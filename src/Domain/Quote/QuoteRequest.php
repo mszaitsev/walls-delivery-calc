@@ -18,8 +18,13 @@ final class QuoteRequest {
 		public readonly string $payment_method,
 		public readonly Money $order_total,
 		public readonly string $calculation_date,
-		public readonly array $customer_context = array()
+		public readonly array $customer_context = array(),
+		public readonly ?Money $all_cart_items_total = null
 	) {
+	}
+
+	public function all_cart_items_total(): Money {
+		return $this->all_cart_items_total ?? $this->order_total;
 	}
 
 	/**
@@ -32,6 +37,7 @@ final class QuoteRequest {
 			'package'          => $this->package->to_array(),
 			'payment_method'   => $this->payment_method,
 			'order_total'      => $this->order_total->to_array(),
+			'all_cart_items_total' => $this->all_cart_items_total()->to_array(),
 			'calculation_date' => $this->calculation_date,
 			'customer_context' => $this->customer_context,
 		);
@@ -48,7 +54,8 @@ final class QuoteRequest {
 			(string) ( $data['payment_method'] ?? '' ),
 			Money::from_array( is_array( $data['order_total'] ?? null ) ? $data['order_total'] : array() ),
 			(string) ( $data['calculation_date'] ?? '' ),
-			is_array( $data['customer_context'] ?? null ) ? $data['customer_context'] : array()
+			is_array( $data['customer_context'] ?? null ) ? $data['customer_context'] : array(),
+			is_array( $data['all_cart_items_total'] ?? null ) ? Money::from_array( $data['all_cart_items_total'] ) : null
 		);
 	}
 
@@ -66,6 +73,6 @@ final class QuoteRequest {
 			$errors[] = 'calculation_date is required';
 		}
 
-		return array_merge( $errors, $this->destination->validate(), $this->package->validate(), $this->order_total->validate() );
+		return array_merge( $errors, $this->destination->validate(), $this->package->validate(), $this->order_total->validate(), $this->all_cart_items_total()->validate() );
 	}
 }

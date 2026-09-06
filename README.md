@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.155.4
+Version: 0.155.5
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.4 fixes checkout selection preservation against the real WooCommerce `add_rate()` contract. WDC rate keys are the raw `DeliveryRate::rate_id` values passed through `WooCommerceRateMapper`, so final chosen-method preservation now detects WDC-owned fresh rates from metadata and returns the exact fresh Woo rate key.
+Current stage: 0.155.5 extends Rule Engine price-change bases. Existing persisted `percent_of_order` rules keep their package-local math and are relabeled as `% от физ. товаров`; new `percent_of_cart` bases use the full WooCommerce cart item total after coupons/sale prices without shipping, fees, or taxes.
 
 ## Quick Start
 

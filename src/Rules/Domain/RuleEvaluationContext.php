@@ -21,8 +21,13 @@ final class RuleEvaluationContext {
 		public readonly string $payment_method,
 		public readonly string $calculation_date,
 		public readonly array $calendar_context = array(),
-		public readonly array $meta = array()
+		public readonly array $meta = array(),
+		public readonly ?Money $all_cart_items_total = null
 	) {
+	}
+
+	public function all_cart_items_total(): Money {
+		return $this->all_cart_items_total ?? $this->order_total;
 	}
 
 	/**
@@ -31,6 +36,7 @@ final class RuleEvaluationContext {
 	public function to_array(): array {
 		return array(
 			'order_total'      => $this->order_total->to_array(),
+			'all_cart_items_total' => $this->all_cart_items_total()->to_array(),
 			'delivery_price'   => $this->delivery_price->to_array(),
 			'package'          => $this->package->to_array(),
 			'destination'      => $this->destination->to_array(),
@@ -55,7 +61,8 @@ final class RuleEvaluationContext {
 			(string) ( $data['payment_method'] ?? '' ),
 			(string) ( $data['calculation_date'] ?? '' ),
 			is_array( $data['calendar_context'] ?? null ) ? $data['calendar_context'] : array(),
-			is_array( $data['meta'] ?? null ) ? $data['meta'] : array()
+			is_array( $data['meta'] ?? null ) ? $data['meta'] : array(),
+			is_array( $data['all_cart_items_total'] ?? null ) ? Money::from_array( $data['all_cart_items_total'] ) : null
 		);
 	}
 
@@ -63,7 +70,7 @@ final class RuleEvaluationContext {
 	 * @return array<int,string>
 	 */
 	public function validate(): array {
-		$errors = array_merge( $this->order_total->validate(), $this->delivery_price->validate(), $this->package->validate(), $this->destination->validate() );
+		$errors = array_merge( $this->order_total->validate(), $this->delivery_price->validate(), $this->all_cart_items_total()->validate(), $this->package->validate(), $this->destination->validate() );
 
 		if ( '' === trim( $this->delivery_type ) ) {
 			$errors[] = 'delivery_type is required';

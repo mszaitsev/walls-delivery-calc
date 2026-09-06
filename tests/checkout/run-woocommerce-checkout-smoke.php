@@ -111,10 +111,16 @@ if ( ! class_exists( 'WC_Shipping_Method' ) ) {
 		public string $title = '';
 		/** @var array<int,string> */
 		public array $supports = array();
-		/** @var array<int,array<string,mixed>> */
+		/** @var array<int|string,array<string,mixed>> */
 		public array $rates = array();
 
 		public function add_rate( array $rate ): void {
+			$id = is_scalar( $rate['id'] ?? null ) ? (string) $rate['id'] : '';
+			if ( '' !== $id ) {
+				$this->rates[ $id ] = $rate;
+				return;
+			}
+
 			$this->rates[] = $rate;
 		}
 	}
@@ -212,9 +218,19 @@ final class WdcSmokeSession {
 
 final class WdcSmokeWooCommerce {
 	public WdcSmokeSession $session;
+	public WdcSmokeCart $cart;
 
 	public function __construct() {
 		$this->session = new WdcSmokeSession();
+		$this->cart = new WdcSmokeCart();
+	}
+}
+
+final class WdcSmokeCart {
+	public float $contents_total = 1000.0;
+
+	public function get_cart_contents_total(): float {
+		return $this->contents_total;
 	}
 }
 
@@ -640,9 +656,16 @@ $request = $mapper->map( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( 'RU' === $request->country_code, 'Package mapper must map destination country.' );
 wc_checkout_smoke_assert( 'Moscow' === $request->destination->city, 'Package mapper must map destination city.' );
 wc_checkout_smoke_assert( 100000 === $request->order_total->get_kopecks(), 'Package mapper must map order total.' );
+wc_checkout_smoke_assert( 100000 === $request->all_cart_items_total()->get_kopecks(), 'Package mapper must default all cart items total from Woo cart contents total.' );
 wc_checkout_smoke_assert( 2 === $request->package->get_total_quantity(), 'Package mapper must map items quantity.' );
 wc_checkout_smoke_assert( 2500 === $request->package->get_total_weight_g(), 'Package mapper must map contents weight.' );
 wc_checkout_smoke_assert( count( $request->package->items ) === 1, 'Package mapper must keep package items.' );
+
+WC()->cart->contents_total = 5000.0;
+$mixed_total_request = $mapper->map( array_merge( wc_checkout_smoke_package(), array( 'contents_cost' => 3000 ) ) );
+wc_checkout_smoke_assert( 300000 === $mixed_total_request->order_total->get_kopecks(), 'Package mapper must keep package contents_cost as physical/shipping order_total.' );
+wc_checkout_smoke_assert( 500000 === $mixed_total_request->all_cart_items_total()->get_kopecks(), 'Package mapper must pass full Woo cart contents total separately for Rule Engine cart bases.' );
+WC()->cart->contents_total = 1000.0;
 
 $phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => 'billing_phone=%2B79131234567&billing_first_name=Hidden' ) );
 wc_checkout_smoke_assert( '+79131234567' === (string) ( $phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must read current billing_phone from WooCommerce AJAX post_data.' );
@@ -1544,7 +1567,8 @@ wc_checkout_smoke_assert( ! array_key_exists( 'pickup_selection_rejected', $sani
 
 $method->calculate_shipping( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( count( $method->rates ) > 0, 'New WC shipping method must add rates.' );
-wc_checkout_smoke_assert( isset( $method->rates[0]['meta_data']['planned_delivery_comment'] ), 'WC rate must contain planned delivery comment metadata.' );
+$method_rates = array_values( $method->rates );
+wc_checkout_smoke_assert( isset( $method_rates[0]['meta_data']['planned_delivery_comment'] ), 'WC rate must contain planned delivery comment metadata.' );
 
 
 $reflection = new ReflectionMethod( NewShippingMethod::class, 'rates_for_wc' );

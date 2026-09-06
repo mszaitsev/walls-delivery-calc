@@ -41,6 +41,7 @@ final class WooCommercePackageMapper {
 		$address     = $this->destination_address( $destination, $country );
 		$request_country = '' !== trim( $address->country_code ) ? $address->country_code : ( '' !== $country ? $country : 'RU' );
 		$total       = Money::from_rubles( (float) ( $package['contents_cost'] ?? 0 ) );
+		$all_cart_items_total = $this->all_cart_items_total( $total );
 		$items       = $this->items_from_contents( is_array( $package['contents'] ?? null ) ? $package['contents'] : array() );
 		$weight_g    = (int) round( max( 0.0, (float) ( $package['contents_weight'] ?? 0 ) ) * 1000 );
 		$location_context = $this->checkout_location_context( $destination, $address, $request_country );
@@ -82,7 +83,8 @@ final class WooCommercePackageMapper {
 			$this->payment_method(),
 			$total,
 			gmdate( 'Y-m-d' ),
-			$context
+			$context,
+			$all_cart_items_total
 		);
 		$this->log_quote_request_context( $request, $location_context );
 
@@ -155,6 +157,23 @@ final class WooCommercePackageMapper {
 		}
 
 		return $items;
+	}
+
+	private function all_cart_items_total( Money $fallback ): Money {
+		if ( ! function_exists( 'WC' ) ) {
+			return $fallback;
+		}
+		$woocommerce = WC();
+		$cart = is_object( $woocommerce ) && isset( $woocommerce->cart ) ? $woocommerce->cart : null;
+		if ( ! is_object( $cart ) || ! method_exists( $cart, 'get_cart_contents_total' ) ) {
+			return $fallback;
+		}
+		$value = $cart->get_cart_contents_total();
+		if ( ! is_numeric( $value ) ) {
+			return $fallback;
+		}
+
+		return Money::from_rubles( max( 0.0, (float) $value ), $fallback->get_currency() );
 	}
 
 	private function product_sku( mixed $product ): string {

@@ -1,6 +1,8 @@
 # Locations And Pickup
 
-Version: 0.155.4
+Version: 0.155.5
+
+0.155.5 does not change destination/location semantics. Rule Engine full-cart bases use WooCommerce cart item totals and do not affect `CheckoutLocationFingerprint`, pickup destination binding, or location resolution.
 
 0.155.4 does not change destination fingerprinting. Checkout selected-method preservation now matches raw fresh Woo rate keys by WDC metadata, while stale pickup points still depend on current `CheckoutLocationFingerprint` and carrier/provider validation.
 

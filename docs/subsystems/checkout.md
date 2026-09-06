@@ -2,7 +2,9 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.155.4
+Version: 0.155.5
+
+0.155.5 adds full-cart item total propagation for Rule Engine cart bases. `WooCommercePackageMapper` keeps `QuoteRequest::order_total` as the current shipping package `contents_cost` for backward-compatible physical/shipping-item rules, and separately reads `WC()->cart->get_cart_contents_total()` into `all_cart_items_total` for `% от всей корзины` rules. Fresh carrier quotes and checkout selection preservation are otherwise unchanged.
 
 0.155.4 updates checkout selection preservation to match the real `add_rate()` chain: `DeliveryRate::rate_id` becomes `WooCommerceRateMapper::map()['id']`, `NewShippingMethod::add_rate()` hands that explicit id to WooCommerce, and Woo stores the package rate under that raw key. Reconciliation and the final `woocommerce_shipping_chosen_method` filter therefore use WDC-owned rate metadata plus exact fresh Woo rate keys rather than invented `wdc_platform_delivery:<rate_id>` prefixes.
 

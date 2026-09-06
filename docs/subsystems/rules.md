@@ -1,10 +1,14 @@
 # Rules
 
-Version: 0.151.2
+Version: 0.155.5
+
+0.155.5 clarifies money bases for the `Изменить цену` action. Persisted `percent_of_order` remains the WooCommerce shipping package total (`contents_cost`) and is presented as `% от физ. товаров`; persisted `percent_of_order_and_delivery` remains package total plus current delivery price and is presented as `% от физ. товаров и доставки`. New `percent_of_cart` and `percent_of_cart_and_delivery` use the full cart item total after sale prices and WooCommerce coupons, including virtual/downloadable items, and exclude shipping, fees, and taxes. Outside Woo checkout, missing full-cart context falls back to `order_total` for backward compatibility.
 
 Rules live under `src/Rules`. The rule engine evaluates delivery conditions and operations used by checkout and delivery services.
 
 Repositories store rule data. Application logic belongs in services such as `RuleEngine`, `RuleEvaluator`, `ConditionEvaluator`, and `RuleSimulator`.
+
+Rule Engine domain/services do not call WooCommerce globals. WooCommerce-specific totals are mapped at the checkout boundary into `QuoteRequest::all_cart_items_total()` and then into `RuleEvaluationContext::all_cart_items_total()`.
 
 Rules may change price, delivery days/date, availability, labels/comments, or delivery-service behavior. Rule evaluation should leave an audit trail sufficient for admin review and order snapshots.
 

@@ -1,6 +1,8 @@
 # New Carrier Guide
 
-Version: 0.155.4
+Version: 0.155.5
+
+0.155.5 does not change carrier implementation responsibilities. New Rule Engine `% от всей корзины` bases receive their totals from checkout context; carriers should keep emitting rates from current `QuoteRequest` data and must not calculate WooCommerce cart totals themselves.
 
 0.155.4 clarifies that `DeliveryRate::rate_id` is the live WooCommerce shipping rate key when WDC passes it as `add_rate()['id']`; WooCommerce does not prefix it with the shipping method id. Carriers must emit stable raw rate ids and canonical metadata, while checkout preservation detects WDC ownership from mapper metadata and never from carrier-specific prefixes or labels.
 

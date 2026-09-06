@@ -412,7 +412,8 @@ final class CheckoutOrchestrator {
 					'original_delivery_max_days' => $rate->delivery_days->max_days,
 					'selected_location_fias_id' => (string) ( $request->customer_context['selected_location_fias_id'] ?? $request->destination->fias_id ),
 				)
-			)
+			),
+			$request->all_cart_items_total()
 		);
 	}
 
@@ -424,7 +425,8 @@ final class CheckoutOrchestrator {
 			$request->payment_method,
 			$request->order_total,
 			$request->calculation_date,
-			array_merge( $request->customer_context, $packaging->to_meta() )
+			array_merge( $request->customer_context, $packaging->to_meta() ),
+			$request->all_cart_items_total()
 		);
 	}
 
@@ -449,7 +451,8 @@ final class CheckoutOrchestrator {
 			array_merge(
 				$request->customer_context,
 				$context
-			)
+			),
+			$request->all_cart_items_total()
 		);
 	}
 }

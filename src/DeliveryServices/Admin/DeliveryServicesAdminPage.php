@@ -4613,7 +4613,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				if ( ! $rate instanceof DeliveryRate ) {
 					continue;
 				}
-				$context = new RuleEvaluationContext( $order_total, $rate->price, $package, $destination, $rate->delivery_type, '', gmdate( 'Y-m-d' ), array(), array_merge( $rate->meta, array( 'original_delivery_days' => $rate->delivery_days->min_days ?? $rate->delivery_days->max_days, 'original_delivery_min_days' => $rate->delivery_days->min_days, 'original_delivery_max_days' => $rate->delivery_days->max_days ) ) );
+				$context = new RuleEvaluationContext( $order_total, $rate->price, $package, $destination, $rate->delivery_type, '', gmdate( 'Y-m-d' ), array(), array_merge( $rate->meta, array( 'original_delivery_days' => $rate->delivery_days->min_days ?? $rate->delivery_days->max_days, 'original_delivery_min_days' => $rate->delivery_days->min_days, 'original_delivery_max_days' => $rate->delivery_days->max_days ) ), $order_total );
 				$applied = $this->rule_builder->apply( $rate, $context, $rules );
 				$processed = $this->manager instanceof DeliveryServiceManager ? $this->manager->post_process_rate( $applied['rate'], $service ) : $applied['rate'];
 				$mode = (int) ( $rate->meta['delivery_mode'] ?? 0 );
@@ -6087,6 +6087,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		$country = strtoupper( sanitize_text_field( (string) ( $input['country'] ?? 'US' ) ) );
 		$weight = max( 0, (int) ( $input['weight'] ?? 1000 ) );
 		$order_total = (float) str_replace( ',', '.', (string) ( $input['order_total'] ?? 1000 ) );
+		$all_cart_items_total = (float) str_replace( ',', '.', (string) ( $input['all_cart_items_total'] ?? $order_total ) );
 		$date = sanitize_text_field( (string) ( $input['date'] ?? gmdate( 'Y-m-d' ) ) );
 		$item = new PackageItem( 'SIM', 'Simulation', 1, Money::from_rubles( $order_total ), Money::from_rubles( $order_total ), $weight );
 		$package = Package::from_items( array( $item ), 0, Money::from_rubles( $order_total ), Money::from_rubles( $order_total ) );
@@ -6094,7 +6095,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			? $this->packaging_calculator->apply_to_package( $package, $service )
 			: new PackagingApplicationResult( $package->weight_g, 0, $package->get_total_weight_g(), $service->include_packaging_weight, $service->packaging_weight_mode, $package );
 		$package = $packaging->package;
-		$request = new QuoteRequest( $country, new Address( country_code: $country ), $package, '', Money::from_rubles( $order_total ), $date );
+		$request = new QuoteRequest( $country, new Address( country_code: $country ), $package, '', Money::from_rubles( $order_total ), $date, array(), Money::from_rubles( $all_cart_items_total ) );
 		$quote = $this->russian_post_carrier->quote( $request );
 		$rate = $quote->rates[0] ?? null;
 		if ( ! $rate instanceof DeliveryRate ) {
@@ -6106,7 +6107,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			);
 		}
 
-		$context = new RuleEvaluationContext( Money::from_rubles( $order_total ), $rate->price, $package, $request->destination, $rate->delivery_type, '', $date, array(), array( 'original_delivery_days' => $rate->delivery_days?->min_days ?? 0, 'original_delivery_min_days' => $rate->delivery_days?->min_days, 'original_delivery_max_days' => $rate->delivery_days?->max_days ) );
+		$context = new RuleEvaluationContext( Money::from_rubles( $order_total ), $rate->price, $package, $request->destination, $rate->delivery_type, '', $date, array(), array( 'original_delivery_days' => $rate->delivery_days?->min_days ?? 0, 'original_delivery_min_days' => $rate->delivery_days?->min_days, 'original_delivery_max_days' => $rate->delivery_days?->max_days ), Money::from_rubles( $all_cart_items_total ) );
 		$applied = $this->rule_builder->apply( $rate, $context, $rules );
 		$final = $applied['rate'];
 		$processed = $this->manager instanceof DeliveryServiceManager ? $this->manager->post_process_rate( $final, $service ) : $final;
@@ -6132,6 +6133,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 
 		$weight = max( 0, (int) ( $input['weight'] ?? 1000 ) );
 		$order_total = (float) str_replace( ',', '.', (string) ( $input['order_total'] ?? 1000 ) );
+		$all_cart_items_total = (float) str_replace( ',', '.', (string) ( $input['all_cart_items_total'] ?? $order_total ) );
 		$date = sanitize_text_field( (string) ( $input['date'] ?? gmdate( 'Y-m-d' ) ) );
 		$postcode = preg_replace( '/\D+/', '', (string) ( $input['postal_code'] ?? '' ) ) ?? '';
 		$city = sanitize_text_field( (string) ( $input['city'] ?? '' ) );
@@ -6154,7 +6156,8 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				'postcode' => $postcode,
 				'fias_id' => $fias_id,
 				'city' => $city,
-			)
+			),
+			Money::from_rubles( $all_cart_items_total )
 		);
 		$quote = $this->russian_post_domestic_carrier->quote( $request );
 		$rows = array();
@@ -6163,7 +6166,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			if ( ! $rate instanceof DeliveryRate ) {
 				continue;
 			}
-			$context = new RuleEvaluationContext( Money::from_rubles( $order_total ), $rate->price, $package, $request->destination, $rate->delivery_type, '', $date, array(), array_merge( $rate->meta, array( 'original_delivery_days' => $rate->delivery_days->min_days ?? $rate->delivery_days->max_days, 'original_delivery_min_days' => $rate->delivery_days->min_days, 'original_delivery_max_days' => $rate->delivery_days->max_days ) ) );
+			$context = new RuleEvaluationContext( Money::from_rubles( $order_total ), $rate->price, $package, $request->destination, $rate->delivery_type, '', $date, array(), array_merge( $rate->meta, array( 'original_delivery_days' => $rate->delivery_days->min_days ?? $rate->delivery_days->max_days, 'original_delivery_min_days' => $rate->delivery_days->min_days, 'original_delivery_max_days' => $rate->delivery_days->max_days ) ), Money::from_rubles( $all_cart_items_total ) );
 			$applied = $this->rule_builder->apply( $rate, $context, $rules );
 			$processed = $this->manager instanceof DeliveryServiceManager ? $this->manager->post_process_rate( $applied['rate'], $service ) : $applied['rate'];
 			$rows[] = array(
@@ -6230,7 +6233,8 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 						'original_delivery_min_days' => $rate->delivery_days->min_days,
 						'original_delivery_max_days' => $rate->delivery_days->max_days,
 					)
-				)
+				),
+				$request->all_cart_items_total()
 			);
 			$applied = $this->rule_builder->apply( $rate, $context, $rules );
 			$processed = $this->manager instanceof DeliveryServiceManager ? $this->manager->post_process_rate( $applied['rate'], $service ) : $applied['rate'];
@@ -6272,6 +6276,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		$country = strtoupper( sanitize_text_field( (string) ( $input['country'] ?? 'RU' ) ) );
 		$weight = max( 0, (int) ( $input['weight'] ?? 1000 ) );
 		$order_total_value = (float) str_replace( ',', '.', (string) ( $input['order_total'] ?? 1000 ) );
+		$all_cart_items_total_value = (float) str_replace( ',', '.', (string) ( $input['all_cart_items_total'] ?? $order_total_value ) );
 		$date = sanitize_text_field( (string) ( $input['date'] ?? gmdate( 'Y-m-d' ) ) );
 		$city = sanitize_text_field( (string) ( $input['city'] ?? '' ) );
 		$postcode = sanitize_text_field( (string) ( $input['postal_code'] ?? '' ) );
@@ -6313,7 +6318,8 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				'location_id' => $location_id,
 				'selected_location_id' => $location_id,
 				'selected_delivery_terminal_code' => sanitize_text_field( (string) ( $input['selected_delivery_terminal_code'] ?? '' ) ),
-			)
+			),
+			Money::from_rubles( $all_cart_items_total_value )
 		);
 	}
 

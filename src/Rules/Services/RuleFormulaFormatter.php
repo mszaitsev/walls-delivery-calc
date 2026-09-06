@@ -94,8 +94,10 @@ final class RuleFormulaFormatter {
 		return match ( $base ) {
 			'rubles' => ' руб.',
 			'percent_of_delivery' => '% от доставки',
-			'percent_of_order' => '% от заказа',
-			'percent_of_order_and_delivery' => '% от заказа и доставки',
+			'percent_of_order' => '% от физ. товаров',
+			'percent_of_cart' => '% от всей корзины',
+			'percent_of_order_and_delivery' => '% от физ. товаров и доставки',
+			'percent_of_cart_and_delivery' => '% от всей корзины и доставки',
 			default => '',
 		};
 	}

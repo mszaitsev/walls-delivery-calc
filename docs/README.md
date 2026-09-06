@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.4
+Version: 0.155.5
+
+0.155.5 extends the Rule Engine `Изменить цену` action with full-cart percentage bases while keeping persisted rule keys backward-compatible. `percent_of_order` and `percent_of_order_and_delivery` still use the WooCommerce shipping package `contents_cost` and are shown as `% от физ. товаров` and `% от физ. товаров и доставки`; new `percent_of_cart` and `percent_of_cart_and_delivery` use all cart item lines after sale prices/coupons and exclude shipping, fees, and taxes. WooCommerce supplies the full cart total at checkout mapping time; `RuleEvaluator` remains Woo-independent through `RuleEvaluationContext::all_cart_items_total()`.
 
 0.155.4 corrects checkout preservation to the actual WooCommerce `WC_Shipping_Method::add_rate()` identity contract. WDC passes `WooCommerceRateMapper::map()['id'] = DeliveryRate::rate_id`, and Woo stores that explicit id as the package rate key without adding the `wdc_platform_delivery` method prefix. `ShippingMethodRegistrar::preserve_chosen_wdc_method()` now preserves raw choices such as `cdek:pickup`, `dpd:courier`, and `self_pickup` only when the exact fresh Woo rate exists and carries WDC-owned metadata; legacy prefixed choices are normalized only for compatibility.
 

@@ -50,7 +50,8 @@ final class RuleEngine {
 						'current_delivery_min_days' => $current_delivery_min_days,
 						'current_delivery_max_days' => $current_delivery_max_days,
 					)
-				)
+				),
+				$context->all_cart_items_total()
 			);
 			$result          = $this->rule_evaluator->evaluate( $rule, $runtime_context );
 			$audit           = array_merge( $audit, $result->audit );
