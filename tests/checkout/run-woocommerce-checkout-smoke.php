@@ -1509,7 +1509,7 @@ $rejected_handler->invoke(
 );
 wc_checkout_smoke_assert( array() === $session->pickup_selection_for_family( 'pek:pickup' ), 'Rejected pickup selection recovery must clear only the rejected PEK family.' );
 wc_checkout_smoke_assert( 'ya-good' === (string) ( $session->pickup_selection_for_family( 'yandex_delivery:pickup' )['point_code'] ?? '' ), 'Rejected PEK pickup recovery must preserve other pickup carrier selections.' );
-wc_checkout_smoke_assert( array( 'wdc_platform_delivery:pek:pickup' ) === WC()->session->get( 'chosen_shipping_methods', array() ), 'Rejected pickup recovery must preserve the recovered PEK pickup method as chosen.' );
+wc_checkout_smoke_assert( array( 'wdc_platform_delivery:yandex_pickup' ) === WC()->session->get( 'chosen_shipping_methods', array() ), 'Rejected pickup family cleanup must leave shipping-method reconciliation to the post-calculation lifecycle.' );
 wc_checkout_smoke_assert( false === wc_has_notice( 'Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.', 'notice' ), 'Rejected pickup recovery must not add a global WooCommerce notice.' );
 $scrubber = new ReflectionMethod( NewShippingMethod::class, 'rate_without_transient_render_meta' );
 $scrubber->setAccessible( true );

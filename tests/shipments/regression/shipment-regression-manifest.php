@@ -106,6 +106,7 @@ return array(
 	'status.status-autosync' => array( 'path' => 'tests/statuses/run-status-autosync-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.packaging' => array( 'path' => 'tests/packaging/run-packaging-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.checkout' => array( 'path' => 'tests/checkout/run-checkout-smoke.php', 'groups' => array( 'status-core' ) ),
+	'core.checkout-selection' => array( 'path' => 'tests/checkout/run-checkout-selection-smoke.php', 'groups' => array( 'checkout-selection', 'status-core' ) ),
 	'core.woocommerce-checkout' => array( 'path' => 'tests/checkout/run-woocommerce-checkout-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.checkout-location-picker' => array( 'path' => 'tests/checkout/run-checkout-location-picker-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.runtime-stabilization' => array( 'path' => 'tests/checkout/run-runtime-stabilization-smoke.php', 'groups' => array( 'status-core' ) ),

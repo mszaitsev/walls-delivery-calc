@@ -19,6 +19,8 @@ final class WooCommerceRateMapper {
 			'label'     => $label,
 			'cost'      => (string) $rate->price->get_rubles(),
 			'meta_data' => array(
+				'wdc_rate'        => true,
+				'wdc_source'      => 'platform',
 				'carrier_key'     => $rate->carrier_key,
 				'rate_id'         => $rate->rate_id,
 				'delivery_type'   => $rate->delivery_type,

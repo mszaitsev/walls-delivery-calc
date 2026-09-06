@@ -1,6 +1,12 @@
 # Locations And Pickup
 
-Version: 0.155.1
+Version: 0.155.4
+
+0.155.4 does not change destination fingerprinting. Checkout selected-method preservation now matches raw fresh Woo rate keys by WDC metadata, while stale pickup points still depend on current `CheckoutLocationFingerprint` and carrier/provider validation.
+
+0.155.3 does not change destination fingerprinting. The WooCommerce selected-method filter may preserve only the method id after rate reordering; stale pickup points still depend on current `CheckoutLocationFingerprint` and carrier/provider validation.
+
+0.155.2 keeps destination identity authoritative for pickup selections during checkout recalculation. Same-destination cart changes may preserve a valid selected point, but a changed `CheckoutLocationFingerprint` still clears stale pickup selections before fresh carrier/provider validation.
 
 0.155.1 clarifies fixed fulfillment-location snapshots for store pickup. `self_pickup` stores card title, address, and working hours in Delivery Service settings, emits them as `fixed_pickup_point_snapshot`, and persists the historical snapshot into the existing order pickup presentation metadata. This is not a pickup provider/catalog flow: there is no map, point search, browser authority, selectable code, or provider registration.
 

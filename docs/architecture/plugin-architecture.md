@@ -1,6 +1,12 @@
 # Plugin Architecture
 
-Version: 0.155.1
+Version: 0.155.4
+
+0.155.4 keeps checkout selection preservation inside the WooCommerce checkout/session layer and corrects the WDC ownership boundary. `WooCommerceRateMapper` adds generic WDC ownership metadata to every mapped WDC rate; `ShippingMethodRegistrar` uses that fresh metadata at the final selected-method filter, and `NewShippingMethod` uses the same stored-rate evidence for post-calculation cleanup. Neither layer treats `wdc_platform_delivery:` as the live Woo key, and neither branches on carrier keys.
+
+0.155.3 adds the final WooCommerce selected-method integration point for checkout selection preservation. `ShippingMethodRegistrar` owns the `woocommerce_shipping_chosen_method` filter and returns a previous WDC method only when that method is present in the fresh package rate array supplied by WooCommerce. This complements `NewShippingMethod` post-calculation reconciliation: the shipping method still owns stale cleanup and canonical session normalization, while the Woo filter protects against WooCommerce order-sensitive default selection after sorted rate order changes.
+
+0.155.2 adds a generic checkout selection reconciliation lifecycle in `NewShippingMethod`. The WooCommerce checkout layer may remember previous WDC method identity from `chosen_shipping_methods`, but authoritative delivery data always comes from the freshly calculated rate set saved to `wdc_platform_rates`. Reconciliation happens after fresh rates are saved and never branches on carrier keys. Pickup validity remains split between destination fingerprint checks in `CheckoutSessionManager` and carrier/provider rejection metadata; invalid pickup selections are cleared by family.
 
 0.155.1 hardens `self_pickup` as a builtin checkout-only Delivery Service. `SelfPickupCarrier` remains registered only in the checkout `CarrierRegistry`; it owns the zero-price quote, fixed pickup-location metadata, separate card title, and buyer-facing comments. `SelfPickupDiscountPolicy` distinguishes promotion availability from applied discount, while `SelfPickupDiscountService` adds a standard negative fee only after stable WDC identity confirms self-pickup is chosen. Admin Rules tab hiding lives in Delivery Services presentation, not Rule Engine. Self-pickup is intentionally non-shipment: no shipment adapter, mapper, document provider, modal extension, lifecycle continuation, autosync, fake shipment record, pickup provider, or carrier API is registered.
 

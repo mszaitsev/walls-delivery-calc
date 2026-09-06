@@ -707,6 +707,16 @@ plugin_architecture_assert(
 	&& str_contains( $shipping_registrar_source, 'wdc-platform-pickup-foundation' ),
 	'Checkout pickup frontend identifiers must preserve their established class and style handle.'
 );
+plugin_architecture_assert(
+	str_contains( $shipping_registrar_source, "add_filter( 'woocommerce_shipping_chosen_method'" )
+	&& str_contains( $shipping_registrar_source, 'preserve_chosen_wdc_method' )
+	&& str_contains( $shipping_registrar_source, 'fresh_wdc_rate_id' )
+	&& str_contains( $shipping_registrar_source, 'is_fresh_wdc_rate' )
+	&& str_contains( $shipping_registrar_source, 'WooCommerceRateMetaNormalizer::meta' )
+	&& str_contains( $shipping_registrar_source, "'wdc_source'" )
+	&& ! str_contains( $shipping_registrar_source, "label ===" ),
+	'WooCommerce chosen-method preservation must run at the final shipping filter boundary and use only fresh package rates plus WDC-owned rate metadata.'
+);
 
 $js_source = '';
 foreach ( plugin_architecture_generic_js_files() as $file ) {
@@ -1297,7 +1307,7 @@ plugin_architecture_assert( str_contains( $pek_context_source, 'pickup_options_e
 plugin_architecture_assert( str_contains( $pek_carrier_source_for_cache, 'log_pickup_options_error' ) && str_contains( $pek_carrier_source_for_cache, 'PEK checkout pickup preliminary options unavailable.' ) && str_contains( $pek_carrier_source_for_cache, "'endpoint' =>" ) && str_contains( $pek_carrier_source_for_cache, "'http_status' =>" ), 'PEK checkout pickup absence must log safe provider root-cause diagnostics without changing customer-facing availability.' );
 $new_shipping_method_source = plugin_architecture_source( 'src/Checkout/WooCommerce/NewShippingMethod.php' );
 plugin_architecture_assert( str_contains( $new_shipping_method_source, 'handle_rejected_pickup_selection_rate' ) && str_contains( $new_shipping_method_source, 'clear_pickup_selection_for_family' ) && str_contains( $new_shipping_method_source, 'carrier_selected_pickup_quote_failed' ), 'Generic WooCommerce shipping method must clear rejected pickup selections by family.' );
-plugin_architecture_assert( str_contains( $new_shipping_method_source, 'rate_without_transient_render_meta' ) && str_contains( $new_shipping_method_source, 'transient_pickup_rejection_keys' ) && str_contains( $new_shipping_method_source, 'preserve_shipping_method_choice' ), 'Generic rejected pickup recovery must preserve recovered shipping method choice and strip transient rejection metadata before session storage.' );
+plugin_architecture_assert( str_contains( $new_shipping_method_source, 'rate_without_transient_render_meta' ) && str_contains( $new_shipping_method_source, 'transient_pickup_rejection_keys' ) && str_contains( $new_shipping_method_source, 'reconcile_shipping_method_choices' ) && str_contains( $new_shipping_method_source, 'clear_pickup_selections_for_unavailable_rates' ) && strpos( $new_shipping_method_source, 'save_rates( $stored )' ) < strpos( $new_shipping_method_source, 'reconcile_shipping_method_choices' ), 'Generic rejected pickup recovery must strip transient metadata before session storage and reconcile the previous shipping choice only after fresh rates are saved.' );
 plugin_architecture_assert( ! str_contains( $new_shipping_method_source, 'wc_add_notice( $message, ' ) && ! str_contains( $new_shipping_method_source, 'wc_has_notice( $message, ' ), 'Rejected pickup recovery must not use global WooCommerce notices.' );
 $checkout_rate_renderer_source = plugin_architecture_source( 'src/Checkout/WooCommerce/CheckoutRateRenderer.php' );
 $wc_rate_meta_normalizer_source = plugin_architecture_source( 'src/Checkout/WooCommerce/WooCommerceRateMetaNormalizer.php' );
