@@ -1,8 +1,8 @@
 # Locations And Pickup
 
-Version: 0.153.6
+Version: 0.153.7
 
-0.153.6 preserves explicit user shipping-method choice across WooCommerce checkout redraws when the selected rate remains available.
+0.153.7 preserves current-destination pickup family selections when switching to courier/custom/non-pickup shipping methods; global pickup invalidation remains limited to real destination/context resets.
 
 0.153.0 does not change manual pickup locality storage or lookup. Manual shipment attach uses the order's historical delivery snapshot and does not create shipment-time location identities, fake `location_id` values, or manual pickup schema changes.
 

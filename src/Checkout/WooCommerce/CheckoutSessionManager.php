@@ -537,7 +537,6 @@ final class CheckoutSessionManager {
 		return in_array(
 			$reason,
 			array(
-				'address_fingerprint_changed',
 				'destination_changed',
 				'location_changed',
 				'reset_selection',

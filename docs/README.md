@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.153.6
+Version: 0.153.7
 
-0.153.6 preserves explicit user shipping-method choice across WooCommerce checkout redraws when the selected rate remains available.
+0.153.7 preserves current-destination pickup family selections when switching to courier/custom/non-pickup shipping methods; global pickup invalidation remains limited to real destination/context resets.
 
 0.153.0 connects manual delivery services to the existing Shipment Framework. The single `manual` shipment adapter supports manual attach, local remove, and generic manual actual cost for the concrete historical manual service saved on the order; preview/create, carrier cancellation, status API, autosync, documents, returns, and manual shipment storage tables remain unsupported.
 
