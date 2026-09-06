@@ -2,7 +2,9 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.155.3
+Version: 0.155.4
+
+0.155.4 updates checkout selection preservation to match the real `add_rate()` chain: `DeliveryRate::rate_id` becomes `WooCommerceRateMapper::map()['id']`, `NewShippingMethod::add_rate()` hands that explicit id to WooCommerce, and Woo stores the package rate under that raw key. Reconciliation and the final `woocommerce_shipping_chosen_method` filter therefore use WDC-owned rate metadata plus exact fresh Woo rate keys rather than invented `wdc_platform_delivery:<rate_id>` prefixes.
 
 0.155.3 adds the final WooCommerce chosen-method filter for order-insensitive WDC selection preservation. `wc_shipping_methods_have_changed()` compares ordered package rate keys, so price-based resorting alone can send WooCommerce into default selection. `ShippingMethodRegistrar::preserve_chosen_wdc_method()` runs from `woocommerce_shipping_chosen_method`, reads only the fresh package `$rates`, and returns the previous WDC choice when that method is still present. It does not alter previous shipping-method snapshots, hide order changes from WooCommerce, restore old rate payloads, or affect non-WDC shipping methods.
 

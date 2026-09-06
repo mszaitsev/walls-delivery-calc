@@ -90,6 +90,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	public function calculate_shipping( $package = array() ): void {
 		try {
 			$previous_chosen_methods = $this->chosen_shipping_methods();
+			$previous_stored_rates = $this->session_manager->rates();
 			$this->session_manager->expire_stale_yandex_5post_selection();
 			$sort = $this->sort_mode();
 			$this->session_manager->save_sort_mode( $sort );
@@ -133,7 +134,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 
 			$this->session_manager->save_rates( $stored );
 			$this->clear_pickup_selections_for_unavailable_rates( $stored );
-			$this->reconcile_shipping_method_choices( $previous_chosen_methods, $stored );
+			$this->reconcile_shipping_method_choices( $previous_chosen_methods, $previous_stored_rates, $stored );
 			$this->session_manager->save_debug(
 				array(
 					'rates_count'    => count( $result->rates ),
@@ -267,9 +268,10 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 
 	/**
 	 * @param array<int|string,string> $previous_chosen_methods
+	 * @param array<string,array<string,mixed>> $previous_stored_rates
 	 * @param array<string,array<string,mixed>> $stored_rates
 	 */
-	private function reconcile_shipping_method_choices( array $previous_chosen_methods, array $stored_rates ): void {
+	private function reconcile_shipping_method_choices( array $previous_chosen_methods, array $previous_stored_rates, array $stored_rates ): void {
 		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'set' ) ) {
 			return;
 		}
@@ -278,25 +280,23 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			return;
 		}
 
-		$available = $this->available_rate_ids( $stored_rates );
-		if ( array() === $available ) {
+		if ( array() === $stored_rates ) {
 			return;
 		}
 
 		$next = $previous_chosen_methods;
 		$changed = false;
 		foreach ( $previous_chosen_methods as $index => $method_id ) {
-			if ( ! $this->is_wdc_shipping_method_choice( $method_id ) ) {
-				continue;
-			}
-
-			$normalized_rate_id = $this->session_manager->normalize_rate_id( $method_id );
-			if ( '' !== $normalized_rate_id && isset( $available[ $normalized_rate_id ] ) ) {
-				$fresh_method_id = self::METHOD_ID . ':' . $normalized_rate_id;
+			$fresh_method_id = $this->fresh_wdc_method_id( $method_id, $stored_rates );
+			if ( '' !== $fresh_method_id ) {
 				if ( $fresh_method_id !== $method_id ) {
 					$next[ $index ] = $fresh_method_id;
 					$changed = true;
 				}
+				continue;
+			}
+
+			if ( ! $this->was_wdc_shipping_method_choice( $method_id, $previous_stored_rates ) ) {
 				continue;
 			}
 
@@ -309,34 +309,85 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		}
 	}
 
-	private function is_wdc_shipping_method_choice( string $method_id ): bool {
+	/**
+	 * @param array<string,array<string,mixed>> $stored_rates
+	 */
+	private function fresh_wdc_method_id( string $method_id, array $stored_rates ): string {
 		$method_id = trim( $method_id );
+		$normalized_method_id = $this->session_manager->normalize_rate_id( $method_id );
+		if ( '' === $normalized_method_id ) {
+			return '';
+		}
 
+		foreach ( $stored_rates as $stored_rate_id => $rate ) {
+			if ( ! is_array( $rate ) ) {
+				continue;
+			}
+			$fresh_method_id = trim( (string) $stored_rate_id );
+			if ( $this->is_legacy_wdc_shipping_method_choice( $fresh_method_id ) ) {
+				continue;
+			}
+			if ( ! $this->is_wdc_stored_rate( $rate, $fresh_method_id ) ) {
+				continue;
+			}
+			if ( $fresh_method_id === $method_id || $normalized_method_id === $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $fresh_method_id ) ) ) {
+				return $fresh_method_id;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $previous_stored_rates
+	 */
+	private function was_wdc_shipping_method_choice( string $method_id, array $previous_stored_rates ): bool {
+		if ( $this->is_legacy_wdc_shipping_method_choice( $method_id ) ) {
+			return true;
+		}
+
+		$normalized_method_id = $this->session_manager->normalize_rate_id( $method_id );
+		if ( '' === $normalized_method_id ) {
+			return false;
+		}
+
+		foreach ( $previous_stored_rates as $stored_rate_id => $rate ) {
+			if ( ! is_array( $rate ) || ! $this->is_wdc_stored_rate( $rate, (string) $stored_rate_id ) ) {
+				continue;
+			}
+			if ( $normalized_method_id === $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $stored_rate_id ) ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function is_legacy_wdc_shipping_method_choice( string $method_id ): bool {
 		return str_starts_with( $method_id, self::METHOD_ID . ':' )
 			|| str_starts_with( $method_id, 'wdc_platform:' );
 	}
 
 	/**
-	 * @param array<string,array<string,mixed>> $stored_rates
-	 * @return array<string,bool>
+	 * @param array<string,mixed> $rate
 	 */
-	private function available_rate_ids( array $stored_rates ): array {
-		$available = array();
-		foreach ( $stored_rates as $stored_rate_id => $rate ) {
-			if ( ! is_array( $rate ) ) {
-				continue;
-			}
-			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $stored_rate_id ) );
-			if ( '' !== $rate_id ) {
-				$available[ $rate_id ] = true;
-			}
-			$stored_rate_id = $this->session_manager->normalize_rate_id( (string) $stored_rate_id );
-			if ( '' !== $stored_rate_id ) {
-				$available[ $stored_rate_id ] = true;
+	private function is_wdc_stored_rate( array $rate, string $stored_rate_id ): bool {
+		$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $stored_rate_id ) );
+		if ( '' === $rate_id || $rate_id !== $this->session_manager->normalize_rate_id( $stored_rate_id ) ) {
+			return false;
+		}
+
+		if ( true === ( $rate['wdc_rate'] ?? false ) && 'platform' === (string) ( $rate['wdc_source'] ?? '' ) ) {
+			return true;
+		}
+
+		foreach ( array( 'carrier_key', 'service_key', 'delivery_type' ) as $key ) {
+			if ( '' === trim( (string) ( $rate[ $key ] ?? '' ) ) ) {
+				return false;
 			}
 		}
 
-		return $available;
+		return true;
 	}
 
 	/**

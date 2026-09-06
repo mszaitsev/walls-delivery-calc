@@ -711,9 +711,11 @@ plugin_architecture_assert(
 	str_contains( $shipping_registrar_source, "add_filter( 'woocommerce_shipping_chosen_method'" )
 	&& str_contains( $shipping_registrar_source, 'preserve_chosen_wdc_method' )
 	&& str_contains( $shipping_registrar_source, 'fresh_wdc_rate_id' )
-	&& str_contains( $shipping_registrar_source, 'array_key_exists( $chosen_method, $rates )' )
+	&& str_contains( $shipping_registrar_source, 'is_fresh_wdc_rate' )
+	&& str_contains( $shipping_registrar_source, 'WooCommerceRateMetaNormalizer::meta' )
+	&& str_contains( $shipping_registrar_source, "'wdc_source'" )
 	&& ! str_contains( $shipping_registrar_source, "label ===" ),
-	'WooCommerce chosen-method preservation must run at the final shipping filter boundary and use only fresh package rates plus stable WDC method identity.'
+	'WooCommerce chosen-method preservation must run at the final shipping filter boundary and use only fresh package rates plus WDC-owned rate metadata.'
 );
 
 $js_source = '';

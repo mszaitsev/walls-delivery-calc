@@ -1,6 +1,8 @@
 # Locations And Pickup
 
-Version: 0.155.3
+Version: 0.155.4
+
+0.155.4 does not change destination fingerprinting. Checkout selected-method preservation now matches raw fresh Woo rate keys by WDC metadata, while stale pickup points still depend on current `CheckoutLocationFingerprint` and carrier/provider validation.
 
 0.155.3 does not change destination fingerprinting. The WooCommerce selected-method filter may preserve only the method id after rate reordering; stale pickup points still depend on current `CheckoutLocationFingerprint` and carrier/provider validation.
 

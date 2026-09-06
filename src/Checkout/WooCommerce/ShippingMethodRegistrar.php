@@ -78,7 +78,7 @@ final class ShippingMethodRegistrar {
 	 */
 	public function preserve_chosen_wdc_method( string $default, array $rates, string $chosen_method ): string {
 		$chosen_method = trim( $chosen_method );
-		if ( '' === $chosen_method || ! $this->is_wdc_shipping_method_choice( $chosen_method ) ) {
+		if ( '' === $chosen_method ) {
 			return $default;
 		}
 
@@ -87,23 +87,15 @@ final class ShippingMethodRegistrar {
 		return '' !== $fresh_method_id ? $fresh_method_id : $default;
 	}
 
-	private function is_wdc_shipping_method_choice( string $method_id ): bool {
-		return str_starts_with( $method_id, NewShippingMethod::METHOD_ID . ':' )
-			|| str_starts_with( $method_id, 'wdc_platform:' );
-	}
-
 	/**
 	 * @param array<string,mixed> $rates
 	 */
 	private function fresh_wdc_rate_id( string $chosen_method, array $rates ): string {
-		if ( array_key_exists( $chosen_method, $rates ) ) {
-			return $chosen_method;
-		}
-
 		$chosen_rate_id = $this->session_manager->normalize_rate_id( $chosen_method );
 		if ( '' === $chosen_rate_id ) {
 			return '';
 		}
+		$legacy_wdc_choice = $this->is_legacy_wdc_shipping_method_choice( $chosen_method );
 
 		foreach ( $rates as $rate_id => $rate ) {
 			$candidate_id = is_string( $rate_id ) ? $rate_id : '';
@@ -111,15 +103,47 @@ final class ShippingMethodRegistrar {
 				$candidate_id = (string) $rate->get_id();
 			}
 			$candidate_id = trim( $candidate_id );
-			if ( '' === $candidate_id || ! $this->is_wdc_shipping_method_choice( $candidate_id ) ) {
+			if ( '' === $candidate_id || ! $this->is_fresh_wdc_rate( $candidate_id, $rate ) ) {
 				continue;
 			}
-			if ( $chosen_rate_id === $this->session_manager->normalize_rate_id( $candidate_id ) ) {
+			if ( $candidate_id === $chosen_method ) {
+				return $candidate_id;
+			}
+			if ( $legacy_wdc_choice && $chosen_rate_id === $this->session_manager->normalize_rate_id( $candidate_id ) ) {
 				return $candidate_id;
 			}
 		}
 
 		return '';
+	}
+
+	private function is_legacy_wdc_shipping_method_choice( string $method_id ): bool {
+		return str_starts_with( $method_id, NewShippingMethod::METHOD_ID . ':' )
+			|| str_starts_with( $method_id, 'wdc_platform:' );
+	}
+
+	private function is_fresh_wdc_rate( string $candidate_id, mixed $rate ): bool {
+		$meta = WooCommerceRateMetaNormalizer::meta( $rate );
+		if ( array() === $meta ) {
+			return false;
+		}
+
+		$meta_rate_id = $this->session_manager->normalize_rate_id( (string) ( $meta['rate_id'] ?? '' ) );
+		if ( '' === $meta_rate_id || $meta_rate_id !== $this->session_manager->normalize_rate_id( $candidate_id ) ) {
+			return false;
+		}
+
+		if ( true === ( $meta['wdc_rate'] ?? false ) && 'platform' === (string) ( $meta['wdc_source'] ?? '' ) ) {
+			return true;
+		}
+
+		foreach ( array( 'carrier_key', 'service_key', 'delivery_type' ) as $key ) {
+			if ( '' === trim( (string) ( $meta[ $key ] ?? '' ) ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	public function enqueue_assets(): void {

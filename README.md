@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.155.3
+Version: 0.155.4
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.3 completes checkout delivery selection preservation at WooCommerce's final chosen-method boundary. WooCommerce treats rate-key order changes as changed shipping methods, so WDC now uses the `woocommerce_shipping_chosen_method` filter to keep a previous WDC method selected when that exact/canonical method id exists in the fresh package rates.
+Current stage: 0.155.4 fixes checkout selection preservation against the real WooCommerce `add_rate()` contract. WDC rate keys are the raw `DeliveryRate::rate_id` values passed through `WooCommerceRateMapper`, so final chosen-method preservation now detects WDC-owned fresh rates from metadata and returns the exact fresh Woo rate key.
 
 ## Quick Start
 

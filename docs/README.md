@@ -1,8 +1,10 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.3
+Version: 0.155.4
 
-0.155.3 completes the checkout selection preservation lifecycle at WooCommerce's final `woocommerce_shipping_chosen_method` boundary. WooCommerce considers ordered rate-key changes significant, so a repricing/sorting change can otherwise replace a valid previous WDC choice with the default rate after `NewShippingMethod::calculate_shipping()` has already reconciled session state. The filter preserves only WDC method identity when the exact/canonical previous method id exists in the fresh package `$rates`; non-WDC methods and disappeared WDC methods fall back to WooCommerce defaults.
+0.155.4 corrects checkout preservation to the actual WooCommerce `WC_Shipping_Method::add_rate()` identity contract. WDC passes `WooCommerceRateMapper::map()['id'] = DeliveryRate::rate_id`, and Woo stores that explicit id as the package rate key without adding the `wdc_platform_delivery` method prefix. `ShippingMethodRegistrar::preserve_chosen_wdc_method()` now preserves raw choices such as `cdek:pickup`, `dpd:courier`, and `self_pickup` only when the exact fresh Woo rate exists and carries WDC-owned metadata; legacy prefixed choices are normalized only for compatibility.
+
+0.155.3 completes the checkout selection preservation lifecycle at WooCommerce's final `woocommerce_shipping_chosen_method` boundary. WooCommerce considers ordered rate-key changes significant, so a repricing/sorting change can otherwise replace a valid previous WDC choice with the default rate after `NewShippingMethod::calculate_shipping()` has already reconciled session state. The filter preserves only WDC method identity when the previous method id exists in the fresh package `$rates`; non-WDC methods and disappeared WDC methods fall back to WooCommerce defaults.
 
 0.155.2 refines the generic WooCommerce checkout selection lifecycle. WDC remembers the previous `chosen_shipping_methods` identity, recalculates package/rates/prices/provider responses/rules from scratch, stores the fresh rate set, and only then reconciles the previous WDC method id if it still exists in the authoritative rate set. Pickup selections remain destination-bound through `CheckoutLocationFingerprint`; carrier/provider rejection clears only the affected pickup family, and disappearing pickup families are removed without resetting unrelated families. Grouped tariff selectors continue to reconcile the inner selected tariff against fresh variants.
 

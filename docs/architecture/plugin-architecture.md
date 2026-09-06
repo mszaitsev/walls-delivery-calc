@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.155.3
+Version: 0.155.4
+
+0.155.4 keeps checkout selection preservation inside the WooCommerce checkout/session layer and corrects the WDC ownership boundary. `WooCommerceRateMapper` adds generic WDC ownership metadata to every mapped WDC rate; `ShippingMethodRegistrar` uses that fresh metadata at the final selected-method filter, and `NewShippingMethod` uses the same stored-rate evidence for post-calculation cleanup. Neither layer treats `wdc_platform_delivery:` as the live Woo key, and neither branches on carrier keys.
 
 0.155.3 adds the final WooCommerce selected-method integration point for checkout selection preservation. `ShippingMethodRegistrar` owns the `woocommerce_shipping_chosen_method` filter and returns a previous WDC method only when that method is present in the fresh package rate array supplied by WooCommerce. This complements `NewShippingMethod` post-calculation reconciliation: the shipping method still owns stale cleanup and canonical session normalization, while the Woo filter protects against WooCommerce order-sensitive default selection after sorted rate order changes.
 
