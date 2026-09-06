@@ -1,8 +1,8 @@
 # Plugin Architecture
 
-Version: 0.153.2
+Version: 0.153.3
 
-0.153.2 resolves pickup reset/delete service-specific pickup family from authoritative rate context for registry-backed multi-service carriers.
+0.153.3 deduplicates pickup provider rate/snapshot resolution and validation without changing pickup behavior.
 
 0.153.0 wires manual delivery into the existing Shipment Framework through one `ManualShipmentAdapter` and one `ManualShipmentService`. Manual shipments use `OrderShipmentRepository`, preserve the concrete historical `service_key` and service title from the order delivery snapshot, delegate actual cost to `ShipmentActualCostService`, and do not add API-create branches, document providers, autosync, modal providers, fake persistence mappers, or manual shipment tables.
 

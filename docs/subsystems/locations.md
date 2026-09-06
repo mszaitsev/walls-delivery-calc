@@ -1,8 +1,8 @@
 # Locations And Pickup
 
-Version: 0.153.2
+Version: 0.153.3
 
-0.153.2 resolves pickup reset/delete service-specific pickup family from authoritative rate context for registry-backed multi-service carriers.
+0.153.3 deduplicates pickup provider rate/snapshot resolution and validation without changing pickup behavior.
 
 0.153.0 does not change manual pickup locality storage or lookup. Manual shipment attach uses the order's historical delivery snapshot and does not create shipment-time location identities, fake `location_id` values, or manual pickup schema changes.
 

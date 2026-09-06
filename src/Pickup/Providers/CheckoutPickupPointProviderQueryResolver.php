@@ -25,41 +25,26 @@ final class CheckoutPickupPointProviderQueryResolver {
 	 * @return array{query:CarrierPickupPointQuery,pickup_family:string,destination_fingerprint:string}
 	 */
 	public function resolve_context( string $shipping_method_id, string $carrier_key, string $pickup_family = '' ): array {
-		$rate = $this->rate( $shipping_method_id );
-		if ( array() === $rate ) {
-			throw new RuntimeException( 'provider_rate_context_missing' );
-		}
-		$meta = $this->rate_meta( $rate );
-		$rate_carrier = (string) ( $rate['carrier_key'] ?? $meta['carrier_key'] ?? '' );
-		$rate_service = (string) ( $rate['service_key'] ?? $meta['service_key'] ?? '' );
-		$rate_family = PickupFamilyResolver::from_meta( array_replace( $meta, $rate ), $shipping_method_id );
+		$context = $this->resolved_rate_context( $shipping_method_id );
 		$requested_family = $this->session_manager->normalize_pickup_family( $pickup_family );
-		$rate_delivery_type = (string) ( $rate['delivery_type'] ?? $meta['delivery_type'] ?? '' );
-		$requires_pickup = $rate['requires_pickup_point'] ?? ( $meta['requires_pickup_point'] ?? false );
-		$root_service_normalized = strtolower( preg_replace( '/[^a-z0-9_\-]+/', '', trim( (string) ( $rate['service_key'] ?? '' ) ) ) ?? '' );
-		$meta_service_normalized = strtolower( preg_replace( '/[^a-z0-9_\-]+/', '', trim( (string) ( $meta['service_key'] ?? '' ) ) ) ?? '' );
-		$rate_service_normalized = strtolower( preg_replace( '/[^a-z0-9_\-]+/', '', trim( $rate_service ) ) ?? '' );
 		if (
-			true !== $requires_pickup
-			|| 'pickup' !== $rate_delivery_type
-			|| $rate_carrier !== $carrier_key
-			|| '' === $rate_service_normalized
-			|| '' === $rate_family
-			|| ! str_ends_with( $rate_family, ':pickup' )
-			|| ( '' !== $requested_family && $rate_family !== $requested_family )
+			true !== $context['requires_pickup_point']
+			|| 'pickup' !== $context['delivery_type']
+			|| $context['carrier_key'] !== $carrier_key
+			|| '' === $context['service_key']
+			|| '' === $context['pickup_family']
+			|| ! str_ends_with( $context['pickup_family'], ':pickup' )
+			|| ( '' !== $requested_family && $context['pickup_family'] !== $requested_family )
 		) {
 			throw new RuntimeException( 'provider_rate_context_mismatch' );
 		}
-		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : ( is_array( $rate['pickup_provider_query'] ?? null ) ? $rate['pickup_provider_query'] : array() );
-		if ( '' === trim( (string) ( $snapshot['service_key'] ?? '' ) ) ) {
-			$snapshot['service_key'] = $rate_service_normalized;
-		}
+		$snapshot = $context['provider_snapshot'];
 		$carrier_snapshot_resolver = $this->carrier_snapshot_resolvers[ $carrier_key ] ?? null;
-		if ( ! is_callable( $carrier_snapshot_resolver ) && '' !== $root_service_normalized && '' !== $meta_service_normalized && $root_service_normalized !== $meta_service_normalized ) {
+		if ( ! is_callable( $carrier_snapshot_resolver ) && '' !== $context['root_service_key'] && '' !== $context['meta_service_key'] && $context['root_service_key'] !== $context['meta_service_key'] ) {
 			throw new RuntimeException( 'provider_rate_context_mismatch' );
 		}
 		if ( is_callable( $carrier_snapshot_resolver ) ) {
-			if ( ! $this->valid_carrier_snapshot_envelope( $snapshot, $rate_carrier, $carrier_key ) ) {
+			if ( ! $this->valid_snapshot_envelope( $snapshot, $context['carrier_key'], $carrier_key ) ) {
 				throw new RuntimeException( 'provider_rate_context_missing' );
 			}
 			$query = $carrier_snapshot_resolver( $snapshot );
@@ -68,15 +53,120 @@ final class CheckoutPickupPointProviderQueryResolver {
 			}
 			return array(
 				'query' => $query,
-				'pickup_family' => $rate_family,
+				'pickup_family' => $context['pickup_family'],
 				'destination_fingerprint' => (string) ( $snapshot['destination_fingerprint'] ?? '' ),
 			);
 		}
-		if ( ! $this->valid_snapshot( $snapshot, $rate_carrier, $carrier_key ) ) {
+		if ( ! $this->valid_snapshot_envelope( $snapshot, $context['carrier_key'], $carrier_key ) || ! $this->valid_snapshot_cargo( $snapshot ) ) {
 			throw new RuntimeException( 'provider_rate_context_missing' );
 		}
+		$query = $this->query_from_snapshot( $snapshot, $carrier_key, $context['service_key'] );
+		if ( array() !== $query->validate() ) {
+			throw new RuntimeException( 'provider_rate_context_missing' );
+		}
+
+		return array(
+			'query' => $query,
+			'pickup_family' => $context['pickup_family'],
+			'destination_fingerprint' => (string) ( $snapshot['destination_fingerprint'] ?? '' ),
+		);
+	}
+
+	public function destination_fingerprint( string $shipping_method_id ): string {
+		try {
+			$context = $this->resolved_rate_context( $shipping_method_id );
+		} catch ( RuntimeException ) {
+			return '';
+		}
+		$snapshot = $context['provider_snapshot'];
+
+		return (string) ( $snapshot['destination_fingerprint'] ?? '' );
+	}
+
+	/**
+	 * @return array{rate:array<string,mixed>,meta:array<string,mixed>,provider_snapshot:array<string,mixed>,carrier_key:string,service_key:string,root_service_key:string,meta_service_key:string,pickup_family:string,delivery_type:string,requires_pickup_point:mixed}
+	 */
+	private function resolved_rate_context( string $shipping_method_id ): array {
+		$rate = $this->rate( $shipping_method_id );
+		if ( array() === $rate ) {
+			throw new RuntimeException( 'provider_rate_context_missing' );
+		}
+		$meta = $this->rate_meta( $rate );
+		$rate_service = (string) ( $rate['service_key'] ?? $meta['service_key'] ?? '' );
+		$service_key = $this->normalized_service_key( $rate_service );
+		$snapshot = $this->provider_snapshot( $rate, $meta, $service_key );
+
+		return array(
+			'rate' => $rate,
+			'meta' => $meta,
+			'provider_snapshot' => $snapshot,
+			'carrier_key' => (string) ( $rate['carrier_key'] ?? $meta['carrier_key'] ?? '' ),
+			'service_key' => $service_key,
+			'root_service_key' => $this->normalized_service_key( (string) ( $rate['service_key'] ?? '' ) ),
+			'meta_service_key' => $this->normalized_service_key( (string) ( $meta['service_key'] ?? '' ) ),
+			'pickup_family' => PickupFamilyResolver::from_meta( array_replace( $meta, $rate ), $shipping_method_id ),
+			'delivery_type' => (string) ( $rate['delivery_type'] ?? $meta['delivery_type'] ?? '' ),
+			'requires_pickup_point' => $rate['requires_pickup_point'] ?? ( $meta['requires_pickup_point'] ?? false ),
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function rate_meta( array $rate ): array {
+		if ( is_array( $rate['rate_meta'] ?? null ) ) {
+			return $rate['rate_meta'];
+		}
+		if ( is_array( $rate['meta'] ?? null ) ) {
+			return $rate['meta'];
+		}
+
+		return array();
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $meta
+	 * @return array<string,mixed>
+	 */
+	private function provider_snapshot( array $rate, array $meta, string $service_key ): array {
+		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : ( is_array( $rate['pickup_provider_query'] ?? null ) ? $rate['pickup_provider_query'] : array() );
+		if ( '' === trim( (string) ( $snapshot['service_key'] ?? '' ) ) ) {
+			$snapshot['service_key'] = $service_key;
+		}
+
+		return $snapshot;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function valid_snapshot_envelope( array $snapshot, string $rate_carrier, string $requested_carrier ): bool {
+		return (string) ( $snapshot['carrier_key'] ?? '' ) === $rate_carrier
+			&& (string) ( $snapshot['carrier_key'] ?? '' ) === $requested_carrier
+			&& '' !== trim( (string) ( $snapshot['service_key'] ?? '' ) )
+			&& CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP === (string) ( $snapshot['purpose'] ?? '' )
+			&& '' !== trim( (string) ( $snapshot['country_code'] ?? '' ) )
+			&& '' !== trim( (string) ( $snapshot['destination_fingerprint'] ?? '' ) )
+			&& $this->valid_destination_locator( $snapshot )
+			&& $this->valid_coordinates( $snapshot );
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function valid_snapshot_cargo( array $snapshot ): bool {
 		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
-		$query = new CarrierPickupPointQuery(
+		foreach ( array( 'weight_g', 'volume_cm3', 'max_dimension_cm', 'max_place_weight_g' ) as $key ) {
+			if ( ! is_numeric( $cargo[ $key ] ?? null ) || (int) $cargo[ $key ] < 0 ) {
+				return false;
+			}
+		}
+
+		return (int) ( $cargo['places_count'] ?? 0 ) >= 1;
+	}
+
+	/**
+	 * @param array<string,mixed> $snapshot
+	 */
+	private function query_from_snapshot( array $snapshot, string $carrier_key, string $service_key ): CarrierPickupPointQuery {
+		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
+
+		return new CarrierPickupPointQuery(
 			(string) ( $snapshot['carrier_key'] ?? $carrier_key ),
 			(int) ( $snapshot['location_id'] ?? 0 ),
 			(string) ( $snapshot['country_code'] ?? 'RU' ),
@@ -93,76 +183,14 @@ final class CheckoutPickupPointProviderQueryResolver {
 			(string) ( $snapshot['purpose'] ?? CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP ),
 			max( 1, (int) ( $snapshot['radius_km'] ?? 50 ) ),
 			max( 1, (int) ( $snapshot['limit'] ?? 50 ) ),
-			(string) ( $snapshot['service_key'] ?? $rate_service_normalized ),
+			(string) ( $snapshot['service_key'] ?? $service_key ),
 			(string) ( $snapshot['region_name'] ?? '' ),
 			(string) ( $snapshot['location_name'] ?? '' )
 		);
-		if ( array() !== $query->validate() ) {
-			throw new RuntimeException( 'provider_rate_context_missing' );
-		}
-
-		return array(
-			'query' => $query,
-			'pickup_family' => $rate_family,
-			'destination_fingerprint' => (string) ( $snapshot['destination_fingerprint'] ?? '' ),
-		);
 	}
 
-	public function destination_fingerprint( string $shipping_method_id ): string {
-		$rate = $this->rate( $shipping_method_id );
-		$meta = $this->rate_meta( $rate );
-		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : ( is_array( $rate['pickup_provider_query'] ?? null ) ? $rate['pickup_provider_query'] : array() );
-
-		return (string) ( $snapshot['destination_fingerprint'] ?? '' );
-	}
-
-	/** @return array<string,mixed> */
-	private function rate_meta( array $rate ): array {
-		if ( is_array( $rate['rate_meta'] ?? null ) ) {
-			return $rate['rate_meta'];
-		}
-		if ( is_array( $rate['meta'] ?? null ) ) {
-			return $rate['meta'];
-		}
-
-		return array();
-	}
-
-	/** @param array<string,mixed> $snapshot */
-	private function valid_carrier_snapshot_envelope( array $snapshot, string $rate_carrier, string $requested_carrier ): bool {
-		return (string) ( $snapshot['carrier_key'] ?? '' ) === $rate_carrier
-			&& (string) ( $snapshot['carrier_key'] ?? '' ) === $requested_carrier
-			&& '' !== trim( (string) ( $snapshot['service_key'] ?? '' ) )
-			&& CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP === (string) ( $snapshot['purpose'] ?? '' )
-			&& '' !== trim( (string) ( $snapshot['country_code'] ?? '' ) )
-			&& '' !== trim( (string) ( $snapshot['destination_fingerprint'] ?? '' ) )
-			&& $this->valid_destination_locator( $snapshot )
-			&& $this->valid_coordinates( $snapshot );
-	}
-
-	/** @param array<string,mixed> $snapshot */
-	private function valid_snapshot( array $snapshot, string $rate_carrier, string $requested_carrier ): bool {
-		if (
-			(string) ( $snapshot['carrier_key'] ?? '' ) !== $rate_carrier
-			|| (string) ( $snapshot['carrier_key'] ?? '' ) !== $requested_carrier
-			|| '' === trim( (string) ( $snapshot['service_key'] ?? '' ) )
-			|| CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP !== (string) ( $snapshot['purpose'] ?? '' )
-			|| '' === trim( (string) ( $snapshot['country_code'] ?? '' ) )
-			|| '' === trim( (string) ( $snapshot['destination_fingerprint'] ?? '' ) )
-		) {
-			return false;
-		}
-		if ( ! $this->valid_destination_locator( $snapshot ) || ! $this->valid_coordinates( $snapshot ) ) {
-			return false;
-		}
-		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
-		foreach ( array( 'weight_g', 'volume_cm3', 'max_dimension_cm', 'max_place_weight_g' ) as $key ) {
-			if ( ! is_numeric( $cargo[ $key ] ?? null ) || (int) $cargo[ $key ] < 0 ) {
-				return false;
-			}
-		}
-
-		return (int) ( $cargo['places_count'] ?? 0 ) >= 1;
+	private function normalized_service_key( string $service_key ): string {
+		return strtolower( preg_replace( '/[^a-z0-9_\-]+/', '', trim( $service_key ) ) ?? '' );
 	}
 
 	/** @param array<string,mixed> $snapshot */

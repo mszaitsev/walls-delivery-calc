@@ -375,11 +375,14 @@ final class PickupPointsRestController {
 			return $this->error( 'provider_session_unavailable', 'Checkout session is unavailable.', 503 );
 		}
 		try {
-			$query = $this->provider_query_resolver->resolve( $method_id, $carrier, $family );
+			$context = $this->provider_query_resolver->resolve_context( $method_id, $carrier, $family );
 		} catch ( \RuntimeException $exception ) {
 			$code = in_array( $exception->getMessage(), array( 'provider_rate_context_missing', 'provider_rate_context_mismatch' ), true ) ? $exception->getMessage() : 'provider_rate_context_missing';
 			return $this->error( $code, 'Pickup rate context is invalid.', 400 );
 		}
+		$query = $context['query'];
+		$family = (string) $context['pickup_family'];
+		$fingerprint = (string) $context['destination_fingerprint'];
 		$provider = $this->provider_registry?->get( $carrier );
 		if ( null === $provider ) {
 			return $this->error( 'pickup_provider_unavailable', 'Pickup provider is unavailable.', 503 );
@@ -389,7 +392,6 @@ final class PickupPointsRestController {
 		} catch ( \Throwable ) {
 			return $this->error( 'pickup_provider_search_failed', 'Pickup provider search failed.', 502 );
 		}
-		$fingerprint = $this->provider_query_resolver->destination_fingerprint( $method_id );
 		$formatted = array();
 		foreach ( $points as $point ) {
 			if ( ! $point instanceof PickupPoint ) {
