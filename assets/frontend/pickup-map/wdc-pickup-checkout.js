@@ -23,8 +23,6 @@
 	var placeOrderResetGuardUntil = 0;
 	var pickupInlineNotices = {};
 	var authoritativePickupSelections = {};
-	var authoritativePickupStateLoaded = false;
-	var authoritativePickupStateRevision = 0;
 	var pickupFamilies = Array.isArray(checkoutConfig.pickupFamilies) && checkoutConfig.pickupFamilies.length ? checkoutConfig.pickupFamilies : [];
 	var pickupRateCapabilities = normalizePickupRateCapabilities(checkoutConfig.pickupRateCapabilities || checkoutConfig.pickup_rate_capabilities || {});
 	var selectedPickupPoints = extractPickupSelections(checkoutConfig);
@@ -551,16 +549,19 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 		Object.keys(pickupInlineNotices).forEach(function (family) {
 			var point = authoritativeSelectedPointForFamily(family);
+			var hasContainer = hasPickupContainerForFamily(family);
 			if (
 				point
-				&& hasPickupContainerForFamily(family)
+				&& hasContainer
 				&& isValidSelectedPointForCard(point, family)
 				&& sameSelectionDestination(point)
 			) {
 				clearPickupInlineNotice(family);
 				return;
 			}
-			removeLocalPickupSelection(family);
+			if (hasContainer) {
+				removeLocalPickupSelection(family);
+			}
 		});
 		syncPickupInlineNotices();
 	}
@@ -1448,8 +1449,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			: mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response));
 		if (true === options.authoritativeState && hasAuthoritativeSelections) {
 			authoritativePickupSelections = Object.assign({}, selectedPickupPoints);
-			authoritativePickupStateLoaded = true;
-			authoritativePickupStateRevision++;
 		}
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
@@ -2303,6 +2302,16 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 	}
 
+	function rememberExplicitShippingMethod(method) {
+		method = normalizeShippingMethod(method);
+		if (!method) {
+			return;
+		}
+		preferredShippingMethod = method;
+		preferredShippingMethodPending = true;
+		preferredShippingMethodRecoveryUpdateSent = false;
+	}
+
 	function clearPreferredShippingMethod() {
 		preferredShippingMethod = '';
 		preferredShippingMethodPending = false;
@@ -2500,6 +2509,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (event.target.matches('input[name^="shipping_method"]')) {
 			var previousMethod = activeMethod;
 			var nextMethod = currentShippingMethod() || normalizeShippingMethod(event.target.value);
+			rememberExplicitShippingMethod(nextMethod);
 			if (isSamePickupMethodFamily(previousMethod, nextMethod)) {
 				activeMethod = nextMethod;
 				syncSelectedPickupRate(nextMethod);

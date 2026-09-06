@@ -292,7 +292,7 @@ final class CheckoutSessionManager {
 	}
 
 	public function clear_pickup_selection_if_allowed( string $reason, string $currentRateId = '' ): bool {
-		$current_family = '' !== $currentRateId ? $this->shipping_method_family( $currentRateId ) : '';
+		$current_family = '' !== $currentRateId ? $this->shipping_method_family_from_rate_context( $currentRateId ) : '';
 		if ( '' !== $current_family && str_ends_with( $current_family, ':pickup' ) ) {
 			if ( $this->has_valid_pickup_selection_for_family( $current_family ) ) {
 				return false;
@@ -309,6 +309,25 @@ final class CheckoutSessionManager {
 		$this->clear_pickup_selection( $reason );
 
 		return true;
+	}
+
+	private function shipping_method_family_from_rate_context( string $rate_id ): string {
+		$normalized_rate_id = $this->normalize_rate_id( $rate_id );
+		foreach ( $this->rates() as $stored_rate_id => $rate ) {
+			if ( ! is_array( $rate ) ) {
+				continue;
+			}
+			$candidate_rate_id = $this->normalize_rate_id( (string) ( $rate['rate_id'] ?? $stored_rate_id ) );
+			if ( $candidate_rate_id !== $normalized_rate_id ) {
+				continue;
+			}
+			$family = PickupFamilyResolver::from_meta( $rate, $normalized_rate_id );
+			if ( '' !== $family ) {
+				return $family;
+			}
+		}
+
+		return $this->shipping_method_family( $normalized_rate_id );
 	}
 
 	public function has_valid_pickup_selection(): bool {
@@ -518,7 +537,6 @@ final class CheckoutSessionManager {
 		return in_array(
 			$reason,
 			array(
-				'address_fingerprint_changed',
 				'destination_changed',
 				'location_changed',
 				'reset_selection',

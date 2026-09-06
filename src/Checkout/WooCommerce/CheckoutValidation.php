@@ -425,11 +425,6 @@ final class CheckoutValidation {
 			return $bucket;
 		}
 
-		$current = $this->session_manager->pickup_selection();
-		if ( false && array() !== $current && $point_code === (string) ( $current['point_code'] ?? '' ) && $family === $this->selection_pickup_family( $current, (string) ( $current['rate_id'] ?? '' ) ) ) {
-			return $current;
-		}
-
 		$checkout = $this->session_manager->checkout_pickup_point_for_family( $family );
 		if ( array() === $checkout || $point_code !== (string) ( $checkout['point_code'] ?? '' ) || $family !== $this->selection_pickup_family( $checkout, (string) ( $checkout['rate_id'] ?? '' ) ) ) {
 			return array();

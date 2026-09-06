@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Manual;
 
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
-use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Common\MoneyParser;
 
 defined( 'ABSPATH' ) || exit;
@@ -67,18 +66,6 @@ final class ManualDeliverySettings {
 			$pricing['minimum_price_kopecks'],
 			$pricing['billing_weight_step_g'],
 			$ranges
-		);
-	}
-
-	public function save_flat_pricing( int $service_id, mixed $price_rub ): void {
-		$this->settings->set_setting(
-			$service_id,
-			self::PRICING_SETTING_KEY,
-			array(
-				'pricing_mode' => self::PRICING_MODE_FLAT,
-				'flat_price_kopecks' => Money::from_rubles( $price_rub )->get_kopecks(),
-			),
-			'json'
 		);
 	}
 

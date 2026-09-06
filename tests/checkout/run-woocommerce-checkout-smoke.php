@@ -1201,6 +1201,94 @@ $country_mismatch_runtime->resolve_checkout_address(
 $country_mismatch_context = $country_mismatch_session->city_context();
 wc_checkout_smoke_assert( 'RU' !== (string) ( $country_mismatch_context['country_code'] ?? '' ) && '101' !== (string) ( $country_mismatch_context['location_id'] ?? '' ), 'Server-side checkout runtime must reject selected location metadata from another country.' );
 
+$pickup_to_courier_session = new CheckoutSessionManager();
+$pickup_to_courier_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$pickup_to_courier_session
+);
+$pickup_to_courier_posted = array(
+	'shipping_country' => 'RU',
+	'shipping_state' => 'Новосибирская область',
+	'shipping_city' => 'Новосибирск',
+	'shipping_postcode' => '630099',
+	'shipping_address_1' => 'Красный проспект, 25',
+	'shipping_method' => array( 'ozon_delivery:courier' ),
+	'wdc_platform_location_id' => '650000',
+	'wdc_platform_location_country_code' => 'RU',
+	'wdc_platform_location_city_name' => 'Новосибирск',
+	'wdc_platform_location_place_name' => 'Новосибирск',
+	'wdc_platform_location_region_name' => 'Новосибирская область',
+	'wdc_platform_location_display_name' => 'Новосибирская обл., г Новосибирск',
+	'wdc_platform_location_selected_source' => 'modal',
+);
+$pickup_to_courier_destination_fingerprint = 'country=RU|location_id=650000';
+$pickup_to_courier_current_address_fingerprint = $pickup_to_courier_runtime->fingerprint_from_checkout_data( $pickup_to_courier_posted );
+$pickup_to_courier_session->save_address_fingerprint( 'stale-address-fingerprint' );
+$pickup_to_courier_session->save_city_context(
+	array(
+		'country_code' => 'RU',
+		'location_id' => '650000',
+		'city_name' => 'Новосибирск',
+		'display_name' => 'Новосибирская обл., г Новосибирск',
+		'region_name' => 'Новосибирская область',
+		'postcode' => '630099',
+	)
+);
+$pickup_to_courier_session->save_rates(
+	array(
+		'ozon_delivery:courier' => array(
+			'rate_id' => 'ozon_delivery:courier',
+			'carrier_key' => 'ozon_delivery',
+			'service_key' => 'ozon_delivery',
+			'delivery_type' => 'courier',
+			'requires_pickup_point' => false,
+		),
+		'custom:service' => array(
+			'rate_id' => 'custom:service',
+			'carrier_key' => 'custom',
+			'service_key' => 'service',
+			'delivery_type' => 'custom',
+			'requires_pickup_point' => false,
+		),
+	)
+);
+foreach (
+	array(
+		'manual:manual_a:pickup' => array( 'carrier_key' => 'manual', 'service_key' => 'manual_a', 'point_code' => 'MANUAL-NSK' ),
+		'ozon_delivery:pickup' => array( 'carrier_key' => 'ozon_delivery', 'service_key' => 'ozon_delivery', 'point_code' => 'OZON-NSK' ),
+		'russian_post_domestic:pickup' => array( 'carrier_key' => 'russian_post_domestic', 'service_key' => 'russian_post_domestic', 'point_code' => 'RP-NSK' ),
+	) as $family => $selection
+) {
+	$pickup_to_courier_session->save_pickup_selection_for_family(
+		$family,
+		array_merge(
+			$selection,
+			array(
+				'pickup_family' => $family,
+				'point_address' => 'Новосибирск',
+				'country_code' => 'RU',
+				'location_id' => '650000',
+				'destination_fingerprint' => $pickup_to_courier_destination_fingerprint,
+			)
+		)
+	);
+}
+$pickup_to_courier_before = $pickup_to_courier_session->raw_pickup_selections();
+$pickup_to_courier_runtime->resolve_checkout_address( $pickup_to_courier_posted );
+$pickup_to_courier_after = $pickup_to_courier_session->raw_pickup_selections();
+wc_checkout_smoke_assert( 'stale-address-fingerprint' !== $pickup_to_courier_current_address_fingerprint, 'Pickup-to-courier fixture must enter the address_fingerprint_changed recalculation branch.' );
+wc_checkout_smoke_assert( array_keys( $pickup_to_courier_before ) === array_keys( $pickup_to_courier_after ), 'Same-destination pickup to courier recalculation must not global-clear saved pickup family buckets.' );
+wc_checkout_smoke_assert( 'OZON-NSK' === (string) ( $pickup_to_courier_after['ozon_delivery:pickup']['point_code'] ?? '' ) && 'MANUAL-NSK' === (string) ( $pickup_to_courier_after['manual:manual_a:pickup']['point_code'] ?? '' ) && 'RP-NSK' === (string) ( $pickup_to_courier_after['russian_post_domestic:pickup']['point_code'] ?? '' ), 'Manual, Ozon, and Russian Post pickup selections must survive while courier is active.' );
+wc_checkout_smoke_assert( $pickup_to_courier_destination_fingerprint === (string) ( $pickup_to_courier_session->pickup_selections_for_current_destination()['ozon_delivery:pickup']['destination_fingerprint'] ?? '' ), 'State while courier is active must still expose stored current-destination pickup selections.' );
+$pickup_to_custom_posted = $pickup_to_courier_posted;
+$pickup_to_custom_posted['shipping_method'] = array( 'custom:service' );
+$pickup_to_courier_session->save_address_fingerprint( 'stale-address-fingerprint-for-custom' );
+$pickup_to_courier_runtime->resolve_checkout_address( $pickup_to_custom_posted );
+$pickup_to_custom_after = $pickup_to_courier_session->raw_pickup_selections();
+wc_checkout_smoke_assert( array_keys( $pickup_to_courier_after ) === array_keys( $pickup_to_custom_after ), 'Same-destination pickup to custom/non-pickup recalculation must not global-clear saved pickup family buckets.' );
+wc_checkout_smoke_assert( 'OZON-NSK' === (string) ( $pickup_to_custom_after['ozon_delivery:pickup']['point_code'] ?? '' ) && 'MANUAL-NSK' === (string) ( $pickup_to_custom_after['manual:manual_a:pickup']['point_code'] ?? '' ) && 'RP-NSK' === (string) ( $pickup_to_custom_after['russian_post_domestic:pickup']['point_code'] ?? '' ), 'Manual, Ozon, and Russian Post pickup selections must survive while custom/non-pickup is active.' );
+
 $large_region_db = new class extends wpdb {
 	public array $locations = array();
 };

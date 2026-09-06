@@ -187,15 +187,29 @@ final class CheckoutPickupPointRestController {
 		if ( $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper ) {
 			$this->session_bootstrapper->ensure();
 		}
-		$family = $this->param( $request, 'pickup_family' );
-		if ( '' === $family ) {
-			$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
-			$family = '' !== $method_id ? $this->session_manager->shipping_method_family( $method_id ) : '';
-		}
-		if ( '' !== $family && str_ends_with( $family, ':pickup' ) ) {
+		$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
+		$family = $this->session_manager->normalize_pickup_family( $this->param( $request, 'pickup_family' ) );
+		$carrier = $this->carrier_from_request_or_rate( $request, $method_id, $family );
+		if ( $this->is_registry_backed_carrier( $carrier ) ) {
+			try {
+				$context = $this->provider_query_resolver->resolve_context( $method_id, $carrier, $family );
+			} catch ( \RuntimeException $exception ) {
+				$code = in_array( $exception->getMessage(), array( 'provider_rate_context_missing', 'provider_rate_context_mismatch' ), true ) ? $exception->getMessage() : 'provider_rate_context_missing';
+				return $this->error( $code, 'Pickup rate context is invalid.', 400 );
+			} catch ( \Throwable ) {
+				return $this->error( 'provider_rate_context_missing', 'Pickup rate context is invalid.', 400 );
+			}
+			$family = (string) ( $context['pickup_family'] ?? '' );
 			$this->session_manager->clear_pickup_selection_for_family( $family, 'rest_reset' );
 		} else {
-			$this->session_manager->clear_pickup_selection( 'rest_reset' );
+			if ( '' === $family ) {
+				$family = '' !== $method_id ? $this->session_manager->shipping_method_family( $method_id ) : '';
+			}
+			if ( '' !== $family && str_ends_with( $family, ':pickup' ) ) {
+				$this->session_manager->clear_pickup_selection_for_family( $family, 'rest_reset' );
+			} else {
+				$this->session_manager->clear_pickup_selection( 'rest_reset' );
+			}
 		}
 
 		return $this->response(
@@ -578,6 +592,33 @@ final class CheckoutPickupPointRestController {
 		}
 
 		return RussianPostDomesticSettings::CARRIER_KEY;
+	}
+
+	private function carrier_from_request_or_rate( mixed $request, string $method_id, string $pickup_family = '' ): string {
+		$carrier = sanitize_key( wp_unslash( $this->param( $request, 'carrier' ) ) );
+		if ( 'russian_post' === $carrier ) {
+			$carrier = RussianPostDomesticSettings::CARRIER_KEY;
+		}
+		if ( '' !== $carrier ) {
+			return $carrier;
+		}
+		$rate = $this->rate_for_shipping_method( $method_id );
+		if ( array() !== $rate ) {
+			$meta = $this->rate_meta( $rate );
+			$carrier = sanitize_key( (string) ( $rate['carrier_key'] ?? $meta['carrier_key'] ?? '' ) );
+			if ( '' !== $carrier ) {
+				return $carrier;
+			}
+		}
+		if ( $this->provider_registry instanceof CarrierPickupPointProviderRegistry ) {
+			foreach ( array_keys( $this->provider_registry->all() ) as $registry_carrier ) {
+				if ( str_starts_with( $method_id, $registry_carrier . ':' ) || str_starts_with( $pickup_family, $registry_carrier . ':' ) ) {
+					return $registry_carrier;
+				}
+			}
+		}
+
+		return $this->carrier_from_request( $request, $method_id );
 	}
 
 	/**

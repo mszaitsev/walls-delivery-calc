@@ -39,7 +39,7 @@ final class PickupAddressSearchService {
 		$types = is_array( $filters['point_types'] ?? null ) ? $filters['point_types'] : array();
 		$include_points = ! array_key_exists( 'include_points', $filters ) || ! empty( $filters['include_points'] );
 
-		if ( preg_match( '/^\d{6}$/', $query ) ) {
+		if ( preg_match( '/^\d{6}$/', $query ) && 'RU' === $country_code ) {
 			return $this->postcode_search( $query, $types, $include_points );
 		}
 
@@ -86,32 +86,15 @@ final class PickupAddressSearchService {
 	 * @return array<string,mixed>
 	 */
 	private function postcode_search( string $postcode, array $types, bool $include_points = true ): array {
-		if ( ! $include_points ) {
-			$location = $this->location_by_postcode( $postcode );
-			if ( $location instanceof Location && null !== $location->latitude && null !== $location->longitude ) {
-				return array(
-					'search_type' => 'postcode',
-					'address_search_available' => $this->token_pool->has_available_token(),
-					'address' => array(
-						'value' => $location->resolved_display_name(),
-						'lat' => $location->latitude,
-						'lng' => $location->longitude,
-					),
-					'points' => array(),
-				);
-			}
-
-			return $this->failure( 'postcode_not_found', $this->token_pool->has_available_token(), 'postcode' );
-		}
 		$exact = $this->points->find_rows_by_postcode( $postcode, array( 'point_types' => $types, 'limit' => 50 ) );
 		if ( array() !== $exact ) {
-			$anchor = $this->average_point( $exact );
-			$nearest = $this->points->find_nearest_rows( $anchor['lat'], $anchor['lng'], array( 'point_types' => $types, 'limit' => 50 ) );
+			$anchor = $this->anchor_point( $exact );
+			$nearest = $include_points ? $this->points->find_nearest_rows( $anchor['lat'], $anchor['lng'], array( 'point_types' => $types, 'limit' => 50 ) ) : array();
 			return array(
 				'search_type' => 'postcode',
-				'address_search_available' => $this->token_pool->has_available_token(),
+				'address_search_available' => true,
 				'address' => array(
-					'value' => $postcode,
+					'value' => $anchor['value'],
 					'lat' => $anchor['lat'],
 					'lng' => $anchor['lng'],
 				),
@@ -121,10 +104,10 @@ final class PickupAddressSearchService {
 
 		$location = $this->location_by_postcode( $postcode );
 		if ( $location instanceof Location && null !== $location->latitude && null !== $location->longitude ) {
-			$points = $this->points->find_nearest_rows( $location->latitude, $location->longitude, array( 'point_types' => $types, 'limit' => 50 ) );
+			$points = $include_points ? $this->points->find_nearest_rows( $location->latitude, $location->longitude, array( 'point_types' => $types, 'limit' => 50 ) ) : array();
 			return array(
 				'search_type' => 'postcode',
-				'address_search_available' => $this->token_pool->has_available_token(),
+				'address_search_available' => true,
 				'address' => array(
 					'value' => $location->resolved_display_name(),
 					'lat' => $location->latitude,
@@ -202,19 +185,23 @@ final class PickupAddressSearchService {
 	 * @param array<int,array<string,mixed>> $rows
 	 * @return array{lat:float,lng:float}
 	 */
-	private function average_point( array $rows ): array {
-		$lat = 0.0;
-		$lng = 0.0;
-		$count = 0;
+	private function anchor_point( array $rows ): array {
 		foreach ( $rows as $row ) {
 			if ( is_numeric( $row['latitude'] ?? null ) && is_numeric( $row['longitude'] ?? null ) ) {
-				$lat += (float) $row['latitude'];
-				$lng += (float) $row['longitude'];
-				++$count;
+				$value = trim( (string) ( $row['address'] ?? '' ) );
+				if ( '' === $value ) {
+					$value = trim( (string) ( $row['postcode'] ?? '' ) );
+				}
+
+				return array(
+					'value' => $value,
+					'lat' => (float) $row['latitude'],
+					'lng' => (float) $row['longitude'],
+				);
 			}
 		}
 
-		return array( 'lat' => $count > 0 ? $lat / $count : 0.0, 'lng' => $count > 0 ? $lng / $count : 0.0 );
+		return array( 'value' => '', 'lat' => 0.0, 'lng' => 0.0 );
 	}
 
 	/**

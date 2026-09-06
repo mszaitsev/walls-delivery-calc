@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.153.0
+Version: 0.153.7
+
+0.153.7 preserves current-destination pickup family selections when switching to courier/custom/non-pickup shipping methods; global pickup invalidation remains limited to real destination/context resets.
 
 0.153.0 wires manual delivery into the existing Shipment Framework through one `ManualShipmentAdapter` and one `ManualShipmentService`. Manual shipments use `OrderShipmentRepository`, preserve the concrete historical `service_key` and service title from the order delivery snapshot, delegate actual cost to `ShipmentActualCostService`, and do not add API-create branches, document providers, autosync, modal providers, fake persistence mappers, or manual shipment tables.
 
