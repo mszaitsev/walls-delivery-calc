@@ -304,7 +304,7 @@ $counter_property->setAccessible( true );
 $counter_property->setValue( $admin, $counter );
 $environment_property = $admin_reflection->getProperty( 'environment' );
 $environment_property->setAccessible( true );
-$environment_property->setValue( $admin, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), 'https://example.test/wp-content/plugins/wdc/', '0.155.8' ) );
+$environment_property->setValue( $admin, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), 'https://example.test/wp-content/plugins/wdc/', '0.155.9' ) );
 $render = $admin_reflection->getMethod( 'render_global_delivery_settings_form' );
 $render->setAccessible( true );
 ob_start();

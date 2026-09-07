@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.8
+Version: 0.155.9
+
+0.155.9 moves manual Delivery Service creation to the separate `admin.php?page=wdc-delivery-services&action=create` screen while keeping the existing Delivery Services page slug and edit tabs. The main list page renders only the services table, global shop-processing settings, and the primary `Создать новую службу` button. Create success uses POST/redirect/GET to the canonical edit URL for the newly created service; validation or storage errors render the create screen again and preserve sanitized submitted values. `service_key` uniqueness is enforced server-side after `sanitize_key()` normalization against all persisted Delivery Services, soft-deleted keys, and predefined/reserved builtin keys, so manual services cannot collide with carrier/system identifiers even before bootstrap has created their rows.
 
 0.155.8 adds fixed/dynamic shop processing working days to the existing Delivery Services settings page. The persisted fixed key `shop_processing_working_days` remains unchanged and mode defaults to `fixed`, so production upgrades keep the same lead-time math until an administrator enables dynamic mode. Dynamic mode stores `shop_processing_dynamic_orders_per_day`, `shop_processing_dynamic_order_statuses`, and `shop_processing_dynamic_extra_days`; the formula is `extra_processing_days + ceil(active_orders / orders_per_day)` with extra days limited to `0/1/2`. Active orders are counted for the selected canonical WooCommerce `wc-*` statuses through the HPOS-compatible `wc_get_orders()` paginated total boundary, cached for 5 minutes by normalized status fingerprint, invalidated on `woocommerce_order_status_changed` and settings saves, and then fed into the existing shop calendar pipeline owned by `DeliveryDateCalculator`.
 

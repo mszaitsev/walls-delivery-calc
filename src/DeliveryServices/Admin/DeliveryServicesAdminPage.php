@@ -102,6 +102,10 @@ defined( 'ABSPATH' ) || exit;
 final class DeliveryServicesAdminPage {
 	public const MENU_SLUG = 'wdc-delivery-services';
 	private const DPD_GEOGRAPHY_AJAX_STEP_LIMIT = 500;
+	/** @var list<string> */
+	private array $create_errors = array();
+	/** @var array<string,mixed> */
+	private array $create_values = array();
 
 	public function __construct(
 		private DeliveryServiceRepository $services,
@@ -838,6 +842,10 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
+		if ( 'create' === $action || ( 'save' === $action && empty( $_POST['id'] ) ) ) {
+			$this->handle_create_action();
+			return;
+		}
 		if ( 'save_yandex_geo_pipeline_v2_schedule' === $action ) {
 			$this->handle_yandex_geo_pipeline_v2_schedule_action();
 			return;
@@ -1451,6 +1459,127 @@ final class DeliveryServicesAdminPage {
 		exit;
 	}
 
+	private function handle_create_action(): void {
+		$data = $this->sanitize_service_data( null );
+		$data['carrier_key'] = ManualDeliverySettings::CARRIER_KEY;
+		$data['service_type'] = DeliveryService::TYPE_MANUAL;
+		$this->create_values = $this->create_form_values_from_post( $data );
+
+		$errors = $this->validate_create_service_data( $data );
+		try {
+			$this->validate_create_manual_settings();
+		} catch ( \InvalidArgumentException ) {
+			$errors[] = 'manual_settings_invalid';
+		}
+		if ( array() !== $errors ) {
+			$this->create_errors = $errors;
+			return;
+		}
+
+		$redirect_url = '';
+		try {
+			$id = $this->services->insert_service( $data );
+			if ( $id <= 0 ) {
+				$this->create_errors = array( 'storage_failed' );
+				return;
+			}
+			$service = $this->services->find_by_id( $id );
+			if ( ! $service instanceof DeliveryService || null === $service->id || (string) $data['service_key'] !== $service->service_key ) {
+				$this->create_errors = array( 'storage_failed' );
+				return;
+			}
+
+			$this->save_manual_delivery_settings( (int) $service->id );
+			$countries = $this->countries_from_post();
+			$this->countries->replace_countries( (int) $service->id, $countries );
+			$this->save_manual_delivery_geography( (int) $service->id, $countries );
+			$this->clear_delivery_quote_cache();
+			$redirect_url = $this->service_tab_url_by_key( $service->service_key, 'main' );
+		} catch ( \InvalidArgumentException ) {
+			$this->create_errors = array( 'manual_settings_invalid' );
+		} catch ( \Throwable ) {
+			$this->create_errors = array( 'storage_failed' );
+		}
+		if ( '' !== $redirect_url ) {
+			wp_safe_redirect( $redirect_url );
+			exit;
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return list<string>
+	 */
+	private function validate_create_service_data( array $data ): array {
+		$errors = array();
+		$service_key = (string) ( $data['service_key'] ?? '' );
+		$title = trim( (string) ( $data['title'] ?? '' ) );
+
+		if ( '' === $title ) {
+			$errors[] = 'title_required';
+		}
+		if ( '' === $service_key ) {
+			$errors[] = 'service_key_required';
+		} elseif ( $this->services->is_predefined_service_key( $service_key ) || $this->services->service_key_exists( $service_key ) ) {
+			$errors[] = 'service_key_duplicate';
+		}
+
+		return $errors;
+	}
+
+	private function validate_create_manual_settings(): void {
+		if ( ! array_key_exists( 'manual_pricing_mode', $_POST ) ) {
+			return;
+		}
+		$mode = sanitize_key( wp_unslash( $_POST['manual_pricing_mode'] ?? ManualDeliverySettings::PRICING_MODE_FLAT ) );
+		if ( ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === $mode ) {
+			$this->manual_delivery_weight_ranges->validate_ranges( $this->manual_weight_ranges_from_post() );
+		}
+		if ( array_key_exists( 'manual_delivery_type', $_POST ) ) {
+			$type = sanitize_key( wp_unslash( $_POST['manual_delivery_type'] ?? ManualDeliverySettings::DELIVERY_TYPE_COURIER ) );
+			$label = sanitize_text_field( wp_unslash( $_POST['manual_delivery_type_label'] ?? '' ) );
+			if ( ! in_array( $type, array_keys( $this->manual_delivery_type_options() ), true ) ) {
+				throw new \InvalidArgumentException( 'manual_delivery_type_invalid' );
+			}
+			if ( ManualDeliverySettings::DELIVERY_TYPE_CUSTOM === $type && '' === trim( $label ) ) {
+				throw new \InvalidArgumentException( 'manual_delivery_type_label_required' );
+			}
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function create_form_values_from_post( array $data ): array {
+		$values = $data;
+		$values['countries'] = implode( ',', $this->countries_from_post() );
+		$values['manual_pricing_mode'] = sanitize_key( wp_unslash( $_POST['manual_pricing_mode'] ?? ManualDeliverySettings::PRICING_MODE_FLAT ) );
+		$values['manual_flat_price_rub'] = sanitize_text_field( wp_unslash( $_POST['manual_flat_price_rub'] ?? '0' ) );
+		$values['manual_price_per_kg_rub'] = sanitize_text_field( wp_unslash( $_POST['manual_price_per_kg_rub'] ?? '' ) );
+		$values['manual_tariff_minimum_price_rub'] = sanitize_text_field( wp_unslash( $_POST['manual_tariff_minimum_price_rub'] ?? '' ) );
+		$values['manual_billing_weight_step_g'] = (int) wp_unslash( $_POST['manual_billing_weight_step_g'] ?? ManualDeliverySettings::BILLING_STEP_1_KG );
+		$values['manual_delivery_min_days'] = sanitize_text_field( wp_unslash( $_POST['manual_delivery_min_days'] ?? '' ) );
+		$values['manual_delivery_max_days'] = sanitize_text_field( wp_unslash( $_POST['manual_delivery_max_days'] ?? '' ) );
+		$from_values = wp_unslash( $_POST['manual_weight_range_from_kg'] ?? array() );
+		$to_values = wp_unslash( $_POST['manual_weight_range_to_kg'] ?? array() );
+		$price_values = wp_unslash( $_POST['manual_weight_range_price_rub'] ?? array() );
+		$from_values = is_array( $from_values ) ? $from_values : array();
+		$to_values = is_array( $to_values ) ? $to_values : array();
+		$price_values = is_array( $price_values ) ? $price_values : array();
+		$ranges = array();
+		foreach ( $from_values as $index => $from ) {
+			$ranges[] = array(
+				'from_weight_kg' => sanitize_text_field( (string) $from ),
+				'to_weight_kg' => sanitize_text_field( (string) ( $to_values[ $index ] ?? '' ) ),
+				'price_rub' => sanitize_text_field( (string) ( $price_values[ $index ] ?? '' ) ),
+			);
+		}
+		$values['manual_weight_ranges'] = $ranges;
+
+		return $values;
+	}
+
 	private function handle_pek_action( string $action ): void {
 		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 		$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
@@ -1689,19 +1818,29 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 
+		$is_create_screen = $this->is_create_screen();
 		$service = $this->requested_service();
 		?>
 		<div class="wrap">
-			<h1><?php echo esc_html__( 'Службы доставки', 'walls-delivery-calc' ); ?></h1>
+			<h1><?php echo esc_html( $is_create_screen ? __( 'Создание службы доставки', 'walls-delivery-calc' ) : __( 'Службы доставки', 'walls-delivery-calc' ) ); ?></h1>
 			<?php $this->render_service_key_notice(); ?>
-			<?php if ( $service instanceof DeliveryService ) : ?>
+			<?php if ( $is_create_screen ) : ?>
+				<?php $this->render_create_form(); ?>
+			<?php elseif ( $service instanceof DeliveryService ) : ?>
 				<?php $this->render_edit_page( $service ); ?>
 			<?php else : ?>
 				<?php $this->render_table(); ?>
-				<?php $this->render_create_form(); ?>
 			<?php endif; ?>
 		</div>
 		<?php
+	}
+
+	private function is_create_screen(): bool {
+		if ( array() !== $this->create_errors ) {
+			return true;
+		}
+
+		return 'create' === sanitize_key( wp_unslash( $_GET['action'] ?? '' ) );
 	}
 
 	private function requested_service(): ?DeliveryService {
@@ -1770,6 +1909,9 @@ final class DeliveryServicesAdminPage {
 				</tbody>
 			</table>
 		</form>
+		<p>
+			<a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&action=create' ) ); ?>"><?php echo esc_html__( 'Создать новую службу', 'walls-delivery-calc' ); ?></a>
+		</p>
 		<?php $this->render_global_delivery_settings_form(); ?>
 		<?php
 	}
@@ -4751,25 +4893,72 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	}
 
 	private function render_create_form(): void {
-		echo '<h2>' . esc_html__( 'Новая служба', 'walls-delivery-calc' ) . '</h2>';
-		$this->render_service_form( null );
+		foreach ( $this->create_errors as $error ) {
+			?>
+			<div class="notice notice-error inline"><p><?php echo esc_html( $this->create_error_message( $error ) ); ?></p></div>
+			<?php
+		}
+		$this->render_service_form( $this->create_form_service(), 'create', __( 'Создать службу', 'walls-delivery-calc' ), true );
 	}
 
-	private function render_service_form( ?DeliveryService $service ): void {
+	private function create_form_service(): ?DeliveryService {
+		if ( array() === $this->create_values ) {
+			return null;
+		}
+
+		return DeliveryService::from_array(
+			array_merge(
+				array(
+					'id' => null,
+					'service_key' => '',
+					'carrier_key' => ManualDeliverySettings::CARRIER_KEY,
+					'service_type' => DeliveryService::TYPE_MANUAL,
+					'title' => '',
+					'enabled' => 1,
+					'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+					'use_default_rules_when_no_service_rules' => 1,
+					'round_up_to_ruble' => 1,
+					'minimum_price_rub' => 1,
+					'sort_order' => 100,
+					'deleted' => 0,
+				),
+				$this->create_values,
+				array(
+					'id' => null,
+					'carrier_key' => ManualDeliverySettings::CARRIER_KEY,
+					'service_type' => DeliveryService::TYPE_MANUAL,
+				)
+			)
+		);
+	}
+
+	private function create_error_message( string $error ): string {
+		return match ( $error ) {
+			'title_required' => __( 'Укажите название службы доставки.', 'walls-delivery-calc' ),
+			'service_key_required' => __( 'Укажите Service key.', 'walls-delivery-calc' ),
+			'service_key_duplicate' => __( 'Service key уже используется другой службой доставки.', 'walls-delivery-calc' ),
+			'manual_settings_invalid' => __( 'Проверьте настройки ручной службы доставки.', 'walls-delivery-calc' ),
+			default => __( 'Служба доставки не создана. Проверьте данные и повторите попытку.', 'walls-delivery-calc' ),
+		};
+	}
+
+	private function render_service_form( ?DeliveryService $service, string $action = 'save', string $submit_label = '', bool $show_cancel = false ): void {
+		$submit_label = '' !== $submit_label ? $submit_label : __( 'Сохранить службу', 'walls-delivery-calc' );
+		$countries_value = $service instanceof DeliveryService && null !== $service->id ? implode( ',', $this->countries->countries( (int) $service->id ) ) : (string) ( $this->create_values['countries'] ?? '' );
 		?>
 		<form method="post" style="max-width: 760px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
-			<input type="hidden" name="wdc_delivery_services_action" value="save">
+			<input type="hidden" name="wdc_delivery_services_action" value="<?php echo esc_attr( $action ); ?>">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) ( $service->id ?? 0 ) ); ?>">
 			<table class="form-table" role="presentation">
-				<?php $this->text_row( 'service_key', __( 'Service key', 'walls-delivery-calc' ), $service->service_key ?? '' ); ?>
+				<?php $this->text_row_with_description( 'service_key', __( 'Service key', 'walls-delivery-calc' ), $service->service_key ?? '', __( 'Используется как технический идентификатор. После создания лучше не менять без необходимости.', 'walls-delivery-calc' ) ); ?>
 				<?php $this->text_row( 'title', __( 'Название', 'walls-delivery-calc' ), $service->title ?? '' ); ?>
 				<?php $this->readonly_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), ManualDeliverySettings::CARRIER_KEY ); ?>
 				<input type="hidden" name="carrier_key" value="<?php echo esc_attr( ManualDeliverySettings::CARRIER_KEY ); ?>">
 				<?php $this->readonly_row( 'service_type', __( 'Тип', 'walls-delivery-calc' ), DeliveryService::TYPE_MANUAL ); ?>
 				<input type="hidden" name="service_type" value="<?php echo esc_attr( DeliveryService::TYPE_MANUAL ); ?>">
 				<?php $this->select_assoc_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, $this->availability_mode_options() ); ?>
-				<?php $this->text_row( 'countries', __( 'Countries', 'walls-delivery-calc' ), $service instanceof DeliveryService ? implode( ',', $this->countries->countries( (int) $service->id ) ) : '' ); ?>
+				<?php $this->text_row( 'countries', __( 'Countries', 'walls-delivery-calc' ), $countries_value ); ?>
 				<?php $this->render_manual_geography_rows( $service ); ?>
 				<?php $this->render_manual_pricing_rows( $service ); ?>
 				<?php $this->text_row( 'minimum_price_rub', __( 'Минимальная цена, руб.', 'walls-delivery-calc' ), (string) ( $service->minimum_price_rub ?? 1 ) ); ?>
@@ -4778,7 +4967,14 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				<?php $this->checkbox_row( 'use_default_rules_when_no_service_rules', __( 'Fallback на default rules', 'walls-delivery-calc' ), $service->use_default_rules_when_no_service_rules ?? true ); ?>
 				<?php $this->checkbox_row( 'round_up_to_ruble', __( 'Округлять вверх до рубля', 'walls-delivery-calc' ), $service->round_up_to_ruble ?? true ); ?>
 			</table>
-			<?php submit_button( __( 'Сохранить службу', 'walls-delivery-calc' ) ); ?>
+			<?php if ( $show_cancel ) : ?>
+				<p class="submit">
+					<button class="button button-primary" type="submit"><?php echo esc_html( $submit_label ); ?></button>
+					<a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::MENU_SLUG ) ); ?>"><?php echo esc_html__( 'Отмена', 'walls-delivery-calc' ); ?></a>
+				</p>
+			<?php else : ?>
+				<?php submit_button( $submit_label ); ?>
+			<?php endif; ?>
 		</form>
 		<?php
 	}
@@ -4985,6 +5181,18 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 */
 	private function manual_pricing_values( DeliveryService $service ): array {
 		if ( null === $service->id ) {
+			if ( array() !== $this->create_values ) {
+				return array(
+					'pricing_mode' => sanitize_key( (string) ( $this->create_values['manual_pricing_mode'] ?? ManualDeliverySettings::PRICING_MODE_FLAT ) ),
+					'flat_price_rub' => (string) ( $this->create_values['manual_flat_price_rub'] ?? '0' ),
+					'price_per_kg_rub' => (string) ( $this->create_values['manual_price_per_kg_rub'] ?? '' ),
+					'tariff_minimum_price_rub' => (string) ( $this->create_values['manual_tariff_minimum_price_rub'] ?? '' ),
+					'billing_weight_step_g' => (int) ( $this->create_values['manual_billing_weight_step_g'] ?? ManualDeliverySettings::BILLING_STEP_1_KG ),
+					'min_days' => (string) ( $this->create_values['manual_delivery_min_days'] ?? '' ),
+					'max_days' => (string) ( $this->create_values['manual_delivery_max_days'] ?? '' ),
+					'ranges' => is_array( $this->create_values['manual_weight_ranges'] ?? null ) ? $this->create_values['manual_weight_ranges'] : array(),
+				);
+			}
 			return array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '0', 'price_per_kg_rub' => '', 'tariff_minimum_price_rub' => '', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_1_KG, 'min_days' => '', 'max_days' => '', 'ranges' => array() );
 		}
 

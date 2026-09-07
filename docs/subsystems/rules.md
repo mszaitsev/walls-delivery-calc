@@ -1,6 +1,6 @@
 # Rules
 
-Version: 0.155.8
+Version: 0.155.9
 
 0.155.6 adds a full-cart application condition to the Rule Engine. Existing persisted `condition_type=order_total` is not renamed and still evaluates the current WooCommerce shipping package total after sale prices/coupons; only its UI label changes from `Сумма заказа` to `Сумма доставляемых товаров`. New persisted `condition_type=cart_total` is labeled `Сумма всей корзины` and evaluates `RuleEvaluationContext::all_cart_items_total()`, which includes all cart item lines after sale prices/coupons and excludes shipping, fees, and taxes. Non-Woo contexts keep the typed fallback `all_cart_items_total() = order_total`.
 

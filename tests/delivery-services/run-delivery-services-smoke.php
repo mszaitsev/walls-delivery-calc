@@ -18,6 +18,62 @@ function current_time( string $type ): string { return '2026-05-25 12:00:00'; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
+function is_admin(): bool { return true; }
+function current_user_can( string $capability ): bool { return (bool) ( $GLOBALS['wdc_ds_current_user_can'] ?? true ); }
+function check_admin_referer( string $action ): bool {
+	if ( false === ( $GLOBALS['wdc_ds_nonce_valid'] ?? true ) ) {
+		throw new WdcDsNonceException( 'invalid_nonce' );
+	}
+	return true;
+}
+function wp_nonce_field( string|int $action = -1, string $name = '_wpnonce', bool $referer = true, bool $display = true ): string {
+	$field = '<input type="hidden" name="' . esc_attr( $name ) . '" value="nonce">';
+	if ( $display ) {
+		echo $field;
+	}
+	return $field;
+}
+function admin_url( string $path = '' ): string { return 'https://example.test/wp-admin/' . ltrim( $path, '/' ); }
+function add_query_arg( string|array $key, mixed $value = null, string $url = '' ): string {
+	$args = is_array( $key ) ? $key : array( $key => $value );
+	$separator = str_contains( $url, '?' ) ? '&' : '?';
+	return $url . $separator . http_build_query( $args );
+}
+function wp_safe_redirect( string $location ): bool { throw new WdcDsRedirectException( $location ); }
+function __( string $text, string $domain = '' ): string { return $text; }
+function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function esc_attr__( string $text, string $domain = '' ): string { return $text; }
+function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_url( mixed $text ): string { return esc_attr( $text ); }
+function esc_textarea( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_NOQUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
+	$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
+function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
+	$result = (string) $checked === (string) $current ? ' checked="checked"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
+function submit_button( string $text = 'Save Changes', string $type = 'primary' ): void { echo '<p class="submit"><button class="button button-' . esc_attr( $type ) . '" type="submit">' . esc_html( $text ) . '</button></p>'; }
+function sanitize_key( mixed $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $key ) ) ?? ''; }
+function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_textarea_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function wp_unslash( mixed $value ): mixed { return $value; }
+
+final class WdcDsRedirectException extends RuntimeException {
+	public function __construct( public readonly string $location ) {
+		parent::__construct( $location );
+	}
+}
+
+final class WdcDsNonceException extends RuntimeException {}
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -296,6 +352,10 @@ function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyRepository;
+use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRangeRepository;
+use WallsShop\WDC\Carriers\Manual\ManualPickupPointRepository;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
@@ -311,6 +371,7 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
+use WallsShop\WDC\DeliveryServices\Application\DeliveryServiceKeyRenameService;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
@@ -318,6 +379,8 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
@@ -339,6 +402,51 @@ wdc_ds_assert( count( $GLOBALS['wdc_db_delta'] ?? array() ) === 3, 'Delivery ser
 $services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 $settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
 $countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+
+function wdc_ds_admin_page( DeliveryServiceRepository $services, DeliveryServiceCountryRepository $countries, DeliveryServiceSettingsRepository $settings, RuleRepository $rules ): DeliveryServicesAdminPage {
+	$reflection = new ReflectionClass( DeliveryServicesAdminPage::class );
+	$admin = $reflection->newInstanceWithoutConstructor();
+	$values = array(
+		'services' => $services,
+		'countries' => $countries,
+		'rules' => $rules,
+		'global_settings' => new SettingsRepository(),
+		'manual_delivery_settings' => new ManualDeliverySettings( $settings ),
+		'manual_delivery_geography' => new ManualDeliveryGeographyRepository( $GLOBALS['wpdb'] ),
+		'manual_delivery_weight_ranges' => new ManualDeliveryWeightRangeRepository( $GLOBALS['wpdb'] ),
+		'manual_pickup_points' => new ManualPickupPointRepository( $GLOBALS['wpdb'] ),
+		'delivery_service_key_rename' => new DeliveryServiceKeyRenameService( $services, $rules ),
+		'shop_processing_queue_counter' => new ShopProcessingOrderQueueCounter( new Logger(), static fn( array $statuses ): int => 0 ),
+		'settings' => $settings,
+		'delivery_quote_cache_manager' => null,
+		'locations' => null,
+	);
+	foreach ( $values as $property => $value ) {
+		$reflection_property = $reflection->getProperty( $property );
+		$reflection_property->setAccessible( true );
+		$reflection_property->setValue( $admin, $value );
+	}
+
+	return $admin;
+}
+
+function wdc_ds_render_admin_page( DeliveryServicesAdminPage $admin, array $get = array() ): string {
+	$_GET = $get;
+	ob_start();
+	$admin->render_page();
+	return (string) ob_get_clean();
+}
+
+function wdc_ds_post_create( DeliveryServicesAdminPage $admin, array $post ): ?string {
+	$_POST = array_merge( array( 'wdc_delivery_services_action' => 'create' ), $post );
+	try {
+		$admin->handle_actions();
+	} catch ( WdcDsRedirectException $exception ) {
+		return $exception->location;
+	}
+
+	return null;
+}
 
 $rp = $services->ensure_russian_post_service();
 wdc_ds_assert( RussianPostSettings::SERVICE_KEY === $rp->service_key, 'Russian Post service must be auto-created.' );
@@ -690,6 +798,99 @@ $processed_fallback = $manager->post_process_rate(
 wdc_ds_assert( 0 === $processed_fallback->price->get_kopecks() && empty( $processed_fallback->meta['minimum_price_applied'] ) && empty( $processed_fallback->meta['round_up_applied'] ), 'Service post-processing must not change fallback price.' );
 $countries->delete_countries( $custom_id );
 wdc_ds_assert( array() === $countries->countries( $custom_id ), 'Country repository must delete countries.' );
+
+$create_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$list_html = wdc_ds_render_admin_page( $create_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG ) );
+wdc_ds_assert( str_contains( $list_html, 'Создать новую службу' ) && str_contains( $list_html, 'button button-primary' ) && str_contains( $list_html, 'action=create' ), 'Delivery Services list page must render a primary create button.' );
+wdc_ds_assert( ! str_contains( $list_html, 'value="save"><input type="hidden" name="id" value="0"' ) && ! str_contains( $list_html, 'Новая служба' ), 'Delivery Services list page must not render the inline create form.' );
+$create_html = wdc_ds_render_admin_page( $create_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( str_contains( $create_html, 'Создание службы доставки' ) && str_contains( $create_html, 'name="wdc_delivery_services_action" value="create"' ), 'Create route must render the manual service create form.' );
+wdc_ds_assert( str_contains( $create_html, 'Service key' ) && str_contains( $create_html, 'Название' ) && str_contains( $create_html, ManualDeliverySettings::CARRIER_KEY ) && str_contains( $create_html, DeliveryService::TYPE_MANUAL ), 'Create form must keep the manual service creation fields.' );
+wdc_ds_assert( str_contains( $create_html, 'Используется как технический идентификатор' ), 'Create form must explain the service key contract.' );
+wdc_ds_assert( str_contains( $create_html, 'Отмена' ) && str_contains( $create_html, 'admin.php?page=' . DeliveryServicesAdminPage::MENU_SLUG ), 'Create form must render a Cancel link back to the list page.' );
+
+$manual_create_count = count( $GLOBALS['wpdb']->services );
+$redirect = wdc_ds_post_create(
+	$create_admin,
+	array(
+		'service_key' => 'manual_local',
+		'title' => 'Manual Local',
+		'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+		'countries' => 'RU,BY',
+		'minimum_price_rub' => '2',
+		'sort_order' => '77',
+		'enabled' => '1',
+		'use_default_rules_when_no_service_rules' => '1',
+		'round_up_to_ruble' => '1',
+		'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT,
+		'manual_flat_price_rub' => '350',
+		'manual_delivery_min_days' => '1',
+		'manual_delivery_max_days' => '3',
+	)
+);
+$manual_local = $services->find_by_service_key( 'manual_local' );
+wdc_ds_assert( $manual_local instanceof DeliveryService && ManualDeliverySettings::CARRIER_KEY === $manual_local->carrier_key && DeliveryService::TYPE_MANUAL === $manual_local->service_type, 'Valid manual service create must persist a manual DeliveryService.' );
+wdc_ds_assert( null !== $redirect && str_contains( $redirect, 'page=' . DeliveryServicesAdminPage::MENU_SLUG ) && str_contains( $redirect, 'service=manual_local' ) && str_contains( $redirect, 'tab=main' ), 'Successful create must redirect to the new service edit page.' );
+wdc_ds_assert( count( $GLOBALS['wpdb']->services ) === $manual_create_count + 1, 'Successful create must insert exactly one service.' );
+
+$duplicate_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$duplicate_redirect = wdc_ds_post_create( $duplicate_admin, array( 'service_key' => 'manual_local', 'title' => 'Duplicate Manual', 'minimum_price_rub' => '5' ) );
+$duplicate_html = wdc_ds_render_admin_page( $duplicate_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $duplicate_redirect && str_contains( $duplicate_html, 'Service key уже используется другой службой доставки.' ) && str_contains( $duplicate_html, 'Duplicate Manual' ) && str_contains( $duplicate_html, 'manual_local' ), 'Duplicate manual key must stay on create screen with submitted values.' );
+wdc_ds_assert( count( $GLOBALS['wpdb']->services ) === $manual_create_count + 1, 'Duplicate manual key must not create a service.' );
+
+$builtin_duplicate_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( null === wdc_ds_post_create( $builtin_duplicate_admin, array( 'service_key' => CdekSettings::SERVICE_KEY, 'title' => 'Duplicate CDEK' ) ), 'Duplicate builtin/carrier key must not redirect as successful create.' );
+wdc_ds_assert( str_contains( wdc_ds_render_admin_page( $builtin_duplicate_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) ), 'Service key уже используется другой службой доставки.' ), 'Duplicate builtin/carrier key must render a clear error.' );
+
+$main_wpdb = $GLOBALS['wpdb'];
+$GLOBALS['wpdb'] = new wpdb();
+$reserved_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$reserved_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$reserved_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$reserved_admin = wdc_ds_admin_page( $reserved_services, $reserved_countries, $reserved_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( null === $reserved_services->find_by_service_key( 'self_pickup' ), 'Reserved self_pickup service row must be absent before reserved-key create validation.' );
+wdc_ds_assert( null === wdc_ds_post_create( $reserved_admin, array( 'service_key' => 'self_pickup', 'title' => 'Reserved Self Pickup' ) ), 'Reserved predefined key without a row must be rejected.' );
+wdc_ds_assert( str_contains( wdc_ds_render_admin_page( $reserved_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) ), 'Service key уже используется другой службой доставки.' ), 'Reserved predefined key must render the duplicate-key error.' );
+$GLOBALS['wpdb'] = $main_wpdb;
+
+$collision_id = $services->create_service( array( 'service_key' => 'manual_collision', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Manual Collision', 'deleted' => 0 ) );
+$collision_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( $services->service_key_exists( 'manual_collision' ), 'Repository uniqueness lookup must see the seeded collision key.' );
+wdc_ds_assert( null === wdc_ds_post_create( $collision_admin, array( 'service_key' => 'Manual_Collision', 'title' => 'Normalized Collision' ) ), 'Normalized service key collision must be rejected after sanitize_key().' );
+wdc_ds_assert( null !== $collision_id && str_contains( wdc_ds_render_admin_page( $collision_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) ), 'manual_collision' ), 'Normalized collision error screen must preserve the canonical sanitized key.' );
+
+$invalid_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( null === wdc_ds_post_create( $invalid_admin, array( 'service_key' => '!!!', 'title' => 'Invalid Key', 'minimum_price_rub' => '9' ) ), 'Invalid service key must not create a service.' );
+$invalid_html = wdc_ds_render_admin_page( $invalid_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( str_contains( $invalid_html, 'Укажите Service key.' ) && str_contains( $invalid_html, 'Invalid Key' ) && str_contains( $invalid_html, 'value="9"' ), 'Invalid-key error must preserve other submitted values.' );
+
+$soft_deleted_id = $services->create_service( array( 'service_key' => 'manual_soft_deleted', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Soft Deleted Manual', 'deleted' => 0 ) );
+$services->soft_delete_service( $soft_deleted_id );
+wdc_ds_assert( null === $services->find_by_service_key( 'manual_soft_deleted' ) && $services->service_key_exists( 'manual_soft_deleted' ), 'Soft-deleted manual service key must remain reserved by repository uniqueness.' );
+$soft_deleted_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( null === wdc_ds_post_create( $soft_deleted_admin, array( 'service_key' => 'manual_soft_deleted', 'title' => 'Reuse Soft Deleted' ) ), 'Soft-deleted service key must be rejected on create.' );
+
+$capability_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wdc_ds_current_user_can'] = false;
+$before_denied = count( $GLOBALS['wpdb']->services );
+wdc_ds_assert( null === wdc_ds_post_create( $capability_admin, array( 'service_key' => 'manual_denied', 'title' => 'Denied' ) ), 'Denied capability must not create or redirect.' );
+wdc_ds_assert( $before_denied === count( $GLOBALS['wpdb']->services ), 'Denied capability must leave services unchanged.' );
+$GLOBALS['wdc_ds_current_user_can'] = true;
+$nonce_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wdc_ds_nonce_valid'] = false;
+$before_nonce = count( $GLOBALS['wpdb']->services );
+try {
+	wdc_ds_post_create( $nonce_admin, array( 'service_key' => 'manual_bad_nonce', 'title' => 'Bad Nonce' ) );
+	$nonce_failed = false;
+} catch ( WdcDsNonceException ) {
+	$nonce_failed = true;
+}
+$GLOBALS['wdc_ds_nonce_valid'] = true;
+wdc_ds_assert( $nonce_failed && $before_nonce === count( $GLOBALS['wpdb']->services ), 'Nonce failure must stop manual service create before persistence.' );
+
+$manual_edit_html = wdc_ds_render_admin_page( $create_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'service' => 'manual_local' ) );
+wdc_ds_assert( str_contains( $manual_edit_html, 'Manual Local' ) && str_contains( $manual_edit_html, 'name="wdc_delivery_services_action" value="save_main"' ), 'Existing edit page must remain available after create route split.' );
 
 $GLOBALS['wpdb']->rules[] = array( 'id' => 1, 'name' => 'Service rule', 'enabled' => 1, 'priority' => 10, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'fixed_test', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::MULTIPLY, 'operation_value' => 2, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
 $GLOBALS['wpdb']->rules[] = array( 'id' => 2, 'name' => 'Default rule', 'enabled' => 1, 'priority' => 20, 'target_type' => RuleRepository::TARGET_DEFAULT, 'target_value' => '', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::DECREASE, 'operation_value' => 100, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );

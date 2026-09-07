@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.155.8
+Version: 0.155.9
+
+0.155.9 keeps Delivery Services administration inside `DeliveryServicesAdminPage` and adds only a small internal create route under the existing `wdc-delivery-services` page slug. Manual create no longer renders inline on the list page; it uses the same service form contract on `action=create`, redirects to the canonical edit screen after success, and preserves submitted values on validation/storage errors. `DeliveryServiceRepository::service_key_exists()` is the typed global uniqueness check for persisted active or soft-deleted rows; predefined service keys remain reserved through `is_predefined_service_key()`, so manual services cannot take carrier/system keys even if their bootstrap row is not present yet. The database already has a unique `service_key` index, so this stage does not introduce a schema migration.
 
 0.155.8 keeps `Plugin.php` as composition root for dynamic shop processing days. `ShopProcessingOrderQueueCounter` owns the WooCommerce order-count/cache boundary, `ShopProcessingDaysResolver` owns the fixed/dynamic processing-day contract, and `DeliveryLeadTimeNormalizer` consumes only the resolved integer before handing calendar arithmetic to `DeliveryDateCalculator`. The Delivery Services admin page remains the owner of shop processing settings and invalidates the queue-count cache when those settings change. The passive `woocommerce_order_status_changed` cache invalidation hook is registered outside checkout/order runtime gates, so queue bookkeeping stays fresh while the WordPress plugin is active even if WDC WooCommerce runtime is temporarily disabled; order mutation hooks, shipment autosync, and shipment analytics runtime hooks remain gated by `woocommerce_runtime_enabled`.
 

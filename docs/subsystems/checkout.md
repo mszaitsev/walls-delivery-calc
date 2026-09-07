@@ -2,7 +2,7 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.155.8
+Version: 0.155.9
 
 0.155.8 adds fixed/dynamic shop processing working days without adding calendar math to checkout. Dynamic mode resolves only an integer shop working-day count from `extra_processing_days + ceil(active_orders / orders_per_day)`, counts selected canonical WooCommerce `wc-*` statuses through a paginated HPOS-compatible `wc_get_orders()` total query, caches that aggregate for 5 minutes by status fingerprint/generation, and invalidates the cache from a passive `woocommerce_order_status_changed` hook registered outside the global WDC WooCommerce runtime gate. Runtime off still prevents checkout/order/shipment runtime registration; the passive invalidation hook only expires WDC's own queue-count cache.
 

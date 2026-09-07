@@ -56,6 +56,17 @@ final class DeliveryServiceRepository {
 	/**
 	 * @param array<string,mixed> $data
 	 */
+	public function insert_service( array $data ): int {
+		$now = current_time( 'mysql' );
+		$row = $this->normalize_row( $data, $now );
+		$inserted = $this->wpdb->insert( $this->table(), $row, $this->formats() );
+
+		return true === $inserted ? (int) $this->wpdb->insert_id : 0;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
 	public function update_service( int $id, array $data ): void {
 		$row = $this->normalize_row( $data, current_time( 'mysql' ), false );
 		if ( array() === $row ) {
@@ -127,8 +138,12 @@ final class DeliveryServiceRepository {
 	}
 
 	public function service_key_exists_for_other_service( string $service_key, int $service_id ): bool {
+		return $this->service_key_exists( $service_key, $service_id );
+	}
+
+	public function service_key_exists( string $service_key, ?int $exclude_id = null ): bool {
 		$existing = $this->find_any_by_service_key( $service_key );
-		return $existing instanceof DeliveryService && null !== $existing->id && (int) $existing->id !== $service_id;
+		return $existing instanceof DeliveryService && null !== $existing->id && ( null === $exclude_id || (int) $existing->id !== $exclude_id );
 	}
 
 	/**
