@@ -94,6 +94,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $prefix = 'wp_';
 		/** @var array<string,array<string,mixed>> */
 		public array $calendar_days = array();
+		/** @var array<string,array<string,mixed>> */
+		public array $delivery_services = array();
 
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
@@ -137,6 +139,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public function get_row( string $query, mixed $output = null ): ?array {
 			if ( preg_match( "/calendar_type = '([^']+)' AND calendar_date = '([^']+)'/", $query, $matches ) ) {
 				return $this->calendar_days[ $matches[1] . '|' . $matches[2] ] ?? null;
+			}
+			if ( preg_match( "/service_key = '([^']+)' AND deleted = 0 LIMIT 1/", $query, $matches ) ) {
+				return $this->delivery_services[ $matches[1] ] ?? null;
 			}
 
 			return null;
@@ -184,6 +189,8 @@ use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
@@ -286,6 +293,9 @@ shop_processing_assert( 3 === $normalized->meta['shop_processing_working_days'] 
 
 $admin = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();
 $admin_reflection = new ReflectionClass( DeliveryServicesAdminPage::class );
+$services_property = $admin_reflection->getProperty( 'services' );
+$services_property->setAccessible( true );
+$services_property->setValue( $admin, new DeliveryServiceRepository( $GLOBALS['wpdb'] ) );
 $global_settings_property = $admin_reflection->getProperty( 'global_settings' );
 $global_settings_property->setAccessible( true );
 $global_settings_property->setValue( $admin, $settings );
@@ -307,15 +317,35 @@ shop_processing_assert( 3 === substr_count( $html, 'data-wdc-shop-processing-mod
 shop_processing_assert( str_contains( $html, 'wc-processing' ) && str_contains( $html, 'wc-on-hold' ) && str_contains( $html, 'multiple' ), 'Delivery Services admin must render WooCommerce status multi-select from canonical statuses.' );
 shop_processing_assert( str_contains( $html, '>0 дней<' ) && str_contains( $html, '>1 день<' ) && str_contains( $html, '>2 дня<' ), 'Dynamic extra days select must expose exactly 0/1/2 labels.' );
 
+$GLOBALS['wpdb']->delivery_services['existing_service'] = array(
+	'id' => 1,
+	'service_key' => 'existing_service',
+	'carrier_key' => 'manual',
+	'service_type' => DeliveryService::TYPE_MANUAL,
+	'title' => 'Existing service',
+	'deleted' => 0,
+);
 $GLOBALS['wdc_shop_processing_scripts'] = array();
 $_GET = array( 'page' => DeliveryServicesAdminPage::MENU_SLUG );
 $admin->enqueue_assets();
 shop_processing_assert( isset( $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing'] ), 'Shop processing visibility script must enqueue on the Delivery Services list page.' );
 shop_processing_assert( str_ends_with( (string) $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing']['src'], '/assets/admin/delivery-services-shop-processing.js' ), 'Shop processing visibility script must use the dedicated admin asset.' );
 $GLOBALS['wdc_shop_processing_scripts'] = array();
+$_GET = array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'tab' => 'foo' );
+$admin->enqueue_assets();
+shop_processing_assert( isset( $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing'] ), 'Irrelevant tab parameter must not suppress list-page shop processing script enqueue.' );
+$GLOBALS['wdc_shop_processing_scripts'] = array();
+$_GET = array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'service' => 'nonexistent' );
+$admin->enqueue_assets();
+shop_processing_assert( isset( $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing'] ), 'Unknown service parameter must keep list-page shop processing script enqueue.' );
+$GLOBALS['wdc_shop_processing_scripts'] = array();
 $_GET = array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'service' => 'russian_post' );
 $admin->enqueue_assets();
-shop_processing_assert( ! isset( $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing'] ), 'Shop processing visibility script must not enqueue on service detail tabs.' );
+shop_processing_assert( isset( $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing'] ), 'Unknown predefined-looking service without a repository row must still render the list-page shop processing script.' );
+$GLOBALS['wdc_shop_processing_scripts'] = array();
+$_GET = array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'service' => 'existing_service', 'tab' => 'foo' );
+$admin->enqueue_assets();
+shop_processing_assert( ! isset( $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing'] ), 'Shop processing visibility script must not enqueue on a real service edit screen.' );
 $GLOBALS['wdc_shop_processing_scripts'] = array();
 $_GET = array( 'page' => 'wdc-platform-settings' );
 $admin->enqueue_assets();

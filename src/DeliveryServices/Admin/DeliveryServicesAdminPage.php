@@ -223,7 +223,7 @@ final class DeliveryServicesAdminPage {
 				$this->asset_version(),
 				true
 			);
-			if ( '' === $service && '' === $tab ) {
+			if ( ! $this->requested_service() instanceof DeliveryService ) {
 				wp_enqueue_script(
 					'wdc-delivery-services-shop-processing',
 					$this->asset_url( 'assets/admin/delivery-services-shop-processing.js' ),
@@ -1689,8 +1689,7 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 
-		$service_key = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
-		$service = '' !== $service_key ? $this->services->find_by_service_key( $service_key ) : null;
+		$service = $this->requested_service();
 		?>
 		<div class="wrap">
 			<h1><?php echo esc_html__( 'Службы доставки', 'walls-delivery-calc' ); ?></h1>
@@ -1703,6 +1702,12 @@ final class DeliveryServicesAdminPage {
 			<?php endif; ?>
 		</div>
 		<?php
+	}
+
+	private function requested_service(): ?DeliveryService {
+		$service_key = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
+
+		return '' !== $service_key ? $this->services->find_by_service_key( $service_key ) : null;
 	}
 
 	private function render_table(): void {
