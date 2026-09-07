@@ -68,6 +68,13 @@ final class DeliveryServiceSettingsRepository {
 		$this->wpdb->delete( $this->table(), array( 'service_id' => $service_id, 'setting_key' => $key ), array( '%d', '%s' ) );
 	}
 
+	public function delete_settings_for_service( int $service_id ): void {
+		$result = $this->wpdb->delete( $this->table(), array( 'service_id' => $service_id ), array( '%d' ) );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Failed to delete delivery service settings.' );
+		}
+	}
+
 	public function delivery_days_are_working( int $service_id ): bool {
 		return true === $this->get_setting( $service_id, self::DELIVERY_DAYS_ARE_WORKING_KEY, false );
 	}

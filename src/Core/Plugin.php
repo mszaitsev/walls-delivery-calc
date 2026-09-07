@@ -1139,6 +1139,7 @@ final class Plugin {
 				$this->container->get( PekStatusAdminPage::class ),
 				$this->container->get( OzonDeliveryAdminPage::class ),
 				$this->container->get( SelfPickupSettings::class ),
+				$this->container->get( Logger::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );

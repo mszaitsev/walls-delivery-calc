@@ -66,6 +66,7 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
@@ -106,6 +107,7 @@ final class DeliveryServicesAdminPage {
 	private array $create_errors = array();
 	/** @var array<string,mixed> */
 	private array $create_values = array();
+	private ?Logger $logger = null;
 
 	public function __construct(
 		private DeliveryServiceRepository $services,
@@ -175,7 +177,9 @@ final class DeliveryServicesAdminPage {
 		private ?PekStatusAdminPage $pek_statuses = null,
 		private ?OzonDeliveryAdminPage $ozon_delivery_admin = null,
 		private ?SelfPickupSettings $self_pickup_settings = null,
+		?Logger $logger = null,
 	) {
+		$this->logger = $logger;
 	}
 
 	public function register(): void {
@@ -1477,44 +1481,58 @@ final class DeliveryServicesAdminPage {
 		}
 
 		$redirect_url = '';
+		$stage = 'begin_transaction';
+		$new_service_id = 0;
+		$service_key = (string) $data['service_key'];
 		$transaction_started = $this->begin_create_transaction();
 		if ( ! $transaction_started ) {
-			$this->create_errors = array( 'storage_failed' );
+			$this->log_manual_create_failure( $stage, $service_key );
+			$this->create_errors = array( 'storage_failed:begin_transaction' );
 			return;
 		}
 
 		try {
+			$stage = 'insert_service';
 			$id = $this->services->insert_service( $data );
 			if ( $id <= 0 ) {
 				$this->rollback_create_transaction();
-				$this->create_errors = $this->services->service_key_exists( (string) $data['service_key'] )
+				$this->create_errors = $this->services->service_key_exists( $service_key )
 					? array( 'service_key_duplicate' )
-					: array( 'storage_failed' );
+					: array( 'storage_failed:insert_service' );
+				if ( ! in_array( 'service_key_duplicate', $this->create_errors, true ) ) {
+					$this->log_manual_create_failure( $stage, $service_key );
+				}
 				return;
 			}
+			$new_service_id = $id;
+			$stage = 'read_inserted_service';
 			$service = $this->services->find_by_id( $id );
-			if ( ! $service instanceof DeliveryService || null === $service->id || (string) $data['service_key'] !== $service->service_key ) {
-				$this->rollback_create_transaction();
-				$this->create_errors = array( 'storage_failed' );
+			if ( ! $service instanceof DeliveryService || null === $service->id || $service_key !== $service->service_key ) {
+				$this->rollback_create_transaction_and_cleanup( $new_service_id, $stage, $service_key );
+				$this->create_errors = array( 'storage_failed:read_inserted_service' );
 				return;
 			}
 
+			$stage = 'save_manual_settings';
 			$this->save_manual_delivery_settings( (int) $service->id, true );
+			$stage = 'save_countries';
 			$countries = $this->countries_from_post();
 			$this->countries->replace_countries( (int) $service->id, $countries );
+			$stage = 'save_geography';
 			$this->save_manual_delivery_geography( (int) $service->id, $countries );
+			$stage = 'commit';
 			if ( ! $this->commit_create_transaction() ) {
-				$this->rollback_create_transaction();
-				$this->create_errors = array( 'storage_failed' );
+				$this->rollback_create_transaction_and_cleanup( $new_service_id, $stage, $service_key );
+				$this->create_errors = array( 'storage_failed:commit' );
 				return;
 			}
 			$redirect_url = $this->service_tab_url_by_key( $service->service_key, 'main' );
-		} catch ( \InvalidArgumentException ) {
-			$this->rollback_create_transaction();
+		} catch ( \InvalidArgumentException $exception ) {
+			$this->rollback_create_transaction_and_cleanup( $new_service_id, $stage, $service_key, $exception );
 			$this->create_errors = array( 'manual_settings_invalid' );
-		} catch ( \Throwable ) {
-			$this->rollback_create_transaction();
-			$this->create_errors = array( 'storage_failed' );
+		} catch ( \Throwable $exception ) {
+			$this->rollback_create_transaction_and_cleanup( $new_service_id, $stage, $service_key, $exception );
+			$this->create_errors = array( 'storage_failed:' . $stage );
 		}
 		if ( '' !== $redirect_url ) {
 			$this->clear_delivery_quote_cache();
@@ -1539,6 +1557,57 @@ final class DeliveryServicesAdminPage {
 		global $wpdb;
 
 		$wpdb->query( 'ROLLBACK' );
+	}
+
+	private function rollback_create_transaction_and_cleanup( int $new_service_id, string $stage, string $service_key, ?\Throwable $exception = null ): void {
+		$this->rollback_create_transaction();
+		$this->log_manual_create_failure( $stage, $service_key, $exception );
+
+		if ( $new_service_id <= 0 || ! ( $this->services->find_by_id( $new_service_id ) instanceof DeliveryService ) ) {
+			return;
+		}
+
+		try {
+			$this->cleanup_failed_create_aggregate( $new_service_id );
+		} catch ( \Throwable $cleanup_exception ) {
+			$this->log_manual_create_failure( 'compensating_cleanup', $service_key, $cleanup_exception );
+		}
+	}
+
+	private function cleanup_failed_create_aggregate( int $service_id ): void {
+		$this->manual_pickup_points->clear( $service_id );
+		$this->manual_delivery_weight_ranges->clear( $service_id );
+		$this->manual_delivery_geography->clear( $service_id );
+		$this->countries->delete_countries( $service_id );
+		if ( $this->settings instanceof DeliveryServiceSettingsRepository ) {
+			$this->settings->delete_settings_for_service( $service_id );
+		}
+		$this->services->delete_newly_created_service( $service_id );
+	}
+
+	private function log_manual_create_failure( string $stage, string $service_key, ?\Throwable $exception = null ): void {
+		global $wpdb;
+
+		$context = array(
+			'operation' => 'manual_service_create',
+			'stage' => $stage,
+			'service_key' => $service_key,
+		);
+		if ( null !== $exception ) {
+			$context['exception_class'] = get_class( $exception );
+			$context['exception_message'] = $exception->getMessage();
+		}
+		$last_error = trim( (string) ( $wpdb->last_error ?? '' ) );
+		if ( '' !== $last_error ) {
+			$context['wpdb_last_error'] = $last_error;
+		}
+
+		if ( $this->logger instanceof Logger ) {
+			$this->logger->error( 'Manual service create failed.', $context );
+			return;
+		}
+
+		error_log( '[walls-delivery-calc] error: Manual service create failed. ' . (string) wp_json_encode( $context ) );
 	}
 
 	/**

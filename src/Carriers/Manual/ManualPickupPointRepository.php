@@ -90,6 +90,13 @@ final class ManualPickupPointRepository {
 		$this->replace_normalized_points( $service_id, $normalized );
 	}
 
+	public function clear( int $service_id ): void {
+		$result = $this->wpdb->delete( $this->table(), array( 'service_id' => $service_id ), array( '%d' ) );
+		if ( false === $result ) {
+			throw new RuntimeException( 'Failed to clear manual pickup points.' );
+		}
+	}
+
 	public function to_pickup_point( array $row, DeliveryService $service ): ?PickupPoint {
 		$row = $this->normalize_row( $row );
 		if ( '' === $row['code'] || '' === $row['address'] || '' === $row['country_code'] || '' === $row['region_name'] || '' === $row['location_name'] || ! $row['active'] ) {

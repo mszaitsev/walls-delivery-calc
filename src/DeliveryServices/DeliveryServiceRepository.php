@@ -61,7 +61,14 @@ final class DeliveryServiceRepository {
 		$row = $this->normalize_row( $data, $now );
 		$inserted = $this->wpdb->insert( $this->table(), $row, $this->formats() );
 
-		return true === $inserted ? (int) $this->wpdb->insert_id : 0;
+		return false !== $inserted ? (int) $this->wpdb->insert_id : 0;
+	}
+
+	public function delete_newly_created_service( int $id ): void {
+		$result = $this->wpdb->delete( $this->table(), array( 'id' => $id ), array( '%d' ) );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Failed to delete newly created delivery service.' );
+		}
 	}
 
 	/**
