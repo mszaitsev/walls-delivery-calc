@@ -6,7 +6,7 @@ WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.10 adds global checkout delivery messages on the platform settings page. Administrators can enable an informational WYSIWYG text and an optional promo WYSIWYG text before the delivery sort selector; both are off by default for upgrades. Promo rendering compares an integer kopeck threshold against either the existing full-cart post-discount total or the new minimal WooCommerce-boundary shippable-items total, replaces `{s}` and `{d}` with plain numeric ruble amounts, sanitizes stored/rendered HTML, and refreshes through the normal WooCommerce checkout review lifecycle.
+Current stage: 0.155.10 adds global checkout delivery messages on the platform settings page. Administrators can enable an informational WYSIWYG text and an optional promo WYSIWYG text before the delivery sort selector; both are off by default for upgrades. Promo rendering compares an integer kopeck threshold against either the existing full-cart post-discount total or the new minimal WooCommerce-boundary shippable-items total, replaces `{s}` and `{d}` with plain numeric ruble amounts, sanitizes stored/rendered HTML, and refreshes through the normal WooCommerce checkout review lifecycle. The server emits a valid source table row and the existing checkout DOM enhancement moves messages into the shipping cell before the sort control.
 
 ## Quick Start
 

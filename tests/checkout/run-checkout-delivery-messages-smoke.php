@@ -193,7 +193,7 @@ $admin = new SettingsAdminPage( $settings, new PlatformRuntimeSettings( $setting
 $sanitized = $admin->sanitize_settings(
 	array(
 		CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY => '1',
-		CheckoutDeliveryMessageSettings::INFO_HTML_KEY => '<p><strong>Bold</strong> <em>Italic</em> <u>Under</u> <s>Strike</s> <a href="https://example.test">link</a> <span style="color:#f00">red</span><script>alert(1)</script><a href="javascript:alert(1)">bad</a></p>',
+		CheckoutDeliveryMessageSettings::INFO_HTML_KEY => '<p><strong>Bold</strong> <em>Italic</em> <u>Under</u> <s>Strike</s> <a href="https://example.test">link</a> <span style="color:#ff0000;">red</span><script>alert(1)</script><a href="javascript:alert(1)">bad</a></p><p>Вторая строка</p>Первая строка<br>Вторая строка',
 		CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY => '1',
 		'checkout_delivery_promo_threshold_rub' => '3499.50',
 		CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY => CheckoutDeliveryMessageSettings::BASIS_SHIPPABLE_CART_ITEMS,
@@ -205,7 +205,7 @@ wdc_delivery_messages_assert( true === $sanitized[ CheckoutDeliveryMessageSettin
 wdc_delivery_messages_assert( true === $sanitized[ CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY ], 'Promo enabled must sanitize to true.' );
 wdc_delivery_messages_assert( 349950 === $sanitized[ CheckoutDeliveryMessageSettings::PROMO_THRESHOLD_KOPECKS_KEY ], 'Promo threshold must be stored as kopecks without losing cents.' );
 wdc_delivery_messages_assert( CheckoutDeliveryMessageSettings::BASIS_SHIPPABLE_CART_ITEMS === $sanitized[ CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY ], 'Promo basis must sanitize to canonical machine value.' );
-foreach ( array( '<strong>Bold</strong>', '<em>Italic</em>', '<u>Under</u>', '<s>Strike</s>', 'href="https://example.test"', 'style="color: #f00"' ) as $needle ) {
+foreach ( array( '<strong>Bold</strong>', '<em>Italic</em>', '<u>Under</u>', '<s>Strike</s>', 'href="https://example.test"', 'style="color: #ff0000"', '<p>Вторая строка</p>', '<br>' ) as $needle ) {
 	wdc_delivery_messages_assert( str_contains( $sanitized[ CheckoutDeliveryMessageSettings::INFO_HTML_KEY ], $needle ), 'Sanitizer must preserve safe editor formatting: ' . $needle );
 }
 wdc_delivery_messages_assert( ! str_contains( $sanitized[ CheckoutDeliveryMessageSettings::INFO_HTML_KEY ], '<script' ), 'Sanitizer must strip script tags.' );
@@ -231,7 +231,9 @@ WC()->cart->contents_total = 0.0;
 WC()->cart->shipping_packages = array( array( 'contents_cost' => 0.0 ) );
 $below_zero = wdc_delivery_messages_render( $settings );
 wdc_delivery_messages_assert( str_contains( $below_zero, 'wdc-checkout-delivery-info' ) && str_contains( $below_zero, 'Обычная доставка' ), 'Enabled info block must render before promo.' );
-wdc_delivery_messages_assert( ! str_contains( $below_zero, '<tr' ), 'Checkout delivery messages must render inside the WooCommerce shipping cell instead of adding a nested table row.' );
+wdc_delivery_messages_assert( str_starts_with( $below_zero, '<tr class="wdc-checkout-delivery-messages-row"><th></th><td>' ), 'Checkout delivery messages source markup must be a valid table row for the WooCommerce shipping hook.' );
+wdc_delivery_messages_assert( 1 === substr_count( $below_zero, 'class="wdc-checkout-delivery-messages"' ), 'Source row must contain exactly one delivery messages holder.' );
+wdc_delivery_messages_assert( str_contains( $below_zero, '</td></tr>' ), 'Source row must contain a table cell holder for valid table markup.' );
 wdc_delivery_messages_assert( str_contains( $below_zero, 'wdc-checkout-delivery-promo--below' ) && str_contains( $below_zero, 'От 3500 руб. Добавьте ещё 3500 руб. {x}' ), 'T=0 must render below state with full difference and keep unknown tokens.' );
 
 WC()->cart->contents_total = 3499.0;
@@ -257,6 +259,12 @@ $shippable_below = wdc_delivery_messages_render( $settings );
 wdc_delivery_messages_assert( str_contains( $shippable_below, 'wdc-checkout-delivery-promo--below' ) && str_contains( $shippable_below, 'Добавьте ещё 500 руб.' ), 'shippable_cart_items basis must use shippable package contents_cost aggregate.' );
 
 $settings->set( CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY, CheckoutDeliveryMessageSettings::BASIS_ALL_CART_ITEMS );
+WC()->cart->contents_total = 1990.0;
+$old_below = wdc_delivery_messages_render( $settings );
+wdc_delivery_messages_assert( str_contains( $old_below, 'Добавьте ещё 1510 руб.' ), 'Initial below-threshold render must calculate d=1510 for the stale-state regression.' );
+WC()->cart->contents_total = 3980.0;
+$fresh_reached = wdc_delivery_messages_render( $settings );
+wdc_delivery_messages_assert( str_contains( $fresh_reached, 'wdc-checkout-delivery-promo--reached' ) && ! str_contains( $fresh_reached, '1510' ) && ! str_contains( $fresh_reached, 'wdc-checkout-delivery-promo--below' ), 'Second checkout refresh render must contain only fresh reached state without stale below text.' );
 WC()->cart->contents_total = 3200.0;
 $coupon_aware = wdc_delivery_messages_render( $settings );
 wdc_delivery_messages_assert( str_contains( $coupon_aware, 'wdc-checkout-delivery-promo--below' ) && str_contains( $coupon_aware, 'Добавьте ещё 300 руб.' ), 'Promo must use the typed effective total after coupons, not a raw subtotal.' );
@@ -279,6 +287,7 @@ $admin_html = (string) ob_get_clean();
 wdc_delivery_messages_assert( str_contains( $admin_html, 'Тексты о доставке на checkout' ), 'Platform settings page must render checkout delivery messages section.' );
 foreach ( array( 'wdc_checkout_delivery_info_html', 'wdc_checkout_delivery_promo_below_html', 'wdc_checkout_delivery_promo_reached_html' ) as $editor_id ) {
 	wdc_delivery_messages_assert( isset( $GLOBALS['wdc_test_editors'][ $editor_id ] ), 'Platform settings page must render editor ' . $editor_id . '.' );
+	wdc_delivery_messages_assert( false === ( $GLOBALS['wdc_test_editors'][ $editor_id ]['settings']['teeny'] ?? true ), 'Checkout delivery editors must use the normal TinyMCE toolbar so forecolor is visible.' );
 	wdc_delivery_messages_assert( str_contains( (string) ( $GLOBALS['wdc_test_editors'][ $editor_id ]['settings']['tinymce']['toolbar1'] ?? '' ), 'underline' ), 'Checkout delivery editor toolbar must include underline.' );
 	wdc_delivery_messages_assert( str_contains( (string) ( $GLOBALS['wdc_test_editors'][ $editor_id ]['settings']['tinymce']['toolbar1'] ?? '' ), 'forecolor' ), 'Checkout delivery editor toolbar must include text color.' );
 	wdc_delivery_messages_assert( str_contains( (string) ( $GLOBALS['wdc_test_editors'][ $editor_id ]['settings']['tinymce']['toolbar1'] ?? '' ), 'link' ), 'Checkout delivery editor toolbar must include link controls.' );
@@ -299,8 +308,15 @@ wdc_delivery_messages_assert( false === $roundtrip[ CheckoutDeliveryMessageSetti
 
 $css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
 wdc_delivery_messages_assert( str_contains( $css, '.woocommerce-checkout .woocommerce-checkout-review-order-table tr.woocommerce-shipping-totals.shipping > th' ), 'Checkout heading spacing CSS must be scoped to the checkout shipping row heading.' );
+wdc_delivery_messages_assert( str_contains( $css, 'tr.cart-discount + tr.woocommerce-shipping-totals.shipping > th' ) && str_contains( $css, 'tr.cart-discount + tr.woocommerce-shipping-totals.shipping > td' ), 'Coupon spacing must use an adjacent cart-discount to shipping-row selector.' );
+wdc_delivery_messages_assert( str_contains( $css, '.wdc-checkout-delivery-messages-row' ) && str_contains( $css, 'display: none;' ), 'Source delivery message row must be hidden until JS relocates its content.' );
+wdc_delivery_messages_assert( str_contains( $css, '.wdc-checkout-delivery-info p' ) && str_contains( $css, '.wdc-checkout-delivery-promo p' ) && str_contains( $css, 'margin: 0 0 6px;' ), 'Checkout message CSS must preserve paragraph line structure with compact margins.' );
 wdc_delivery_messages_assert( ! str_contains( $css, "\nh3 {" ) && ! str_contains( $css, "\ntable {" ), 'Checkout spacing CSS must not add generic Woo heading/table overrides.' );
 $sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
-wdc_delivery_messages_assert( str_contains( $sort_js, ".wdc-checkout-delivery-messages" ) && str_contains( $sort_js, 'insertAfter( $messages )' ), 'Checkout sort JS must place the relocated sort selector after delivery messages when they are present.' );
+foreach ( array( 'function relocateDeliveryControls()', 'function relocateDeliveryMessages()', "'.wdc-checkout-delivery-messages-row'", "'.wdc-checkout-delivery-messages'", '.detach()', 'prependTo( $shippingCell )', 'insertAfter( $messages )', "'.wdc-checkout-sort-inline'" ) as $needle ) {
+	wdc_delivery_messages_assert( str_contains( $sort_js, $needle ), 'Checkout JS must contain relocation contract: ' . $needle );
+}
+wdc_delivery_messages_assert( ! str_contains( $sort_js, '.clone(' ), 'Checkout relocation must move nodes instead of cloning them.' );
+wdc_delivery_messages_assert( str_contains( $sort_js, '$existing.length' ), 'Checkout delivery message relocation must be idempotent on repeated calls.' );
 
 echo "Checkout delivery messages smoke passed.\n";

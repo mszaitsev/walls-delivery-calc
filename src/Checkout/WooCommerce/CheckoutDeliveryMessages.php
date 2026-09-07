@@ -34,9 +34,11 @@ final class CheckoutDeliveryMessages {
 			return;
 		}
 
+		echo '<tr class="wdc-checkout-delivery-messages-row"><th></th><td>';
 		echo '<div class="wdc-checkout-delivery-messages">';
 		echo implode( '', $blocks );
 		echo '</div>';
+		echo '</td></tr>';
 	}
 
 	private function info_html(): string {

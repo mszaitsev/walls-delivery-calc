@@ -5,17 +5,50 @@
 		$( document.body ).trigger( 'update_checkout' );
 	} );
 
-	function relocateSortControl() {
-		var $row = $( '.wdc-checkout-sort-row' ).first();
-		var $shippingCell = $( 'tr.woocommerce-shipping-totals.shipping:not(.just_label) > td' ).first();
-		if ( ! $row.length || ! $shippingCell.length || $shippingCell.find( '.wdc-checkout-sort-inline' ).length ) {
+	function shippingCell() {
+		return $( 'tr.woocommerce-shipping-totals.shipping:not(.just_label) > td' ).first();
+	}
+
+	function relocateDeliveryMessages() {
+		var $shippingCell = shippingCell();
+		var $existing = $shippingCell.children( '.wdc-checkout-delivery-messages' ).first();
+		if ( $existing.length ) {
+			return $existing;
+		}
+
+		var $row = $( '.wdc-checkout-delivery-messages-row' ).first();
+		if ( ! $row.length || ! $shippingCell.length ) {
+			return $();
+		}
+
+		var $messages = $row.find( '.wdc-checkout-delivery-messages' ).first().detach();
+		if ( ! $messages.length ) {
+			return $();
+		}
+
+		$row.addClass( 'wdc-checkout-delivery-messages-row--relocated' );
+		$messages.prependTo( $shippingCell );
+
+		return $messages;
+	}
+
+	function relocateSortControl( $messages ) {
+		var $shippingCell = shippingCell();
+		var $inline = $shippingCell.children( '.wdc-checkout-sort-inline' ).first();
+		if ( $inline.length ) {
+			if ( $messages && $messages.length ) {
+				$inline.insertAfter( $messages );
+			}
 			return;
 		}
 
+		var $row = $( '.wdc-checkout-sort-row' ).first();
+		if ( ! $row.length || ! $shippingCell.length ) {
+			return;
+		}
 		var $select = $row.find( '.wdc-checkout-sort' ).first().detach();
 		var label = $.trim( $row.find( 'th' ).first().text() || '' );
-		var $messages = $shippingCell.find( '.wdc-checkout-delivery-messages' ).last();
-		var $inline = $( '<div class="wdc-checkout-sort-inline" />' )
+		$inline = $( '<div class="wdc-checkout-sort-inline" />' )
 			.append( $( '<span class="wdc-checkout-sort-inline__label" />' ).text( label ) )
 			.append( $select );
 
@@ -27,8 +60,13 @@
 		$inline.prependTo( $shippingCell );
 	}
 
-	$( relocateSortControl );
-	$( document.body ).on( 'updated_checkout', relocateSortControl );
+	function relocateDeliveryControls() {
+		var $messages = relocateDeliveryMessages();
+		relocateSortControl( $messages );
+	}
+
+	$( relocateDeliveryControls );
+	$( document.body ).on( 'updated_checkout', relocateDeliveryControls );
 
 	$( document.body ).on( 'change', '.wdc-platform-pickup-point', function () {
 		var $select = $( this );

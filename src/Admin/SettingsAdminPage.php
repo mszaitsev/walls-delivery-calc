@@ -299,7 +299,7 @@ final class SettingsAdminPage {
 			'textarea_name' => $name,
 			'textarea_rows' => 5,
 			'media_buttons' => false,
-			'teeny'         => true,
+			'teeny'         => false,
 			'quicktags'     => false,
 			'tinymce'       => array(
 				'toolbar1' => 'bold,italic,underline,strikethrough,forecolor,link,unlink,removeformat',
