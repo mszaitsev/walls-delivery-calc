@@ -73,6 +73,20 @@ final class ManualDeliverySettings {
 	 * @param array<string,mixed> $values
 	 */
 	public function save_pricing( int $service_id, array $values ): void {
+		$this->write_pricing( $service_id, $values, false );
+	}
+
+	/**
+	 * @param array<string,mixed> $values
+	 */
+	public function save_pricing_in_current_transaction( int $service_id, array $values ): void {
+		$this->write_pricing( $service_id, $values, true );
+	}
+
+	/**
+	 * @param array<string,mixed> $values
+	 */
+	private function write_pricing( int $service_id, array $values, bool $strict ): void {
 		$mode = $this->normalize_pricing_mode( (string) ( $values['pricing_mode'] ?? self::PRICING_MODE_FLAT ) );
 		if ( '' === $mode ) {
 			throw new \InvalidArgumentException( 'manual_pricing_mode_invalid' );
@@ -98,7 +112,7 @@ final class ManualDeliverySettings {
 			throw new \InvalidArgumentException( 'manual_price_per_kg_invalid' );
 		}
 
-		$this->settings->set_setting(
+		$this->set_setting(
 			$service_id,
 			self::PRICING_SETTING_KEY,
 			array(
@@ -108,7 +122,8 @@ final class ManualDeliverySettings {
 				'minimum_price_kopecks' => $minimum,
 				'billing_weight_step_g' => $step,
 			),
-			'json'
+			'json',
+			$strict
 		);
 	}
 
@@ -131,17 +146,26 @@ final class ManualDeliverySettings {
 	}
 
 	public function save_delivery_days( int $service_id, mixed $min_days, mixed $max_days ): void {
+		$this->write_delivery_days( $service_id, $min_days, $max_days, false );
+	}
+
+	public function save_delivery_days_in_current_transaction( int $service_id, mixed $min_days, mixed $max_days ): void {
+		$this->write_delivery_days( $service_id, $min_days, $max_days, true );
+	}
+
+	private function write_delivery_days( int $service_id, mixed $min_days, mixed $max_days, bool $strict ): void {
 		$min = '' === trim( (string) $min_days ) ? null : max( 0, (int) $min_days );
 		$max = '' === trim( (string) $max_days ) ? null : max( 0, (int) $max_days );
 		if ( null !== $min && null !== $max && $min > $max ) {
 			$max = $min;
 		}
 
-		$this->settings->set_setting(
+		$this->set_setting(
 			$service_id,
 			self::DELIVERY_DAYS_SETTING_KEY,
 			array( 'min_days' => $min, 'max_days' => $max ),
-			'json'
+			'json',
+			$strict
 		);
 	}
 
@@ -166,6 +190,14 @@ final class ManualDeliverySettings {
 	}
 
 	public function save_delivery_type( int $service_id, string $type, string $label = '' ): void {
+		$this->write_delivery_type( $service_id, $type, $label, false );
+	}
+
+	public function save_delivery_type_in_current_transaction( int $service_id, string $type, string $label = '' ): void {
+		$this->write_delivery_type( $service_id, $type, $label, true );
+	}
+
+	private function write_delivery_type( int $service_id, string $type, string $label, bool $strict ): void {
 		$type = $this->normalize_delivery_type( $type );
 		if ( '' === $type ) {
 			throw new \InvalidArgumentException( 'manual_delivery_type_invalid' );
@@ -175,14 +207,15 @@ final class ManualDeliverySettings {
 			throw new \InvalidArgumentException( 'manual_delivery_type_label_required' );
 		}
 
-		$this->settings->set_setting(
+		$this->set_setting(
 			$service_id,
 			self::DELIVERY_TYPE_SETTING_KEY,
 			array(
 				'type' => $type,
 				'label' => $label,
 			),
-			'json'
+			'json',
+			$strict
 		);
 	}
 
@@ -251,5 +284,14 @@ final class ManualDeliverySettings {
 		}
 
 		return $kopecks;
+	}
+
+	private function set_setting( int $service_id, string $key, mixed $value, string $format, bool $strict ): void {
+		if ( $strict ) {
+			$this->settings->set_setting_in_current_transaction( $service_id, $key, $value, $format );
+			return;
+		}
+
+		$this->settings->set_setting( $service_id, $key, $value, $format );
 	}
 }

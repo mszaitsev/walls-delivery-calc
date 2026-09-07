@@ -29,6 +29,14 @@ final class DeliveryServiceSettingsRepository {
 	}
 
 	public function set_setting( int $service_id, string $key, mixed $value, string $format = 'json', bool $autoload = false ): void {
+		$this->write_setting( $service_id, $key, $value, $format, $autoload, false );
+	}
+
+	public function set_setting_in_current_transaction( int $service_id, string $key, mixed $value, string $format = 'json', bool $autoload = false ): void {
+		$this->write_setting( $service_id, $key, $value, $format, $autoload, true );
+	}
+
+	private function write_setting( int $service_id, string $key, mixed $value, string $format, bool $autoload, bool $strict ): void {
 		$format = in_array( $format, array( 'json', 'string', 'number', 'bool' ), true ) ? $format : 'json';
 		$row = array(
 			'service_id' => $service_id,
@@ -43,15 +51,28 @@ final class DeliveryServiceSettingsRepository {
 		);
 
 		if ( null !== $existing ) {
-			$this->wpdb->update( $this->table(), $row, array( 'id' => (int) $existing ), array( '%d', '%s', '%s', '%s', '%d', '%s' ), array( '%d' ) );
+			$result = $this->wpdb->update( $this->table(), $row, array( 'id' => (int) $existing ), array( '%d', '%s', '%s', '%s', '%d', '%s' ), array( '%d' ) );
+			if ( $strict && false === $result ) {
+				throw new \RuntimeException( 'Failed to update delivery service setting.' );
+			}
 			return;
 		}
 
-		$this->wpdb->insert( $this->table(), $row, array( '%d', '%s', '%s', '%s', '%d', '%s' ) );
+		$result = $this->wpdb->insert( $this->table(), $row, array( '%d', '%s', '%s', '%s', '%d', '%s' ) );
+		if ( $strict && false === $result ) {
+			throw new \RuntimeException( 'Failed to insert delivery service setting.' );
+		}
 	}
 
 	public function delete_setting( int $service_id, string $key ): void {
 		$this->wpdb->delete( $this->table(), array( 'service_id' => $service_id, 'setting_key' => $key ), array( '%d', '%s' ) );
+	}
+
+	public function delete_settings_for_service( int $service_id ): void {
+		$result = $this->wpdb->delete( $this->table(), array( 'service_id' => $service_id ), array( '%d' ) );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Failed to delete delivery service settings.' );
+		}
 	}
 
 	public function delivery_days_are_working( int $service_id ): bool {

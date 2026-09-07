@@ -18,6 +18,62 @@ function current_time( string $type ): string { return '2026-05-25 12:00:00'; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
+function is_admin(): bool { return true; }
+function current_user_can( string $capability ): bool { return (bool) ( $GLOBALS['wdc_ds_current_user_can'] ?? true ); }
+function check_admin_referer( string $action ): bool {
+	if ( false === ( $GLOBALS['wdc_ds_nonce_valid'] ?? true ) ) {
+		throw new WdcDsNonceException( 'invalid_nonce' );
+	}
+	return true;
+}
+function wp_nonce_field( string|int $action = -1, string $name = '_wpnonce', bool $referer = true, bool $display = true ): string {
+	$field = '<input type="hidden" name="' . esc_attr( $name ) . '" value="nonce">';
+	if ( $display ) {
+		echo $field;
+	}
+	return $field;
+}
+function admin_url( string $path = '' ): string { return 'https://example.test/wp-admin/' . ltrim( $path, '/' ); }
+function add_query_arg( string|array $key, mixed $value = null, string $url = '' ): string {
+	$args = is_array( $key ) ? $key : array( $key => $value );
+	$separator = str_contains( $url, '?' ) ? '&' : '?';
+	return $url . $separator . http_build_query( $args );
+}
+function wp_safe_redirect( string $location ): bool { throw new WdcDsRedirectException( $location ); }
+function __( string $text, string $domain = '' ): string { return $text; }
+function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function esc_attr__( string $text, string $domain = '' ): string { return $text; }
+function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_url( mixed $text ): string { return esc_attr( $text ); }
+function esc_textarea( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_NOQUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
+	$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
+function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
+	$result = (string) $checked === (string) $current ? ' checked="checked"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
+function submit_button( string $text = 'Save Changes', string $type = 'primary' ): void { echo '<p class="submit"><button class="button button-' . esc_attr( $type ) . '" type="submit">' . esc_html( $text ) . '</button></p>'; }
+function sanitize_key( mixed $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $key ) ) ?? ''; }
+function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_textarea_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function wp_unslash( mixed $value ): mixed { return $value; }
+
+final class WdcDsRedirectException extends RuntimeException {
+	public function __construct( public readonly string $location ) {
+		parent::__construct( $location );
+	}
+}
+
+final class WdcDsNonceException extends RuntimeException {}
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -30,19 +86,88 @@ if ( ! class_exists( 'wpdb' ) ) {
 		/** @var array<int,array<string,mixed>> */
 		public array $countries = array();
 		/** @var array<int,array<string,mixed>> */
+		public array $manual_regions = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $manual_locations = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $manual_weight_ranges = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $manual_pickup_points = array();
+		/** @var array<int,array<string,mixed>> */
 		public array $rules = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $conditions = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $queries = array();
 		public bool $fail_next_query = false;
+		public ?string $fail_next_query_contains = null;
+		public ?string $fail_next_insert_table_contains = null;
+		public ?string $fail_next_update_table_contains = null;
+		public ?string $race_duplicate_key_on_failed_service_insert = null;
+		public bool $rollback_preserves_transaction_writes = false;
+		/** @var array<int,string> */
+		public array $insert_attempts = array();
+		/** @var array<int,string> */
+		public array $delete_attempts = array();
+		/** @var array<string,mixed>|null */
+		private ?array $transaction_snapshot = null;
+		/** @var array<string,mixed>|null */
+		private ?array $pending_race_duplicate_row = null;
 		private int $condition_insert_id = 0;
 
 		public function get_charset_collate(): string { return 'DEFAULT CHARSET=utf8mb4'; }
 		public function query( string $query ): bool {
+			$trimmed = trim( $query );
 			$this->queries[] = array( 'query' => $query );
+			if ( 'START TRANSACTION' === $trimmed ) {
+				$this->transaction_snapshot = array(
+					'insert_id' => $this->insert_id,
+					'condition_insert_id' => $this->condition_insert_id,
+					'services' => $this->services,
+					'settings' => $this->settings,
+					'countries' => $this->countries,
+					'manual_regions' => $this->manual_regions,
+					'manual_locations' => $this->manual_locations,
+					'manual_weight_ranges' => $this->manual_weight_ranges,
+					'manual_pickup_points' => $this->manual_pickup_points,
+					'rules' => $this->rules,
+					'conditions' => $this->conditions,
+				);
+				return true;
+			}
+			if ( 'ROLLBACK' === $trimmed ) {
+				if ( null !== $this->transaction_snapshot && ! $this->rollback_preserves_transaction_writes ) {
+					$this->insert_id = (int) $this->transaction_snapshot['insert_id'];
+					$this->condition_insert_id = (int) $this->transaction_snapshot['condition_insert_id'];
+					$this->services = $this->transaction_snapshot['services'];
+					$this->settings = $this->transaction_snapshot['settings'];
+					$this->countries = $this->transaction_snapshot['countries'];
+					$this->manual_regions = $this->transaction_snapshot['manual_regions'];
+					$this->manual_locations = $this->transaction_snapshot['manual_locations'];
+					$this->manual_weight_ranges = $this->transaction_snapshot['manual_weight_ranges'];
+					$this->manual_pickup_points = $this->transaction_snapshot['manual_pickup_points'];
+					$this->rules = $this->transaction_snapshot['rules'];
+					$this->conditions = $this->transaction_snapshot['conditions'];
+				}
+				$this->transaction_snapshot = null;
+				if ( null !== $this->pending_race_duplicate_row ) {
+					$row = $this->pending_race_duplicate_row;
+					$row['id'] = ++$this->insert_id;
+					$this->services[] = $row;
+					$this->pending_race_duplicate_row = null;
+				}
+				return true;
+			}
+			if ( 'COMMIT' === $trimmed ) {
+				$this->transaction_snapshot = null;
+				return true;
+			}
 			if ( $this->fail_next_query ) {
 				$this->fail_next_query = false;
+				return false;
+			}
+			if ( null !== $this->fail_next_query_contains && str_contains( $query, $this->fail_next_query_contains ) ) {
+				$this->fail_next_query_contains = null;
 				return false;
 			}
 			if ( str_contains( $query, 'wdc_delivery_service_countries' ) && str_starts_with( strtoupper( trim( $query ) ), 'DELETE ' ) ) {
@@ -59,12 +184,34 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 			return $query;
 		}
-		public function insert( string $table, array $data, array $format = array() ): bool {
+		public function insert( string $table, array $data, array $format = array() ): int|false {
+			$this->insert_attempts[] = $table;
+			if (
+				null !== $this->race_duplicate_key_on_failed_service_insert
+				&& str_contains( $table, 'wdc_delivery_services' )
+				&& (string) ( $data['service_key'] ?? '' ) === $this->race_duplicate_key_on_failed_service_insert
+			) {
+				$this->pending_race_duplicate_row = array_merge( $data, array( 'deleted' => 0 ) );
+				$this->race_duplicate_key_on_failed_service_insert = null;
+				return false;
+			}
+			if ( null !== $this->fail_next_insert_table_contains && str_contains( $table, $this->fail_next_insert_table_contains ) ) {
+				$this->fail_next_insert_table_contains = null;
+				return false;
+			}
 			$data['id'] = ++$this->insert_id;
 			if ( str_contains( $table, 'wdc_delivery_service_settings' ) ) {
 				$this->settings[] = $data;
 			} elseif ( str_contains( $table, 'wdc_delivery_service_countries' ) ) {
 				$this->countries[] = $data;
+			} elseif ( str_contains( $table, 'wdc_manual_delivery_regions' ) ) {
+				$this->manual_regions[] = $data;
+			} elseif ( str_contains( $table, 'wdc_manual_delivery_locations' ) ) {
+				$this->manual_locations[] = $data;
+			} elseif ( str_contains( $table, 'wdc_manual_delivery_weight_ranges' ) ) {
+				$this->manual_weight_ranges[] = $data;
+			} elseif ( str_contains( $table, 'wdc_manual_delivery_pickup_points' ) ) {
+				$this->manual_pickup_points[] = $data;
 			} elseif ( str_contains( $table, 'wdc_rule_conditions' ) ) {
 				$data['id'] = ++$this->condition_insert_id;
 				$this->conditions[] = $data;
@@ -73,9 +220,13 @@ if ( ! class_exists( 'wpdb' ) ) {
 			} elseif ( str_contains( $table, 'wdc_delivery_services' ) ) {
 				$this->services[] = $data;
 			}
-			return true;
+			return 1;
 		}
 		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			if ( null !== $this->fail_next_update_table_contains && str_contains( $table, $this->fail_next_update_table_contains ) ) {
+				$this->fail_next_update_table_contains = null;
+				return false;
+			}
 			$rows =& $this->rows_for_table( $table );
 			foreach ( $rows as $index => $row ) {
 				$matches = true;
@@ -89,6 +240,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return true;
 		}
 		public function delete( string $table, array $where, array $format = array() ): bool {
+			$this->delete_attempts[] = $table;
 			$rows =& $this->rows_for_table( $table );
 			$rows = array_values(
 				array_filter(
@@ -105,7 +257,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 			);
 			return true;
 		}
-		public function replace( string $table, array $data, array $format = array() ): bool {
+		public function replace( string $table, array $data, array $format = array() ): int|false {
 			$rows =& $this->rows_for_table( $table );
 			foreach ( $rows as $index => $row ) {
 				if (
@@ -114,7 +266,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 					&& (string) ( $row['setting_key'] ?? '' ) === (string) ( $data['setting_key'] ?? '' )
 				) {
 					$rows[ $index ] = array_merge( $row, $data );
-					return true;
+					return 1;
 				}
 				if (
 					str_contains( $table, 'wdc_delivery_service_countries' )
@@ -122,7 +274,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 					&& (string) ( $row['country_code'] ?? '' ) === (string) ( $data['country_code'] ?? '' )
 				) {
 					$rows[ $index ] = array_merge( $row, $data );
-					return true;
+					return 1;
 				}
 			}
 			return $this->insert( $table, $data, $format );
@@ -235,6 +387,18 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( str_contains( $table, 'wdc_delivery_service_countries' ) ) {
 				return $this->countries;
 			}
+			if ( str_contains( $table, 'wdc_manual_delivery_regions' ) ) {
+				return $this->manual_regions;
+			}
+			if ( str_contains( $table, 'wdc_manual_delivery_locations' ) ) {
+				return $this->manual_locations;
+			}
+			if ( str_contains( $table, 'wdc_manual_delivery_weight_ranges' ) ) {
+				return $this->manual_weight_ranges;
+			}
+			if ( str_contains( $table, 'wdc_manual_delivery_pickup_points' ) ) {
+				return $this->manual_pickup_points;
+			}
 			if ( str_contains( $table, 'wdc_rule_conditions' ) ) {
 				return $this->conditions;
 			}
@@ -296,6 +460,10 @@ function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyRepository;
+use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRangeRepository;
+use WallsShop\WDC\Carriers\Manual\ManualPickupPointRepository;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
@@ -311,6 +479,7 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
+use WallsShop\WDC\DeliveryServices\Application\DeliveryServiceKeyRenameService;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
@@ -318,6 +487,8 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
@@ -339,6 +510,66 @@ wdc_ds_assert( count( $GLOBALS['wdc_db_delta'] ?? array() ) === 3, 'Delivery ser
 $services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 $settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
 $countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+
+function wdc_ds_admin_page( DeliveryServiceRepository $services, DeliveryServiceCountryRepository $countries, DeliveryServiceSettingsRepository $settings, RuleRepository $rules ): DeliveryServicesAdminPage {
+	$reflection = new ReflectionClass( DeliveryServicesAdminPage::class );
+	$admin = $reflection->newInstanceWithoutConstructor();
+	$values = array(
+		'services' => $services,
+		'countries' => $countries,
+		'rules' => $rules,
+		'global_settings' => new SettingsRepository(),
+		'manual_delivery_settings' => new ManualDeliverySettings( $settings ),
+		'manual_delivery_geography' => new ManualDeliveryGeographyRepository( $GLOBALS['wpdb'] ),
+		'manual_delivery_weight_ranges' => new ManualDeliveryWeightRangeRepository( $GLOBALS['wpdb'] ),
+		'manual_pickup_points' => new ManualPickupPointRepository( $GLOBALS['wpdb'] ),
+		'delivery_service_key_rename' => new DeliveryServiceKeyRenameService( $services, $rules ),
+		'shop_processing_queue_counter' => new ShopProcessingOrderQueueCounter( new Logger(), static fn( array $statuses ): int => 0 ),
+		'settings' => $settings,
+		'delivery_quote_cache_manager' => null,
+		'locations' => null,
+	);
+	foreach ( $values as $property => $value ) {
+		$reflection_property = $reflection->getProperty( $property );
+		$reflection_property->setAccessible( true );
+		$reflection_property->setValue( $admin, $value );
+	}
+
+	return $admin;
+}
+
+function wdc_ds_render_admin_page( DeliveryServicesAdminPage $admin, array $get = array() ): string {
+	$_GET = $get;
+	ob_start();
+	$admin->render_page();
+	return (string) ob_get_clean();
+}
+
+function wdc_ds_post_create( DeliveryServicesAdminPage $admin, array $post ): ?string {
+	$_POST = array_merge( array( 'wdc_delivery_services_action' => 'create' ), $post );
+	try {
+		$admin->handle_actions();
+	} catch ( WdcDsRedirectException $exception ) {
+		return $exception->location;
+	}
+
+	return null;
+}
+
+/** @return array<int,string> */
+function wdc_ds_queries_since( wpdb $db, int $offset ): array {
+	return array_values( array_map( static fn ( array $row ): string => (string) ( $row['query'] ?? '' ), array_slice( $db->queries, $offset ) ) );
+}
+
+function wdc_ds_contains_query( array $queries, string $needle ): bool {
+	foreach ( $queries as $query ) {
+		if ( str_contains( $query, $needle ) ) {
+			return true;
+		}
+	}
+
+	return false;
+}
 
 $rp = $services->ensure_russian_post_service();
 wdc_ds_assert( RussianPostSettings::SERVICE_KEY === $rp->service_key, 'Russian Post service must be auto-created.' );
@@ -471,6 +702,54 @@ wdc_ds_assert( 'https://example.test' === $settings->get_setting( $custom_id, 'e
 wdc_ds_assert( 1000 === $settings->all_settings( $custom_id )['limits']['max_weight_g'], 'Settings repository must read JSON values.' );
 $settings->delete_setting( $custom_id, 'endpoint' );
 wdc_ds_assert( null === $settings->get_setting( $custom_id, 'endpoint' ), 'Settings repository must delete values.' );
+
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_service_settings';
+$ordinary_insert_threw = false;
+try {
+	$settings->set_setting( $custom_id, 'ordinary_insert_failure', 'value', 'string' );
+} catch ( RuntimeException ) {
+	$ordinary_insert_threw = true;
+}
+wdc_ds_assert( ! $ordinary_insert_threw && null === $settings->get_setting( $custom_id, 'ordinary_insert_failure' ), 'Ordinary set_setting insert failure must keep baseline no-throw behavior.' );
+$GLOBALS['wpdb']->fail_next_update_table_contains = 'wdc_delivery_service_settings';
+$ordinary_update_threw = false;
+try {
+	$settings->set_setting( $custom_id, 'limits', array( 'max_weight_g' => 2000 ) );
+} catch ( RuntimeException ) {
+	$ordinary_update_threw = true;
+}
+wdc_ds_assert( ! $ordinary_update_threw && 1000 === $settings->all_settings( $custom_id )['limits']['max_weight_g'], 'Ordinary set_setting update failure must keep baseline no-throw behavior.' );
+$settings->set_setting_in_current_transaction( $custom_id, 'strict_success', 'ok', 'string' );
+wdc_ds_assert( 'ok' === $settings->get_setting( $custom_id, 'strict_success' ), 'Strict set_setting_in_current_transaction must write successfully when storage succeeds.' );
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_service_settings';
+$strict_insert_threw = false;
+try {
+	$settings->set_setting_in_current_transaction( $custom_id, 'strict_insert_failure', 'value', 'string' );
+} catch ( RuntimeException ) {
+	$strict_insert_threw = true;
+}
+wdc_ds_assert( $strict_insert_threw, 'Strict set_setting_in_current_transaction insert failure must throw.' );
+$GLOBALS['wpdb']->fail_next_update_table_contains = 'wdc_delivery_service_settings';
+$strict_update_threw = false;
+try {
+	$settings->set_setting_in_current_transaction( $custom_id, 'strict_success', 'changed', 'string' );
+} catch ( RuntimeException ) {
+	$strict_update_threw = true;
+}
+wdc_ds_assert( $strict_update_threw && 'ok' === $settings->get_setting( $custom_id, 'strict_success' ), 'Strict set_setting_in_current_transaction update failure must throw without changing the stored value.' );
+
+$edit_settings_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$edit_settings_method = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->getMethod( 'save_manual_delivery_settings' );
+$edit_settings_method->setAccessible( true );
+$_POST = array( 'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'manual_flat_price_rub' => '111' );
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_service_settings';
+$edit_path_threw = false;
+try {
+	$edit_settings_method->invoke( $edit_settings_admin, $custom_id, false );
+} catch ( RuntimeException ) {
+	$edit_path_threw = true;
+}
+wdc_ds_assert( ! $edit_path_threw, 'Existing edit/save manual settings path must use ordinary set_setting semantics.' );
 
 $countries->replace_countries( $custom_id, array( 'us', 'DE', 'bad', 'US' ) );
 wdc_ds_assert( array( 'DE', 'US' ) === $countries->countries( $custom_id ), 'Country repository must normalize, sort and de-duplicate country codes.' );
@@ -690,6 +969,213 @@ $processed_fallback = $manager->post_process_rate(
 wdc_ds_assert( 0 === $processed_fallback->price->get_kopecks() && empty( $processed_fallback->meta['minimum_price_applied'] ) && empty( $processed_fallback->meta['round_up_applied'] ), 'Service post-processing must not change fallback price.' );
 $countries->delete_countries( $custom_id );
 wdc_ds_assert( array() === $countries->countries( $custom_id ), 'Country repository must delete countries.' );
+
+$create_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$list_html = wdc_ds_render_admin_page( $create_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG ) );
+wdc_ds_assert( str_contains( $list_html, 'Создать новую службу' ) && str_contains( $list_html, 'button button-primary' ) && str_contains( $list_html, 'action=create' ), 'Delivery Services list page must render a primary create button.' );
+wdc_ds_assert( ! str_contains( $list_html, 'value="save"><input type="hidden" name="id" value="0"' ) && ! str_contains( $list_html, 'Новая служба' ), 'Delivery Services list page must not render the inline create form.' );
+$create_html = wdc_ds_render_admin_page( $create_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( str_contains( $create_html, 'Создание службы доставки' ) && str_contains( $create_html, 'name="wdc_delivery_services_action" value="create"' ), 'Create route must render the manual service create form.' );
+wdc_ds_assert( str_contains( $create_html, 'Service key' ) && str_contains( $create_html, 'Название' ) && str_contains( $create_html, ManualDeliverySettings::CARRIER_KEY ) && str_contains( $create_html, DeliveryService::TYPE_MANUAL ), 'Create form must keep the manual service creation fields.' );
+wdc_ds_assert( 1 === substr_count( $create_html, 'name="service_key"' ), 'Create form must render exactly one service_key successful control.' );
+wdc_ds_assert( str_contains( $create_html, 'Используется как технический идентификатор' ), 'Create form must explain the service key contract.' );
+wdc_ds_assert( str_contains( $create_html, 'Отмена' ) && str_contains( $create_html, 'admin.php?page=' . DeliveryServicesAdminPage::MENU_SLUG ), 'Create form must render a Cancel link back to the list page.' );
+
+$manual_create_count = count( $GLOBALS['wpdb']->services );
+$success_query_offset = count( $GLOBALS['wpdb']->queries );
+$redirect = wdc_ds_post_create(
+	$create_admin,
+	array(
+		'service_key' => 'manual_local',
+		'title' => 'Manual Local',
+		'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+		'countries' => 'RU,BY',
+		'minimum_price_rub' => '2',
+		'sort_order' => '77',
+		'enabled' => '1',
+		'use_default_rules_when_no_service_rules' => '1',
+		'round_up_to_ruble' => '1',
+		'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT,
+		'manual_flat_price_rub' => '350',
+		'manual_delivery_min_days' => '1',
+		'manual_delivery_max_days' => '3',
+	)
+);
+$manual_local = $services->find_by_service_key( 'manual_local' );
+wdc_ds_assert( $manual_local instanceof DeliveryService && ManualDeliverySettings::CARRIER_KEY === $manual_local->carrier_key && DeliveryService::TYPE_MANUAL === $manual_local->service_type, 'Valid manual service create must persist a manual DeliveryService.' );
+wdc_ds_assert( null !== $redirect && str_contains( $redirect, 'page=' . DeliveryServicesAdminPage::MENU_SLUG ) && str_contains( $redirect, 'service=manual_local' ) && str_contains( $redirect, 'tab=main' ), 'Successful create must redirect to the new service edit page.' );
+wdc_ds_assert( count( $GLOBALS['wpdb']->services ) === $manual_create_count + 1, 'Successful create must insert exactly one service.' );
+$success_queries = wdc_ds_queries_since( $GLOBALS['wpdb'], $success_query_offset );
+wdc_ds_assert( wdc_ds_contains_query( $success_queries, 'START TRANSACTION' ) && wdc_ds_contains_query( $success_queries, 'COMMIT' ) && ! wdc_ds_contains_query( $success_queries, 'ROLLBACK' ), 'Successful create must wrap persistence in BEGIN/COMMIT without rollback.' );
+
+$duplicate_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$duplicate_query_offset = count( $GLOBALS['wpdb']->queries );
+$duplicate_redirect = wdc_ds_post_create( $duplicate_admin, array( 'service_key' => 'manual_local', 'title' => 'Duplicate Manual', 'minimum_price_rub' => '5' ) );
+$duplicate_html = wdc_ds_render_admin_page( $duplicate_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $duplicate_redirect && str_contains( $duplicate_html, 'Service key уже используется другой службой доставки.' ) && str_contains( $duplicate_html, 'Duplicate Manual' ) && str_contains( $duplicate_html, 'manual_local' ), 'Duplicate manual key must stay on create screen with submitted values.' );
+wdc_ds_assert( count( $GLOBALS['wpdb']->services ) === $manual_create_count + 1, 'Duplicate manual key must not create a service.' );
+wdc_ds_assert( ! wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], $duplicate_query_offset ), 'START TRANSACTION' ), 'Precheck duplicate must fail before starting a transaction.' );
+$changed_key_redirect = wdc_ds_post_create( $duplicate_admin, array( 'service_key' => 'manual_after_duplicate', 'title' => 'Manual After Duplicate', 'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'manual_flat_price_rub' => '125' ) );
+wdc_ds_assert( null !== $changed_key_redirect && str_contains( $changed_key_redirect, 'service=manual_after_duplicate' ) && $services->find_by_service_key( 'manual_after_duplicate' ) instanceof DeliveryService, 'Second create POST after a duplicate error must validate the changed service_key from the new request.' );
+
+$fresh_unique_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$fresh_unique_redirect = wdc_ds_post_create( $fresh_unique_admin, array( 'service_key' => 'manual_fresh_unique', 'title' => 'Manual Fresh Unique', 'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'manual_flat_price_rub' => '140' ) );
+wdc_ds_assert( null !== $fresh_unique_redirect && str_contains( $fresh_unique_redirect, 'service=manual_fresh_unique' ) && $services->find_by_service_key( 'manual_fresh_unique' ) instanceof DeliveryService, 'Fresh unique manual service create must succeed with the real wpdb insert int-return contract.' );
+
+$builtin_duplicate_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( null === wdc_ds_post_create( $builtin_duplicate_admin, array( 'service_key' => CdekSettings::SERVICE_KEY, 'title' => 'Duplicate CDEK' ) ), 'Duplicate builtin/carrier key must not redirect as successful create.' );
+wdc_ds_assert( str_contains( wdc_ds_render_admin_page( $builtin_duplicate_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) ), 'Service key уже используется другой службой доставки.' ), 'Duplicate builtin/carrier key must render a clear error.' );
+
+$main_wpdb = $GLOBALS['wpdb'];
+$GLOBALS['wpdb'] = new wpdb();
+$reserved_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$reserved_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$reserved_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$reserved_admin = wdc_ds_admin_page( $reserved_services, $reserved_countries, $reserved_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( null === $reserved_services->find_by_service_key( 'self_pickup' ), 'Reserved self_pickup service row must be absent before reserved-key create validation.' );
+wdc_ds_assert( null === wdc_ds_post_create( $reserved_admin, array( 'service_key' => 'self_pickup', 'title' => 'Reserved Self Pickup' ) ), 'Reserved predefined key without a row must be rejected.' );
+wdc_ds_assert( str_contains( wdc_ds_render_admin_page( $reserved_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) ), 'Service key уже используется другой службой доставки.' ), 'Reserved predefined key must render the duplicate-key error.' );
+$GLOBALS['wpdb'] = $main_wpdb;
+
+$collision_id = $services->create_service( array( 'service_key' => 'manual_collision', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Manual Collision', 'deleted' => 0 ) );
+$collision_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( $services->service_key_exists( 'manual_collision' ), 'Repository uniqueness lookup must see the seeded collision key.' );
+wdc_ds_assert( null === wdc_ds_post_create( $collision_admin, array( 'service_key' => 'Manual_Collision', 'title' => 'Normalized Collision' ) ), 'Normalized service key collision must be rejected after sanitize_key().' );
+wdc_ds_assert( null !== $collision_id && str_contains( wdc_ds_render_admin_page( $collision_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) ), 'manual_collision' ), 'Normalized collision error screen must preserve the canonical sanitized key.' );
+
+$invalid_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( null === wdc_ds_post_create( $invalid_admin, array( 'service_key' => '!!!', 'title' => 'Invalid Key', 'minimum_price_rub' => '9' ) ), 'Invalid service key must not create a service.' );
+$invalid_html = wdc_ds_render_admin_page( $invalid_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( str_contains( $invalid_html, 'Укажите Service key.' ) && str_contains( $invalid_html, 'Invalid Key' ) && str_contains( $invalid_html, 'value="9"' ), 'Invalid-key error must preserve other submitted values.' );
+
+$soft_deleted_id = $services->create_service( array( 'service_key' => 'manual_soft_deleted', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Soft Deleted Manual', 'deleted' => 0 ) );
+$services->soft_delete_service( $soft_deleted_id );
+wdc_ds_assert( null === $services->find_by_service_key( 'manual_soft_deleted' ) && $services->service_key_exists( 'manual_soft_deleted' ), 'Soft-deleted manual service key must remain reserved by repository uniqueness.' );
+$soft_deleted_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( null === wdc_ds_post_create( $soft_deleted_admin, array( 'service_key' => 'manual_soft_deleted', 'title' => 'Reuse Soft Deleted' ) ), 'Soft-deleted service key must be rejected on create.' );
+
+$capability_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wdc_ds_current_user_can'] = false;
+$before_denied = count( $GLOBALS['wpdb']->services );
+wdc_ds_assert( null === wdc_ds_post_create( $capability_admin, array( 'service_key' => 'manual_denied', 'title' => 'Denied' ) ), 'Denied capability must not create or redirect.' );
+wdc_ds_assert( $before_denied === count( $GLOBALS['wpdb']->services ), 'Denied capability must leave services unchanged.' );
+$GLOBALS['wdc_ds_current_user_can'] = true;
+$nonce_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wdc_ds_nonce_valid'] = false;
+$before_nonce = count( $GLOBALS['wpdb']->services );
+try {
+	wdc_ds_post_create( $nonce_admin, array( 'service_key' => 'manual_bad_nonce', 'title' => 'Bad Nonce' ) );
+	$nonce_failed = false;
+} catch ( WdcDsNonceException ) {
+	$nonce_failed = true;
+}
+$GLOBALS['wdc_ds_nonce_valid'] = true;
+wdc_ds_assert( $nonce_failed && $before_nonce === count( $GLOBALS['wpdb']->services ), 'Nonce failure must stop manual service create before persistence.' );
+
+$manual_edit_html = wdc_ds_render_admin_page( $create_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'service' => 'manual_local' ) );
+wdc_ds_assert( str_contains( $manual_edit_html, 'Manual Local' ) && str_contains( $manual_edit_html, 'name="wdc_delivery_services_action" value="save_main"' ), 'Existing edit page must remain available after create route split.' );
+
+$main_wpdb = $GLOBALS['wpdb'];
+$GLOBALS['wpdb'] = new wpdb();
+$settings_failure_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$settings_failure_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$settings_failure_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$settings_failure_admin = wdc_ds_admin_page( $settings_failure_services, $settings_failure_countries, $settings_failure_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_service_settings';
+$settings_failure_redirect = wdc_ds_post_create(
+	$settings_failure_admin,
+	array(
+		'service_key' => 'manual_settings_rollback',
+		'title' => 'Manual Settings Rollback',
+		'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT,
+		'manual_flat_price_rub' => '250',
+	)
+);
+$settings_failure_html = wdc_ds_render_admin_page( $settings_failure_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $settings_failure_redirect && str_contains( $settings_failure_html, 'Служба доставки не создана.' ), 'Strict initial manual settings failure must stay on create screen with storage error.' );
+wdc_ds_assert( wdc_ds_contains_query( $GLOBALS['wpdb']->insert_attempts, 'wdc_delivery_services' ) && wdc_ds_contains_query( $GLOBALS['wpdb']->insert_attempts, 'wdc_delivery_service_settings' ), 'Settings rollback test must insert the service first and then fail a strict settings write.' );
+wdc_ds_assert( wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'START TRANSACTION' ) && wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'ROLLBACK' ) && ! wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'COMMIT' ), 'Strict initial manual settings failure must rollback the create transaction without commit.' );
+wdc_ds_assert( null === $settings_failure_services->find_by_service_key( 'manual_settings_rollback' ) && ! $settings_failure_services->service_key_exists( 'manual_settings_rollback' ), 'Settings failure rollback must remove the partial service row and free the key.' );
+wdc_ds_assert( array() === $GLOBALS['wpdb']->delete_attempts, 'Transactional rollback must not run compensating cleanup when the service row disappears.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->rollback_preserves_transaction_writes = true;
+$non_transactional_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$non_transactional_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$non_transactional_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$non_transactional_admin = wdc_ds_admin_page( $non_transactional_services, $non_transactional_countries, $non_transactional_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wpdb']->fail_next_query_contains = 'wdc_delivery_service_countries';
+$non_transactional_redirect = wdc_ds_post_create(
+	$non_transactional_admin,
+	array(
+		'service_key' => 'manual_nontransactional_rollback',
+		'title' => 'Manual Nontransactional Rollback',
+		'countries' => 'RU',
+		'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT,
+		'manual_flat_price_rub' => '250',
+	)
+);
+$non_transactional_html = wdc_ds_render_admin_page( $non_transactional_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $non_transactional_redirect && str_contains( $non_transactional_html, 'Служба доставки не создана.' ), 'Non-transactional downstream failure must stay on create screen with storage error.' );
+wdc_ds_assert( null === $non_transactional_services->find_by_service_key( 'manual_nontransactional_rollback' ) && ! $non_transactional_services->service_key_exists( 'manual_nontransactional_rollback' ), 'Compensating cleanup must remove a service row that survives rollback and free the key.' );
+wdc_ds_assert( array() === $GLOBALS['wpdb']->settings && array() === $GLOBALS['wpdb']->countries && array() === $GLOBALS['wpdb']->manual_regions && array() === $GLOBALS['wpdb']->manual_locations && array() === $GLOBALS['wpdb']->manual_weight_ranges && array() === $GLOBALS['wpdb']->manual_pickup_points, 'Compensating cleanup must remove dependent create aggregate rows only for the newly created service.' );
+$delete_order = implode( '|', $GLOBALS['wpdb']->delete_attempts );
+wdc_ds_assert( false !== strpos( $delete_order, 'wdc_manual_delivery_pickup_points' ) && false !== strpos( $delete_order, 'wdc_manual_delivery_weight_ranges' ) && false !== strpos( $delete_order, 'wdc_manual_delivery_regions' ) && false !== strpos( $delete_order, 'wdc_manual_delivery_locations' ) && false !== strpos( $delete_order, 'wdc_delivery_service_countries' ) && false !== strpos( $delete_order, 'wdc_delivery_service_settings' ) && str_ends_with( $delete_order, 'wdc_delivery_services' ), 'Compensating cleanup must delete dependent tables before deleting the service row last.' );
+wdc_ds_assert( null !== wdc_ds_post_create( $non_transactional_admin, array( 'service_key' => 'manual_nontransactional_rollback', 'title' => 'Manual Nontransactional Retry', 'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'manual_flat_price_rub' => '250' ) ), 'Create with the same key must be retryable after compensating cleanup on non-transactional rollback.' );
+
+$live_sequence_admin = wdc_ds_admin_page( $non_transactional_services, $non_transactional_countries, $non_transactional_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+wdc_ds_assert( null === wdc_ds_post_create( $live_sequence_admin, array( 'service_key' => 'manual_nontransactional_rollback', 'title' => 'Live Sequence Duplicate' ) ), 'Live sequence must still reject an existing key before persistence.' );
+$GLOBALS['wpdb']->fail_next_query_contains = 'wdc_delivery_service_countries';
+wdc_ds_assert( null === wdc_ds_post_create( $live_sequence_admin, array( 'service_key' => 'manual_live_key_a', 'title' => 'Manual Live Key A', 'countries' => 'RU', 'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'manual_flat_price_rub' => '250' ) ), 'Live sequence key A can fail downstream without redirect.' );
+wdc_ds_assert( ! $non_transactional_services->service_key_exists( 'manual_live_key_a' ), 'Live sequence key A must not remain reserved after failed downstream create.' );
+$live_sequence_success = wdc_ds_post_create( $live_sequence_admin, array( 'service_key' => 'manual_live_key_b', 'title' => 'Manual Live Key B', 'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'manual_flat_price_rub' => '260' ) );
+wdc_ds_assert( null !== $live_sequence_success && str_contains( $live_sequence_success, 'service=manual_live_key_b' ), 'Live sequence key B must create successfully after duplicate and failed-create attempts.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$rollback_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$rollback_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$rollback_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$rollback_admin = wdc_ds_admin_page( $rollback_services, $rollback_countries, $rollback_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wpdb']->fail_next_query_contains = 'wdc_delivery_service_countries';
+$rollback_redirect = wdc_ds_post_create(
+	$rollback_admin,
+	array(
+		'service_key' => 'manual_rollback',
+		'title' => 'Manual Rollback',
+		'countries' => 'RU',
+		'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT,
+		'manual_flat_price_rub' => '250',
+	)
+);
+$rollback_html = wdc_ds_render_admin_page( $rollback_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $rollback_redirect && str_contains( $rollback_html, 'Служба доставки не создана.' ), 'Downstream country persistence failure must stay on create screen with storage error.' );
+wdc_ds_assert( wdc_ds_contains_query( $GLOBALS['wpdb']->insert_attempts, 'wdc_delivery_services' ), 'Downstream failure test must attempt the service INSERT before failing later persistence.' );
+wdc_ds_assert( wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'START TRANSACTION' ) && wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'ROLLBACK' ) && ! wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'COMMIT' ), 'Downstream persistence failure must rollback the create transaction without commit.' );
+wdc_ds_assert( null === $rollback_services->find_by_service_key( 'manual_rollback' ) && ! $rollback_services->service_key_exists( 'manual_rollback' ), 'Rollback after downstream failure must remove the partial service row and free the service key.' );
+wdc_ds_assert( null !== wdc_ds_post_create( $rollback_admin, array( 'service_key' => 'manual_rollback', 'title' => 'Manual Rollback Retry', 'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'manual_flat_price_rub' => '250' ) ), 'Create with the same key must be retryable after downstream rollback.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$race_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$race_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$race_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$race_admin = wdc_ds_admin_page( $race_services, $race_countries, $race_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wpdb']->race_duplicate_key_on_failed_service_insert = 'manual_race';
+$race_redirect = wdc_ds_post_create( $race_admin, array( 'service_key' => 'manual_race', 'title' => 'Manual Race' ) );
+$race_html = wdc_ds_render_admin_page( $race_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $race_redirect && str_contains( $race_html, 'Service key уже используется другой службой доставки.' ) && ! str_contains( $race_html, 'Служба доставки не создана.' ), 'Duplicate race on strict INSERT must render the duplicate validation error, not generic storage failure.' );
+wdc_ds_assert( wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'START TRANSACTION' ) && wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'ROLLBACK' ), 'Duplicate race must rollback before the repeated uniqueness lookup.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$generic_failure_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$generic_failure_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$generic_failure_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$generic_failure_admin = wdc_ds_admin_page( $generic_failure_services, $generic_failure_countries, $generic_failure_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_services';
+$generic_failure_redirect = wdc_ds_post_create( $generic_failure_admin, array( 'service_key' => 'manual_insert_failure', 'title' => 'Manual Insert Failure' ) );
+$generic_failure_html = wdc_ds_render_admin_page( $generic_failure_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $generic_failure_redirect && str_contains( $generic_failure_html, 'Служба доставки не создана.' ) && ! str_contains( $generic_failure_html, 'Service key уже используется' ), 'Generic strict INSERT failure with a still-free key must render storage_failed.' );
+wdc_ds_assert( null === $generic_failure_services->find_by_service_key( 'manual_insert_failure' ) && ! $generic_failure_services->service_key_exists( 'manual_insert_failure' ), 'Generic strict INSERT failure must not leave a service row.' );
+$GLOBALS['wpdb'] = $main_wpdb;
 
 $GLOBALS['wpdb']->rules[] = array( 'id' => 1, 'name' => 'Service rule', 'enabled' => 1, 'priority' => 10, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'fixed_test', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::MULTIPLY, 'operation_value' => 2, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
 $GLOBALS['wpdb']->rules[] = array( 'id' => 2, 'name' => 'Default rule', 'enabled' => 1, 'priority' => 20, 'target_type' => RuleRepository::TARGET_DEFAULT, 'target_value' => '', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::DECREASE, 'operation_value' => 100, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );

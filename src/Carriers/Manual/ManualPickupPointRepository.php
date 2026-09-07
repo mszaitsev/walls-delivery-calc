@@ -72,56 +72,28 @@ final class ManualPickupPointRepository {
 	public function replace_points( int $service_id, array $points ): void {
 		$normalized = $this->normalize_points( $service_id, $points );
 		$this->validate_points( $normalized );
-		$existing = $this->list_by_service( $service_id );
-		$existing_codes = array_fill_keys( array_map( static fn( array $row ): string => (string) $row['code'], $existing ), true );
-		$seen = array();
-		$table = $this->table();
-		$now = current_time( 'mysql' );
 
 		$this->wpdb->query( 'START TRANSACTION' );
 		try {
-			foreach ( $normalized as $index => $point ) {
-				$code = $point['code'];
-				$seen[ $code ] = true;
-				$data = array(
-					'service_id' => $service_id,
-					'code' => $code,
-					'title' => $point['title'],
-					'country_code' => $point['country_code'],
-					'region_name' => $point['region_name'],
-					'location_name' => $point['location_name'],
-					'address' => $point['address'],
-					'postcode' => $point['postcode'],
-					'latitude' => $point['latitude'],
-					'longitude' => $point['longitude'],
-					'work_time' => $point['work_time'],
-					'comment' => $point['comment'],
-					'active' => $point['active'] ? 1 : 0,
-					'sort_order' => $index + 1,
-					'updated_at' => $now,
-				);
-				if ( isset( $existing_codes[ $code ] ) ) {
-					$result = $this->wpdb->update( $table, $data, array( 'service_id' => $service_id, 'code' => $code ), array(), array( '%d', '%s' ) );
-				} else {
-					$data['created_at'] = $now;
-					$result = $this->wpdb->insert( $table, $data, array() );
-				}
-				if ( false === $result ) {
-					throw new RuntimeException( 'Failed to save manual pickup point.' );
-				}
-			}
-			foreach ( $existing_codes as $code => $_ ) {
-				if ( ! isset( $seen[ $code ] ) ) {
-					$result = $this->wpdb->update( $table, array( 'active' => 0, 'updated_at' => $now ), array( 'service_id' => $service_id, 'code' => $code ), array( '%d', '%s' ), array( '%d', '%s' ) );
-					if ( false === $result ) {
-						throw new RuntimeException( 'Failed to deactivate stale manual pickup point.' );
-					}
-				}
-			}
+			$this->replace_normalized_points( $service_id, $normalized );
 			$this->wpdb->query( 'COMMIT' );
 		} catch ( \Throwable $exception ) {
 			$this->wpdb->query( 'ROLLBACK' );
 			throw $exception;
+		}
+	}
+
+	/** @param array<int,array<string,mixed>> $points */
+	public function replace_points_in_current_transaction( int $service_id, array $points ): void {
+		$normalized = $this->normalize_points( $service_id, $points );
+		$this->validate_points( $normalized );
+		$this->replace_normalized_points( $service_id, $normalized );
+	}
+
+	public function clear( int $service_id ): void {
+		$result = $this->wpdb->delete( $this->table(), array( 'service_id' => $service_id ), array( '%d' ) );
+		if ( false === $result ) {
+			throw new RuntimeException( 'Failed to clear manual pickup points.' );
 		}
 	}
 
@@ -249,6 +221,54 @@ final class ManualPickupPointRepository {
 
 	private function generate_code(): string {
 		return 'manual-pvz-' . strtolower( bin2hex( random_bytes( 6 ) ) );
+	}
+
+	/** @param array<int,array<string,mixed>> $normalized */
+	private function replace_normalized_points( int $service_id, array $normalized ): void {
+		$existing = $this->list_by_service( $service_id );
+		$existing_codes = array_fill_keys( array_map( static fn( array $row ): string => (string) $row['code'], $existing ), true );
+		$seen = array();
+		$table = $this->table();
+		$now = current_time( 'mysql' );
+
+		foreach ( $normalized as $index => $point ) {
+			$code = $point['code'];
+			$seen[ $code ] = true;
+			$data = array(
+				'service_id' => $service_id,
+				'code' => $code,
+				'title' => $point['title'],
+				'country_code' => $point['country_code'],
+				'region_name' => $point['region_name'],
+				'location_name' => $point['location_name'],
+				'address' => $point['address'],
+				'postcode' => $point['postcode'],
+				'latitude' => $point['latitude'],
+				'longitude' => $point['longitude'],
+				'work_time' => $point['work_time'],
+				'comment' => $point['comment'],
+				'active' => $point['active'] ? 1 : 0,
+				'sort_order' => $index + 1,
+				'updated_at' => $now,
+			);
+			if ( isset( $existing_codes[ $code ] ) ) {
+				$result = $this->wpdb->update( $table, $data, array( 'service_id' => $service_id, 'code' => $code ), array(), array( '%d', '%s' ) );
+			} else {
+				$data['created_at'] = $now;
+				$result = $this->wpdb->insert( $table, $data, array() );
+			}
+			if ( false === $result ) {
+				throw new RuntimeException( 'Failed to save manual pickup point.' );
+			}
+		}
+		foreach ( $existing_codes as $code => $_ ) {
+			if ( ! isset( $seen[ $code ] ) ) {
+				$result = $this->wpdb->update( $table, array( 'active' => 0, 'updated_at' => $now ), array( 'service_id' => $service_id, 'code' => $code ), array( '%d', '%s' ), array( '%d', '%s' ) );
+				if ( false === $result ) {
+					throw new RuntimeException( 'Failed to deactivate stale manual pickup point.' );
+				}
+			}
+		}
 	}
 
 	private function table(): string {
