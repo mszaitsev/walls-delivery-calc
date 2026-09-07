@@ -211,6 +211,13 @@ foreach ( array( '<strong>Bold</strong>', '<em>Italic</em>', '<u>Under</u>', '<s
 wdc_delivery_messages_assert( ! str_contains( $sanitized[ CheckoutDeliveryMessageSettings::INFO_HTML_KEY ], '<script' ), 'Sanitizer must strip script tags.' );
 wdc_delivery_messages_assert( ! str_contains( $sanitized[ CheckoutDeliveryMessageSettings::INFO_HTML_KEY ], 'javascript:' ), 'Sanitizer must strip javascript URLs.' );
 wdc_delivery_messages_assert( str_contains( $sanitized[ CheckoutDeliveryMessageSettings::PROMO_BELOW_HTML_KEY ], '{s}' ) && str_contains( $sanitized[ CheckoutDeliveryMessageSettings::PROMO_BELOW_HTML_KEY ], '{d}' ), 'Sanitizer must preserve promo placeholders.' );
+wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<p>A</p><p>B</p>' ), 'Top-level editor paragraphs must normalize to soft breaks.' );
+wdc_delivery_messages_assert( '<strong>A</strong><br><span style="color:#ff0000">B</span>' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<p><strong>A</strong></p><p><span style="color:#ff0000">B</span></p>' ), 'Soft-break normalization must preserve rich inline formatting.' );
+wdc_delivery_messages_assert( 'A<br>B<br>C' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<p>A<br>B</p><p>C</p>' ), 'Existing br tags inside editor paragraphs must be preserved without double breaks.' );
+wdc_delivery_messages_assert( 'A' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<p>A</p>' ), 'A single editor paragraph must not leave a trailing break.' );
+wdc_delivery_messages_assert( 'A<br><br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<p>A</p><p><br></p><p>B</p>' ), 'An intentional empty editor paragraph must render as one blank soft line.' );
+wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<div>A</div><div>B</div>' ), 'Top-level editor div blocks must normalize to soft breaks when present.' );
+wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( "A\nB" ), 'Plain editor newlines without HTML tags must normalize to soft breaks.' );
 
 $settings->replace(
 	array_merge(
@@ -270,6 +277,26 @@ $coupon_aware = wdc_delivery_messages_render( $settings );
 wdc_delivery_messages_assert( str_contains( $coupon_aware, 'wdc-checkout-delivery-promo--below' ) && str_contains( $coupon_aware, 'Добавьте ещё 300 руб.' ), 'Promo must use the typed effective total after coupons, not a raw subtotal.' );
 WC()->cart->contents_total = 3600.0;
 wdc_delivery_messages_assert( str_contains( wdc_delivery_messages_render( $settings ), 'wdc-checkout-delivery-promo--reached' ), 'Repeated render must use current Woo totals during checkout AJAX refresh.' );
+
+$settings->set( CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY, true );
+$settings->set( CheckoutDeliveryMessageSettings::INFO_HTML_KEY, '<p>A</p><p>B</p>' );
+$settings->set( CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY, false );
+$soft_info = wdc_delivery_messages_render( $settings );
+wdc_delivery_messages_assert( str_contains( $soft_info, '<div class="wdc-checkout-delivery-info">A<br>B</div>' ), 'Rendered info must contain literal br soft breaks for two editor paragraphs.' );
+wdc_delivery_messages_assert( ! str_contains( $soft_info, '<p>A</p><p>B</p>' ), 'Rendered info must not depend on paragraph display CSS for editor Enter line breaks.' );
+
+$settings->set( CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY, false );
+$settings->set( CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY, true );
+$settings->set( CheckoutDeliveryMessageSettings::PROMO_THRESHOLD_KOPECKS_KEY, 350000 );
+$settings->set( CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY, CheckoutDeliveryMessageSettings::BASIS_ALL_CART_ITEMS );
+$settings->set( CheckoutDeliveryMessageSettings::PROMO_BELOW_HTML_KEY, '<p>От {s} руб.</p><p>Добавьте {d} руб.</p>' );
+$settings->set( CheckoutDeliveryMessageSettings::PROMO_REACHED_HTML_KEY, '<p>Достигли {s} руб.</p><p>Спасибо</p>' );
+WC()->cart->contents_total = 3000.0;
+$soft_promo_below = wdc_delivery_messages_render( $settings );
+wdc_delivery_messages_assert( str_contains( $soft_promo_below, 'От 3500 руб.<br>Добавьте 500 руб.' ), 'Rendered below-threshold promo must substitute placeholders before paragraph soft-break normalization.' );
+WC()->cart->contents_total = 3500.0;
+$soft_promo_reached = wdc_delivery_messages_render( $settings );
+wdc_delivery_messages_assert( str_contains( $soft_promo_reached, 'Достигли 3500 руб.<br>Спасибо' ), 'Rendered reached promo must normalize editor paragraphs after threshold placeholder substitution.' );
 
 $settings->set( CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY, false );
 wdc_delivery_messages_assert( ! str_contains( wdc_delivery_messages_render( $settings ), 'wdc-checkout-delivery-promo' ), 'Disabled promo must not render.' );

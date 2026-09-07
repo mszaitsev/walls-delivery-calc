@@ -46,7 +46,11 @@ final class CheckoutDeliveryMessages {
 			return '';
 		}
 
-		return $this->non_empty_html( $this->settings->info_html() );
+		return $this->non_empty_html(
+			CheckoutDeliveryMessageSettings::sanitize_html(
+				CheckoutDeliveryMessageSettings::normalize_soft_break_html( $this->settings->info_html() )
+			)
+		);
 	}
 
 	private function promo_html(): string {
@@ -69,6 +73,7 @@ final class CheckoutDeliveryMessages {
 				'{d}' => CheckoutDeliveryMessageSettings::format_kopecks_amount( max( 0, $threshold - $total ) ),
 			)
 		);
+		$html = CheckoutDeliveryMessageSettings::normalize_soft_break_html( $html );
 		$html = $this->non_empty_html( CheckoutDeliveryMessageSettings::sanitize_html( $html ) );
 		if ( '' === $html ) {
 			return '';

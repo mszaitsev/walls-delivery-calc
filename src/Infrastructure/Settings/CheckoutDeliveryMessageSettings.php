@@ -91,6 +91,49 @@ final class CheckoutDeliveryMessageSettings {
 		return trim( self::fallback_sanitize_html( $html ) );
 	}
 
+	public static function normalize_soft_break_html( string $html ): string {
+		$html = trim( $html );
+		if ( '' === $html ) {
+			return '';
+		}
+
+		if ( ! str_contains( $html, '<' ) ) {
+			return preg_replace( '/\R+/', '<br>', $html ) ?? $html;
+		}
+
+		preg_match_all(
+			'#<(p|div)\b[^>]*>(.*?)</\1>#is',
+			$html,
+			$matches,
+			PREG_SET_ORDER | PREG_OFFSET_CAPTURE
+		);
+
+		if ( array() === $matches ) {
+			return $html;
+		}
+
+		$lines = array();
+		$offset = 0;
+		foreach ( $matches as $match ) {
+			$full = (string) $match[0][0];
+			$start = (int) $match[0][1];
+			$gap = substr( $html, $offset, $start - $offset );
+			if ( '' !== trim( (string) $gap ) ) {
+				return $html;
+			}
+
+			$body = trim( (string) $match[2][0] );
+			$lines[] = self::is_empty_soft_break_line( $body ) ? '' : $body;
+			$offset = $start + strlen( $full );
+		}
+
+		if ( '' !== trim( substr( $html, $offset ) ) ) {
+			return $html;
+		}
+
+		return implode( '<br>', $lines );
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -141,5 +184,12 @@ final class CheckoutDeliveryMessageSettings {
 		) ?? $html;
 
 		return strip_tags( $html, '<p><br><strong><b><em><i><u><s><del><a><span>' );
+	}
+
+	private static function is_empty_soft_break_line( string $html ): bool {
+		$without_breaks = preg_replace( '#<br\s*/?>#i', '', $html ) ?? $html;
+		$without_spaces = str_replace( '&nbsp;', '', $without_breaks );
+
+		return '' === trim( $without_spaces );
 	}
 }
