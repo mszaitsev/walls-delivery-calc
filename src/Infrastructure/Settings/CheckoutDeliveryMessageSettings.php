@@ -145,7 +145,7 @@ final class CheckoutDeliveryMessageSettings {
 			if ( '' === $part || '<' === $part[0] ) {
 				continue;
 			}
-			$part = preg_replace( '/[ \t]*(?:\R[ \t]*)+/', '<br>', $part ) ?? $part;
+			$part = preg_replace( '/[ \t]*(?:(?:\r\n|\r|\n)[ \t]*)+/', '<br>', $part ) ?? $part;
 		}
 		unset( $part );
 

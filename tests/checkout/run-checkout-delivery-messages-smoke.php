@@ -218,6 +218,13 @@ wdc_delivery_messages_assert( 'A' === CheckoutDeliveryMessageSettings::normalize
 wdc_delivery_messages_assert( 'A<br><br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<p>A</p><p><br></p><p>B</p>' ), 'An intentional empty editor paragraph must render as one blank soft line.' );
 wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<div>A</div><div>B</div>' ), 'Top-level editor div blocks must normalize to soft breaks when present.' );
 wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( "A\nB" ), 'Plain editor newlines without HTML tags must normalize to soft breaks.' );
+wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( "A\r\nB" ), 'CRLF editor newlines must normalize to one soft break.' );
+wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( "A\rB" ), 'CR editor newlines must normalize to one soft break.' );
+wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( "A\n\nB" ), 'Multiple editor newlines must normalize to one soft break.' );
+$cyrillic_newline = "Подробнее об условиях доставки можно прочитать тут\nВторая строка";
+wdc_delivery_messages_assert( 'Подробнее об условиях доставки можно прочитать тут<br>Вторая строка' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( $cyrillic_newline ), 'Cyrillic word условиях must remain exact and only real LF must become br.' );
+$cyrillic_safe = 'Русский текст: х, ё, й, щ, ю, я; хороших условиях хранения';
+wdc_delivery_messages_assert( $cyrillic_safe === CheckoutDeliveryMessageSettings::normalize_soft_break_html( $cyrillic_safe ), 'UTF-8 Cyrillic text without real newlines must not produce false br tags or replacement characters.' );
 wdc_delivery_messages_assert( '<strong>A</strong><br><em>B</em><br><span style="color:#ff0000">C</span>' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( "<strong>A</strong>\n\n<em>B</em>\n\n<span style=\"color:#ff0000\">C</span>" ), 'Mixed inline rich HTML newlines must normalize to literal br tags.' );
 $live_info_fragment = '<strong>Подробнее</strong> о <em>вариантах</em> '
 	. '<span style="text-decoration: underline">доставки</span> и '
@@ -226,6 +233,13 @@ $live_info_fragment = '<strong>Подробнее</strong> о <em>вариант
 	. "\n\n"
 	. 'Вторая строка';
 wdc_delivery_messages_assert( str_contains( CheckoutDeliveryMessageSettings::normalize_soft_break_html( $live_info_fragment ), '</a></span><br>Вторая строка' ), 'Live mixed-inline info HTML must normalize the saved double newline to one br.' );
+$live_rich_cyrillic = '<strong>Подробнее</strong> об условиях доставки можно '
+	. '<a href="https://walls-shop.ru/about/delivery/">прочитать тут</a>'
+	. "\n\n"
+	. 'Вторая строка';
+$live_rich_cyrillic_normalized = CheckoutDeliveryMessageSettings::normalize_soft_break_html( $live_rich_cyrillic );
+wdc_delivery_messages_assert( str_contains( $live_rich_cyrillic_normalized, '<strong>Подробнее</strong> об условиях доставки можно <a href="https://walls-shop.ru/about/delivery/">прочитать тут</a><br>Вторая строка' ), 'Live rich HTML with Cyrillic условиях must normalize only the real saved editor newline.' );
+wdc_delivery_messages_assert( str_contains( $live_rich_cyrillic_normalized, 'условиях' ) && ! str_contains( $live_rich_cyrillic_normalized, 'условия?<br>' ), 'Live rich HTML must not corrupt Cyrillic х into a false br.' );
 $attribute_newline_fragment = "<a\n href=\"https://example.com/path\"\n title=\"Test\">Link</a>\n\nNext";
 $attribute_normalized = CheckoutDeliveryMessageSettings::normalize_soft_break_html( $attribute_newline_fragment );
 wdc_delivery_messages_assert( str_contains( $attribute_normalized, 'href="https://example.com/path"' ) && str_contains( $attribute_normalized, 'title="Test"' ), 'Soft-break normalization must preserve attributes with internal source newlines.' );
