@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.155.9
+Version: 0.155.10
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.9 moves manual Delivery Service creation from the inline list-page form to `admin.php?page=wdc-delivery-services&action=create`. The list page now keeps the services table, global shop-processing settings, and a primary `Создать новую службу` button. Successful creates redirect to the existing edit screen for the new `service_key`; validation/storage errors stay on the create screen with submitted values preserved. Manual service keys are validated after `sanitize_key()` normalization against all persisted services, including soft-deleted rows, and against reserved predefined service keys.
+Current stage: 0.155.10 adds global checkout delivery messages on the platform settings page. Administrators can enable an informational WYSIWYG text and an optional promo WYSIWYG text before the delivery sort selector; both are off by default for upgrades. Promo rendering compares an integer kopeck threshold against either the existing full-cart post-discount total or the new minimal WooCommerce-boundary shippable-items total, replaces `{s}` and `{d}` with plain numeric ruble amounts, sanitizes stored/rendered HTML, and refreshes through the normal WooCommerce checkout review lifecycle.
 
 ## Quick Start
 

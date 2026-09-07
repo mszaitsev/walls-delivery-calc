@@ -491,6 +491,7 @@ use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryMessages;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
@@ -750,6 +751,7 @@ runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutL
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_nopriv_' . CheckoutLocationAjax::ACTION] ), 'Location AJAX endpoint must register for guests.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_after_shipping_rate'] ), 'Checkout rate renderer hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_review_order_before_shipping'] ), 'Address renderer hook must register when platform runtime is enabled.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must register in the full checkout runtime.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_order_status_changed', ShopProcessingOrderQueueCounter::class ), 'Passive shop processing queue cache invalidation must register when platform runtime is enabled.' );
 
@@ -768,6 +770,7 @@ runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_filters']['woocommerce_shippin
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutLocationAjax::ACTION] ), 'Checkout location AJAX must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_select_domestic_tariff'] ), 'Checkout tariff selector AJAX must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend checkout assets must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController::class ), 'Checkout pickup REST routes must not register when platform runtime is disabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\PickupPointsRestController::class ), 'Carrier pickup/admin preparation REST routes must remain registered when platform runtime is disabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_order_status_changed', ShopProcessingOrderQueueCounter::class ), 'Passive shop processing queue cache invalidation must remain registered when platform runtime is disabled.' );

@@ -14,11 +14,17 @@
 
 		var $select = $row.find( '.wdc-checkout-sort' ).first().detach();
 		var label = $.trim( $row.find( 'th' ).first().text() || '' );
-		$row.addClass( 'wdc-checkout-sort-row--relocated' );
-		$( '<div class="wdc-checkout-sort-inline" />' )
+		var $messages = $shippingCell.find( '.wdc-checkout-delivery-messages' ).last();
+		var $inline = $( '<div class="wdc-checkout-sort-inline" />' )
 			.append( $( '<span class="wdc-checkout-sort-inline__label" />' ).text( label ) )
-			.append( $select )
-			.prependTo( $shippingCell );
+			.append( $select );
+
+		$row.addClass( 'wdc-checkout-sort-row--relocated' );
+		if ( $messages.length ) {
+			$inline.insertAfter( $messages );
+			return;
+		}
+		$inline.prependTo( $shippingCell );
 	}
 
 	$( relocateSortControl );

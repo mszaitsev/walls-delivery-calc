@@ -119,6 +119,39 @@
 	color: #92400e;
 }
 
+.woocommerce-checkout .woocommerce-checkout-review-order-table tr.woocommerce-shipping-totals.shipping > th {
+	padding-top: 16px;
+	padding-bottom: 10px;
+	vertical-align: top;
+}
+
+.wdc-checkout-delivery-messages {
+	margin: 0 0 12px;
+	color: #334155;
+	font-size: 14px;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+.wdc-checkout-delivery-info,
+.wdc-checkout-delivery-promo {
+	margin: 0 0 10px;
+}
+
+.wdc-checkout-delivery-promo {
+	margin-bottom: 14px;
+}
+
+.wdc-checkout-delivery-info > :first-child,
+.wdc-checkout-delivery-promo > :first-child {
+	margin-top: 0;
+}
+
+.wdc-checkout-delivery-info > :last-child,
+.wdc-checkout-delivery-promo > :last-child {
+	margin-bottom: 0;
+}
+
 .wdc-platform-debug-panel {
 	margin-top: 16px;
 	padding: 12px;
