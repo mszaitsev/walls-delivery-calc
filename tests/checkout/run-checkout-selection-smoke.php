@@ -499,7 +499,7 @@ function checkout_selection_method( CheckoutSelectionSmokeCarrier $carrier, Chec
 		$session,
 		new RuleRepository(),
 		$settings,
-		new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.155.4' ),
+		new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.155.6' ),
 		new Logger()
 	);
 
@@ -518,7 +518,7 @@ function checkout_selection_registrar( CheckoutSelectionSmokeCarrier $carrier, C
 		new WooCommerceRateMapper(),
 		$session,
 		new RuleRepository(),
-		new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.155.4' ),
+		new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.155.6' ),
 		new Logger()
 	);
 }

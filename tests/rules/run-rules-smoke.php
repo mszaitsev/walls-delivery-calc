@@ -15,6 +15,7 @@ use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
+use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleConditionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
@@ -33,24 +34,44 @@ function rules_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
-function rules_context( float $delivery_price = 450, int $weight = 1000, string $city = 'Moscow', array $meta = array(), string $fias_id = '' ): RuleEvaluationContext {
-	$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), $weight, 120, 20, 15 );
+function rules_context( float $delivery_price = 450, int $weight = 1000, string $city = 'Moscow', array $meta = array(), string $fias_id = '', ?float $order_total = null, ?float $all_cart_items_total = null ): RuleEvaluationContext {
+	$order_total ??= 1000;
+	$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( $order_total ), Money::from_rubles( $order_total ), $weight, 120, 20, 15 );
 
 	return new RuleEvaluationContext(
-		Money::from_rubles( 1000 ),
+		Money::from_rubles( $order_total ),
 		Money::from_rubles( $delivery_price ),
-		Package::from_items( array( $item ), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
+		Package::from_items( array( $item ), 0, Money::from_rubles( $order_total ), Money::from_rubles( $order_total ) ),
 		new Address( country_code: 'RU', city: $city, street: 'Tverskaya', house: '1', raw_address: $city . ', Tverskaya 1', fias_id: $fias_id ),
 		'courier',
 		'card',
 		'2026-05-21',
 		array(),
-		$meta
+		$meta,
+		null === $all_cart_items_total ? null : Money::from_rubles( $all_cart_items_total )
 	);
 }
 
 function price_rule( string $name, string $operation, float $value, string $base = RuleOperationBases::RUBLES, bool $promo = false, bool $stop = false ): Rule {
 	return new Rule( null, $name, true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, $operation, $value, $base, $promo, $stop );
+}
+
+function conditional_price_rule( string $name, string $condition_type, string $operator, float $condition_value ): Rule {
+	return new Rule(
+		null,
+		$name,
+		true,
+		10,
+		'default',
+		'',
+		RuleActionTypes::CHANGE_PRICE,
+		RuleOperationTypes::INCREASE,
+		100,
+		RuleOperationBases::RUBLES,
+		false,
+		false,
+		array( new RuleCondition( null, null, 1, $condition_type, $operator, '', $condition_value ) )
+	);
 }
 
 $engine = new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) );
@@ -76,6 +97,78 @@ rules_smoke_assert( 65000 === $result->final_price?->get_kopecks(), '+200 RUB mu
 
 $result = $engine->apply_rules( array( price_rule( '-10%', RuleOperationTypes::DECREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY ) ), rules_context() );
 rules_smoke_assert( 40500 === $result->final_price?->get_kopecks(), '-10% delivery must produce 405 RUB.' );
+
+$mixed_context = rules_context( 400, 1000, 'Moscow', array(), '', 3000, 5000 );
+$result = $engine->apply_rules( array( price_rule( '+100 RUB', RuleOperationTypes::INCREASE, 100 ) ), $mixed_context );
+rules_smoke_assert( 50000 === $result->final_price?->get_kopecks(), '+100 RUB must remain based on fixed rubles.' );
+$result = $engine->apply_rules( array( price_rule( '+10% delivery', RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY ) ), $mixed_context );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), '+10% delivery must use delivery price base 400.' );
+$result = $engine->apply_rules( array( price_rule( '+10% physical', RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_ORDER ) ), $mixed_context );
+rules_smoke_assert( 70000 === $result->final_price?->get_kopecks(), 'Existing percent_of_order must still use physical/package total 3000.' );
+$result = $engine->apply_rules( array( price_rule( '+10% cart', RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_CART ) ), $mixed_context );
+rules_smoke_assert( 90000 === $result->final_price?->get_kopecks(), 'New percent_of_cart must use all cart items total 5000.' );
+$result = $engine->apply_rules( array( price_rule( '+10% physical+delivery', RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY ) ), $mixed_context );
+rules_smoke_assert( 74000 === $result->final_price?->get_kopecks(), 'Existing percent_of_order_and_delivery must use package total plus delivery.' );
+$result = $engine->apply_rules( array( price_rule( '+10% cart+delivery', RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_CART_AND_DELIVERY ) ), $mixed_context );
+rules_smoke_assert( 94000 === $result->final_price?->get_kopecks(), 'New percent_of_cart_and_delivery must use all cart items total plus delivery.' );
+$result = $engine->apply_rules( array( price_rule( '+10% cart fallback', RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_CART ) ), rules_context( 400, 1000, 'Moscow', array(), '', 1000 ) );
+rules_smoke_assert( 50000 === $result->final_price?->get_kopecks(), 'Contexts without all_cart_items_total must fall back to order_total.' );
+rules_smoke_assert( RuleOperationBases::is_valid( 'percent_of_order' ) && RuleOperationBases::is_valid( 'percent_of_order_and_delivery' ), 'Persisted old operation base keys must remain valid.' );
+rules_smoke_assert( RuleOperationBases::is_valid( RuleOperationBases::PERCENT_OF_CART ) && RuleOperationBases::is_valid( RuleOperationBases::PERCENT_OF_CART_AND_DELIVERY ), 'New cart operation base keys must validate.' );
+rules_smoke_assert( RuleConditionTypes::is_valid( RuleConditionTypes::ORDER_TOTAL ), 'Persisted order_total condition type must remain valid.' );
+rules_smoke_assert( RuleConditionTypes::is_valid( RuleConditionTypes::CART_TOTAL ), 'New cart_total condition type must validate.' );
+
+$result = $engine->apply_rules( array( conditional_price_rule( 'Physical total threshold', RuleConditionTypes::ORDER_TOTAL, RuleOperators::GTE, 4000 ) ), $mixed_context );
+rules_smoke_assert( 40000 === $result->final_price?->get_kopecks(), 'Existing order_total condition must still use physical/package total 3000.' );
+$result = $engine->apply_rules( array( conditional_price_rule( 'Cart total threshold', RuleConditionTypes::CART_TOTAL, RuleOperators::GTE, 4000 ) ), $mixed_context );
+rules_smoke_assert( 50000 === $result->final_price?->get_kopecks(), 'New cart_total condition must use all cart items total 5000.' );
+
+foreach ( array(
+	RuleOperators::EQ  => true,
+	RuleOperators::GTE => true,
+	RuleOperators::GT  => false,
+	RuleOperators::LTE => true,
+	RuleOperators::LT  => false,
+) as $operator => $expected ) {
+	$result = $engine->apply_rules( array( conditional_price_rule( 'Cart boundary ' . $operator, RuleConditionTypes::CART_TOTAL, $operator, 5000 ) ), $mixed_context );
+	rules_smoke_assert( ( 50000 === $result->final_price?->get_kopecks() ) === $expected, 'cart_total boundary operator ' . $operator . ' must compare against 5000.' );
+}
+
+$result = $engine->apply_rules( array( conditional_price_rule( 'Cart total fallback', RuleConditionTypes::CART_TOTAL, RuleOperators::GTE, 3000 ) ), rules_context( 400, 1000, 'Moscow', array(), '', 3000 ) );
+rules_smoke_assert( 50000 === $result->final_price?->get_kopecks(), 'cart_total condition must fall back to order_total outside Woo context.' );
+
+$persisted_order_total_rule = Rule::from_array(
+	array(
+		'name'           => 'Persisted order_total condition',
+		'action_type'    => RuleActionTypes::CHANGE_PRICE,
+		'operation_type' => RuleOperationTypes::INCREASE,
+		'operation_base' => RuleOperationBases::RUBLES,
+		'conditions'     => array(
+			array(
+				'condition_group' => 1,
+				'condition_type'  => 'order_total',
+				'operator'        => RuleOperators::GTE,
+				'value_number'    => 4000,
+			),
+		),
+	)
+);
+rules_smoke_assert( RuleConditionTypes::ORDER_TOTAL === $persisted_order_total_rule->conditions[0]->condition_type, 'Persisted old condition_type order_total must roundtrip without rename.' );
+
+$formatter = new RuleFormulaFormatter();
+$audit_to_array = static fn( array $audit ): array => array_map( static fn( $entry ): array => $entry->to_array(), $audit );
+$cart_lines = $formatter->lines(
+	400,
+	$audit_to_array( $engine->apply_rules( array( price_rule( '+10% cart formula', RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_CART ) ), $mixed_context )->audit ),
+	900
+);
+rules_smoke_assert( str_contains( implode( "\n", $cart_lines ), 'увеличить на 10% от всей корзины' ), 'Formula formatter must render percent_of_cart label.' );
+$physical_lines = $formatter->lines(
+	400,
+	$audit_to_array( $engine->apply_rules( array( price_rule( '+10% physical formula', RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_ORDER ) ), $mixed_context )->audit ),
+	700
+);
+rules_smoke_assert( str_contains( implode( "\n", $physical_lines ), 'увеличить на 10% от физ. товаров' ) && ! str_contains( implode( "\n", $physical_lines ), '% от заказа' ), 'Formula formatter must relabel percent_of_order without changing its persisted key.' );
 
 $result = $engine->apply_rules( array( price_rule( '*2', RuleOperationTypes::MULTIPLY, 2 ) ), rules_context() );
 rules_smoke_assert( 90000 === $result->final_price?->get_kopecks(), 'multiply must produce 900 RUB.' );

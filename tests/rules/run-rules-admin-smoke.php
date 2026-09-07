@@ -457,8 +457,20 @@ rules_admin_smoke_assert( in_array( 'condition_type is invalid', $invalid_errors
 rules_admin_smoke_assert( in_array( 'operator is invalid', $invalid_errors, true ), 'Invalid operator must be rejected.' );
 
 $schema = new RuleConditionUiSchema();
+$definition_keys = array_keys( $schema->definitions() );
+$order_total_index = array_search( RuleConditionTypes::ORDER_TOTAL, $definition_keys, true );
+rules_admin_smoke_assert( false !== $order_total_index && RuleConditionTypes::CART_TOTAL === ( $definition_keys[ $order_total_index + 1 ] ?? '' ), 'cart_total condition must be listed immediately after order_total.' );
+rules_admin_smoke_assert( RuleConditionTypes::CART_TOTAL === ( RuleConditionTypes::all()[1] ?? '' ), 'RuleConditionTypes::all must keep cart_total next to order_total.' );
+rules_admin_smoke_assert( RuleConditionTypes::is_valid( RuleConditionTypes::ORDER_TOTAL ) && RuleConditionTypes::is_valid( RuleConditionTypes::CART_TOTAL ), 'Old order_total and new cart_total condition types must validate.' );
+$order_total_definition = $schema->definition( RuleConditionTypes::ORDER_TOTAL );
+$cart_total_definition = $schema->definition( RuleConditionTypes::CART_TOTAL );
+rules_admin_smoke_assert( 'Сумма доставляемых товаров' === ( $order_total_definition['label'] ?? '' ), 'order_total UI label must be "Сумма доставляемых товаров".' );
+rules_admin_smoke_assert( 'Сумма всей корзины' === ( $cart_total_definition['label'] ?? '' ), 'cart_total UI label must be "Сумма всей корзины".' );
+rules_admin_smoke_assert( ( $order_total_definition['operators'] ?? array() ) === ( $cart_total_definition['operators'] ?? null ) && ( $order_total_definition['input'] ?? '' ) === ( $cart_total_definition['input'] ?? null ) && ( $order_total_definition['storage'] ?? '' ) === ( $cart_total_definition['storage'] ?? null ) && ( $order_total_definition['unit'] ?? '' ) === ( $cart_total_definition['unit'] ?? null ), 'cart_total UI must reuse order_total numeric ruble behavior.' );
 $order_total_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::ORDER_TOTAL, 'operator' => RuleOperators::GTE, 'value_number' => '5000' ) );
 rules_admin_smoke_assert( $order_total_condition instanceof RuleCondition && 5000.0 === $order_total_condition->value_number && '' === $order_total_condition->value_text, 'order_total must store value_number.' );
+$cart_total_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::CART_TOTAL, 'operator' => RuleOperators::GTE, 'value_number' => '5000' ) );
+rules_admin_smoke_assert( $cart_total_condition instanceof RuleCondition && 5000.0 === $cart_total_condition->value_number && '' === $cart_total_condition->value_text, 'cart_total must store value_number.' );
 $items_count_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::ITEMS_COUNT, 'operator' => RuleOperators::EQ, 'value_number' => '3' ) );
 rules_admin_smoke_assert( $items_count_condition instanceof RuleCondition && 3.0 === $items_count_condition->value_number, 'items_count must store value_number.' );
 $payment_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::PAYMENT_METHOD, 'operator' => RuleOperators::EQ, 'value_text' => 'cod' ) );
@@ -506,6 +518,43 @@ $simulation_repository->save_rule( rules_admin_rule( 'Simulation carrier', 1, tr
 $simulator = new RuleSimulator( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) );
 $simulation = $simulator->simulate( $simulation_repository->get_default_rules(), rules_admin_context() );
 rules_admin_smoke_assert( 40000 === $simulation->final_price?->get_kopecks(), 'Simulation must use default rules.' );
+$mixed_simulation_context = RuleEvaluationContext::from_array(
+	array_merge(
+		rules_admin_context()->to_array(),
+		array(
+			'order_total'          => Money::from_rubles( 3000 )->to_array(),
+			'all_cart_items_total' => Money::from_rubles( 5000 )->to_array(),
+		)
+	)
+);
+$simulation_physical_condition = new Rule(
+	null,
+	'Simulation physical condition',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::INCREASE,
+	100,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::ORDER_TOTAL, RuleOperators::GTE, '', 4000 ) )
+);
+$simulation_cart_condition = Rule::from_array(
+	array_merge(
+		$simulation_physical_condition->to_array(),
+		array(
+			'name'       => 'Simulation cart condition',
+			'conditions' => array( new RuleCondition( null, null, 1, RuleConditionTypes::CART_TOTAL, RuleOperators::GTE, '', 4000 ) ),
+		)
+	)
+);
+$simulation = $simulator->simulate( array( $simulation_physical_condition ), $mixed_simulation_context );
+rules_admin_smoke_assert( 45000 === $simulation->final_price?->get_kopecks(), 'Simulator order_total condition must use delivered goods total 3000.' );
+$simulation = $simulator->simulate( array( $simulation_cart_condition ), $mixed_simulation_context );
+rules_admin_smoke_assert( 55000 === $simulation->final_price?->get_kopecks(), 'Simulator cart_total condition must use full cart total 5000.' );
 
 $delivery_days_rule = new Rule(
 	null,
@@ -582,8 +631,16 @@ $operation_summary = $admin_reflection->getMethod( 'operation_summary' );
 $operation_summary->setAccessible( true );
 $conditions_summary = $admin_reflection->getMethod( 'conditions_summary' );
 $conditions_summary->setAccessible( true );
+$condition_type_label = $admin_reflection->getMethod( 'condition_type_label' );
+$condition_type_label->setAccessible( true );
 rules_admin_smoke_assert( 'Нет условий' === $conditions_summary->invoke( $admin_page, new Rule( null, 'No conditions', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 10, RuleOperationBases::RUBLES, false, false ) ), 'No-condition summary must be exactly "Нет условий".' );
-rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Increase percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 12.4, RuleOperationBases::PERCENT_OF_ORDER, false, false ) ), 'увеличить на 12.4% от заказа' ), 'Increase summary must contain "увеличить на" and no space before percent.' );
+rules_admin_smoke_assert( 'сумма доставляемых товаров' === $condition_type_label->invoke( $admin_page, RuleConditionTypes::ORDER_TOTAL ), 'Rules table must relabel order_total as delivered goods total.' );
+rules_admin_smoke_assert( 'сумма всей корзины' === $condition_type_label->invoke( $admin_page, RuleConditionTypes::CART_TOTAL ), 'Rules table must label cart_total as full cart total.' );
+rules_admin_smoke_assert( str_contains( $conditions_summary->invoke( $admin_page, new Rule( null, 'Cart condition summary', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 10, RuleOperationBases::RUBLES, false, false, array( new RuleCondition( null, null, 1, RuleConditionTypes::CART_TOTAL, RuleOperators::GTE, '', 5000 ) ) ) ), 'Сумма всей корзины >= 5000 руб.' ), 'Condition summary must render cart_total label.' );
+rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Increase percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 12.4, RuleOperationBases::PERCENT_OF_ORDER, false, false ) ), 'увеличить на 12.4% от физ. товаров' ), 'Increase summary must relabel persisted percent_of_order as physical goods with no space before percent.' );
+rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Increase cart percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 12.4, RuleOperationBases::PERCENT_OF_CART, false, false ) ), 'увеличить на 12.4% от всей корзины' ), 'Increase summary must support percent_of_cart.' );
+rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Increase physical delivery percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY, false, false ) ), 'увеличить на 10% от физ. товаров и доставки' ), 'Increase summary must relabel persisted percent_of_order_and_delivery.' );
+rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Increase cart delivery percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_CART_AND_DELIVERY, false, false ) ), 'увеличить на 10% от всей корзины и доставки' ), 'Increase summary must support percent_of_cart_and_delivery.' );
 rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Decrease percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY, false, false ) ), 'уменьшить на 10% от доставки' ), 'Decrease summary must contain "уменьшить на" and no space before percent.' );
 rules_admin_smoke_assert( 'установить 500 руб.' === $operation_summary->invoke( $admin_page, new Rule( null, 'Equals rub', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::EQUALS, 500, RuleOperationBases::RUBLES, false, false ) ), 'Equals summary must not contain extra "на" and rub values must keep spacing.' );
 rules_admin_smoke_assert( 'увеличить на 3 календарных дня' === $operation_summary->invoke( $admin_page, new Rule( null, 'Days', true, 10, 'default', '', RuleActionTypes::CHANGE_DELIVERY_DAYS, RuleOperationTypes::INCREASE, 3, RuleOperationBases::CALENDAR_DAYS, false, false ) ), 'Day values must keep normal spacing.' );
@@ -628,6 +685,9 @@ rules_admin_smoke_assert( str_contains( $admin_page_source, 'get_rules_for_targe
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'Исходный срок доставки' ), 'Simulation UI must always expose original delivery days.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'Итоговый срок' ), 'Simulation result must show final delivery days.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'RuleOperationBases::CALENDAR_DAYS' ), 'change_delivery_days must default to calendar_days in admin handling.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'Физ. товары после скидок' ) && str_contains( $admin_page_source, 'Вся корзина после скидок' ), 'Rules simulator must expose separate physical and full-cart totals.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'RuleOperationBases::PERCENT_OF_CART' ) && str_contains( $admin_page_source, 'RuleOperationBases::PERCENT_OF_CART_AND_DELIVERY' ), 'Rules admin must expose new full-cart operation bases.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'сумма доставляемых товаров' ) && str_contains( $admin_page_source, 'сумма всей корзины' ), 'Rules admin summaries must expose delivered-goods and full-cart condition labels.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, "delivery_type_options()" ), 'Simulation delivery_type must use select values pickup/courier.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'payment_method_options()' ) && ! str_contains( $admin_page_source, "'payment_method' => 'card'" ), 'Simulation payment_method must use WooCommerce gateways without hardcoded card default.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, "Условие %d" ) && str_contains( $admin_page_source, 'data-condition-group' ), 'Condition group UI must use select groups 1/2/3.' );
@@ -645,6 +705,7 @@ foreach ( array( 'руб.', 'шт.', 'грамм', 'куб.м.' ) as $unit_label
 	rules_admin_smoke_assert( str_contains( $schema_source, $unit_label ), 'Condition UI schema must expose unit label: ' . $unit_label );
 }
 rules_admin_smoke_assert( str_contains( $schema_source, "'input'     => 'fias_id'" ), 'City condition UI must be FIAS ID only.' );
+rules_admin_smoke_assert( str_contains( $schema_source, 'Сумма доставляемых товаров' ) && str_contains( $schema_source, 'Сумма всей корзины' ), 'Condition UI schema must expose delivered-goods and full-cart condition labels.' );
 
 $delivery_services_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 rules_admin_smoke_assert( str_contains( $delivery_services_admin_source, 'render_rules_tab' ) && str_contains( $delivery_services_admin_source, 'Скопировать дефолтные правила' ), 'Delivery service page must expose service rules tab with copy default rules action.' );

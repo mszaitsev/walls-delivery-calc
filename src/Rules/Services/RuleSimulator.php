@@ -46,7 +46,8 @@ final class RuleSimulator {
 			destination: new Address( country_code: 'RU', city: 'Moscow', street: 'Tverskaya', house: '1', raw_address: 'Moscow, Tverskaya 1' ),
 			delivery_type: 'courier',
 			payment_method: 'card',
-			calculation_date: '2026-05-21'
+			calculation_date: '2026-05-21',
+			all_cart_items_total: Money::from_rubles( 1000 )
 		);
 	}
 }

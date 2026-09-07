@@ -442,7 +442,8 @@ final class RulesAdminPage {
 				<div class="wdc-rule-grid">
 					<label><span><?php echo esc_html__( 'Исходная цена доставки', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[delivery_price]" value="<?php echo esc_attr( (string) $input['delivery_price'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Исходный срок доставки', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[delivery_days]" value="<?php echo esc_attr( (string) $input['delivery_days'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Сумма заказа', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Физ. товары после скидок', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Вся корзина после скидок', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[all_cart_items_total]" value="<?php echo esc_attr( (string) $input['all_cart_items_total'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></span><input type="number" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[country]', $this->country_options(), (string) $input['country'] ); ?></label>
 					<label><span><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[city]" value="<?php echo esc_attr( (string) $input['city'] ); ?>"></label>
@@ -766,6 +767,7 @@ final class RulesAdminPage {
 			'delivery_price' => isset( $raw['delivery_price'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['delivery_price'] ) ) : $defaults['delivery_price'],
 			'delivery_days'  => isset( $raw['delivery_days'] ) ? max( 0, (int) sanitize_text_field( (string) $raw['delivery_days'] ) ) : $defaults['delivery_days'],
 			'order_total'    => isset( $raw['order_total'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['order_total'] ) ) : $defaults['order_total'],
+			'all_cart_items_total' => isset( $raw['all_cart_items_total'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['all_cart_items_total'] ) ) : $defaults['all_cart_items_total'],
 			'weight'         => isset( $raw['weight'] ) ? max( 0, (int) sanitize_text_field( (string) $raw['weight'] ) ) : $defaults['weight'],
 			'country'        => isset( $raw['country'] ) ? sanitize_text_field( (string) $raw['country'] ) : $defaults['country'],
 			'postal_code'    => isset( $raw['postal_code'] ) ? sanitize_text_field( (string) $raw['postal_code'] ) : $defaults['postal_code'],
@@ -787,6 +789,7 @@ final class RulesAdminPage {
 	 */
 	private function simulation_context( array $input ): RuleEvaluationContext {
 		$order_total = Money::from_rubles( (float) $input['order_total'] );
+		$all_cart_items_total = Money::from_rubles( (float) ( $input['all_cart_items_total'] ?? $input['order_total'] ) );
 		$length = (int) round( (float) $input['length_cm'] );
 		$width  = (int) round( (float) $input['width_cm'] );
 		$height = (int) round( (float) $input['height_cm'] );
@@ -805,7 +808,8 @@ final class RulesAdminPage {
 			(string) $input['payment_method'],
 			(string) $input['date'],
 			array(),
-			array( 'original_delivery_days' => (int) $input['delivery_days'], 'selected_location_fias_id' => (string) $input['location_fias_id'] )
+			array( 'original_delivery_days' => (int) $input['delivery_days'], 'selected_location_fias_id' => (string) $input['location_fias_id'] ),
+			$all_cart_items_total
 		);
 	}
 
@@ -1021,6 +1025,7 @@ final class RulesAdminPage {
 			'postal_code' => '',
 			'weight' => 1000,
 			'order_total' => 1000,
+			'all_cart_items_total' => 1000,
 			'delivery_type' => 'pickup',
 			'length_cm' => 10,
 			'width_cm' => 10,
@@ -1044,7 +1049,8 @@ final class RulesAdminPage {
 					<label><span><?php echo esc_html__( 'Длина товаров/исходного места, см', 'walls-delivery-calc' ); ?></span><input type="number" min="0" step="0.1" name="simulation[length_cm]" value="<?php echo esc_attr( (string) $input['length_cm'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Ширина товаров/исходного места, см', 'walls-delivery-calc' ); ?></span><input type="number" min="0" step="0.1" name="simulation[width_cm]" value="<?php echo esc_attr( (string) $input['width_cm'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Высота товаров/исходного места, см', 'walls-delivery-calc' ); ?></span><input type="number" min="0" step="0.1" name="simulation[height_cm]" value="<?php echo esc_attr( (string) $input['height_cm'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Сумма заказа, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Физ. товары после скидок, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Вся корзина после скидок, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[all_cart_items_total]" value="<?php echo esc_attr( (string) $input['all_cart_items_total'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Дата', 'walls-delivery-calc' ); ?></span><input type="date" name="simulation[date]" value="<?php echo esc_attr( (string) $input['date'] ); ?>"></label>
 				</div>
 				<p class="submit"><button class="button button-primary" type="submit"><?php echo esc_html__( 'Симулировать расчет службы', 'walls-delivery-calc' ); ?></button></p>
@@ -1137,8 +1143,10 @@ final class RulesAdminPage {
 		return array(
 			RuleOperationBases::RUBLES                         => __( 'руб.', 'walls-delivery-calc' ),
 			RuleOperationBases::PERCENT_OF_DELIVERY            => __( '% от доставки', 'walls-delivery-calc' ),
-			RuleOperationBases::PERCENT_OF_ORDER               => __( '% от заказа', 'walls-delivery-calc' ),
-			RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY  => __( '% от заказа и доставки', 'walls-delivery-calc' ),
+			RuleOperationBases::PERCENT_OF_ORDER               => __( '% от физ. товаров', 'walls-delivery-calc' ),
+			RuleOperationBases::PERCENT_OF_CART                => __( '% от всей корзины', 'walls-delivery-calc' ),
+			RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY  => __( '% от физ. товаров и доставки', 'walls-delivery-calc' ),
+			RuleOperationBases::PERCENT_OF_CART_AND_DELIVERY   => __( '% от всей корзины и доставки', 'walls-delivery-calc' ),
 			RuleOperationBases::CALENDAR_DAYS                  => __( 'календарных дня', 'walls-delivery-calc' ),
 			RuleOperationBases::BUSINESS_DAYS                  => __( 'рабочих дня', 'walls-delivery-calc' ),
 		)[ $value ] ?? $value;
@@ -1152,7 +1160,7 @@ final class RulesAdminPage {
 			return $value;
 		}
 
-		if ( in_array( $rule->operation_base, array( RuleOperationBases::PERCENT_OF_DELIVERY, RuleOperationBases::PERCENT_OF_ORDER, RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY ), true ) ) {
+		if ( in_array( $rule->operation_base, array( RuleOperationBases::PERCENT_OF_DELIVERY, RuleOperationBases::PERCENT_OF_ORDER, RuleOperationBases::PERCENT_OF_CART, RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY, RuleOperationBases::PERCENT_OF_CART_AND_DELIVERY ), true ) ) {
 			return $value . $base;
 		}
 
@@ -1167,7 +1175,8 @@ final class RulesAdminPage {
 
 	private function condition_type_label( string $value ): string {
 		return array(
-			RuleConditionTypes::ORDER_TOTAL    => __( 'сумма заказа', 'walls-delivery-calc' ),
+			RuleConditionTypes::ORDER_TOTAL    => __( 'сумма доставляемых товаров', 'walls-delivery-calc' ),
+			RuleConditionTypes::CART_TOTAL     => __( 'сумма всей корзины', 'walls-delivery-calc' ),
 			RuleConditionTypes::ITEMS_COUNT    => __( 'количество товаров', 'walls-delivery-calc' ),
 			RuleConditionTypes::PAYMENT_METHOD => __( 'способ оплаты', 'walls-delivery-calc' ),
 			RuleConditionTypes::CITY           => __( 'город', 'walls-delivery-calc' ),
@@ -1229,6 +1238,7 @@ final class RulesAdminPage {
 			'delivery_price' => 450,
 			'delivery_days'  => 5,
 			'order_total'    => 1000,
+			'all_cart_items_total' => 1000,
 			'weight'         => 12000,
 			'country'        => 'RU',
 			'postal_code'    => '',

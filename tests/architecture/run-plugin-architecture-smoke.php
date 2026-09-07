@@ -701,6 +701,8 @@ foreach ( array( 'src', 'assets/admin' ) as $dir ) {
 $checkout_selector_source = plugin_architecture_source( 'src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
 $checkout_sort_source = (string) file_get_contents( plugin_architecture_path( 'assets/frontend/checkout-sort.js' ) );
 $shipping_registrar_source = plugin_architecture_source( 'src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
+$rule_operation_bases_source = plugin_architecture_source( 'src/Rules/ValueObjects/RuleOperationBases.php' );
+$rule_evaluator_source = plugin_architecture_source( 'src/Rules/Services/RuleEvaluator.php' );
 plugin_architecture_assert(
 	str_contains( $checkout_selector_source, 'wdc-platform-pickup-point' )
 	&& str_contains( $checkout_sort_source, 'wdc-platform-pickup-point' )
@@ -717,6 +719,20 @@ plugin_architecture_assert(
 	&& ! str_contains( $shipping_registrar_source, "label ===" ),
 	'WooCommerce chosen-method preservation must run at the final shipping filter boundary and use only fresh package rates plus WDC-owned rate metadata.'
 );
+plugin_architecture_assert(
+	str_contains( $rule_operation_bases_source, 'PERCENT_OF_CART' )
+	&& str_contains( $rule_operation_bases_source, 'PERCENT_OF_CART_AND_DELIVERY' )
+	&& str_contains( $rule_evaluator_source, 'all_cart_items_total()' )
+	&& ! str_contains( $rule_evaluator_source, 'WC()' ),
+	'Rule Engine cart bases must be typed in RuleOperationBases/RuleEvaluationContext and RuleEvaluator must remain Woo-independent.'
+);
+foreach ( array( 'src/Rules/Domain', 'src/Rules/Services', 'src/Rules/ValueObjects', 'src/Rules/Storage' ) as $rules_layer ) {
+	foreach ( plugin_architecture_php_files( $rules_layer ) as $file ) {
+		$source = (string) file_get_contents( $file );
+		$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
+		plugin_architecture_assert( ! str_contains( $source, 'WC()' ), 'Rule Engine domain/services/storage must not call WooCommerce globals: ' . $relative );
+	}
+}
 
 $js_source = '';
 foreach ( plugin_architecture_generic_js_files() as $file ) {

@@ -22,6 +22,9 @@ return array(
 	'framework.adapter-registry' => array( 'path' => 'tests/shipments/run-carrier-adapter-registry-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.pickup-provider-registry' => array( 'path' => 'tests/pickup/run-carrier-pickup-provider-registry-smoke.php', 'groups' => array( 'framework' ) ),
 
+	'rules.engine' => array( 'path' => 'tests/rules/run-rules-smoke.php', 'groups' => array( 'rules', 'status-core' ) ),
+	'rules.admin' => array( 'path' => 'tests/rules/run-rules-admin-smoke.php', 'groups' => array( 'rules', 'status-core' ) ),
+
 	'manual-delivery.foundation' => array( 'path' => 'tests/manual-delivery/run-manual-delivery-foundation-smoke.php', 'groups' => array( 'manual-delivery' ) ),
 	'manual-delivery.pickup-provider-routing' => array( 'path' => 'tests/checkout/run-pickup-provider-routing-smoke.php', 'groups' => array( 'manual-delivery' ) ),
 	'manual-delivery.shipments' => array( 'path' => 'tests/manual-delivery/run-manual-delivery-shipments-smoke.php', 'groups' => array( 'manual-delivery' ) ),

@@ -155,7 +155,9 @@ final class RuleEvaluator {
 
 		$base = match ( $rule->operation_base ) {
 			RuleOperationBases::PERCENT_OF_ORDER              => $context->order_total,
+			RuleOperationBases::PERCENT_OF_CART               => $context->all_cart_items_total(),
 			RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY => $context->order_total->add( $current_price ),
+			RuleOperationBases::PERCENT_OF_CART_AND_DELIVERY  => $context->all_cart_items_total()->add( $current_price ),
 			default                                           => $current_price,
 		};
 
