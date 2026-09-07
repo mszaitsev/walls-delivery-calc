@@ -274,6 +274,7 @@ use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
 use WallsShop\WDC\Locations\Coordinates\LocationCoordinatesDadataBatchUpdater;
@@ -469,7 +470,8 @@ final class Plugin {
 		$this->container->register( PluginConstants::class, fn(): PluginConstants => new PluginConstants( $this->environment ) );
 		$this->container->register( Logger::class, fn(): Logger => new Logger() );
 		$this->container->register( SettingsRepository::class, fn(): SettingsRepository => new SettingsRepository() );
-		$this->container->register( CheckoutFeatureGate::class, fn(): CheckoutFeatureGate => new CheckoutFeatureGate( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( PlatformRuntimeSettings::class, fn(): PlatformRuntimeSettings => new PlatformRuntimeSettings( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( CheckoutFeatureGate::class, fn(): CheckoutFeatureGate => new CheckoutFeatureGate( $this->container->get( SettingsRepository::class ), $this->container->get( PlatformRuntimeSettings::class ) ) );
 		$this->container->register( EncryptionService::class, fn(): EncryptionService => new EncryptionService() );
 		$this->container->register( MigrationManager::class, fn(): MigrationManager => new MigrationManager( $this->environment->version(), $this->environment->plugin_dir() . 'database/migrations' ) );
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
@@ -752,7 +754,7 @@ final class Plugin {
 		$this->container->register( ShipmentCreationService::class, fn(): ShipmentCreationService => new ShipmentCreationService( $this->container->get( OrderShipmentRepository::class ), array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ), $this->container->get( YandexShipmentAdapter::class ), $this->container->get( PekShipmentAdapter::class ), $this->container->get( OzonDeliveryShipmentAdapter::class ) ), $this->container->get( ShipmentActualCostService::class ), $this->container->get( Logger::class ), $this->container->get( CarrierShipmentAdapterRegistry::class ), array( $this->container->get( RussianPostShipmentPersistenceMapper::class ), $this->container->get( CdekShipmentPersistenceMapper::class ), $this->container->get( DpdShipmentPersistenceMapper::class ), $this->container->get( YandexShipmentPersistenceMapper::class ), $this->container->get( PekShipmentPersistenceMapper::class ), $this->container->get( OzonDeliveryShipmentPersistenceMapper::class ) ), $this->container->get( ShipmentCreationAttemptService::class ) ) );
 		$this->container->register( ShipmentOrderStatusMappingService::class, fn(): ShipmentOrderStatusMappingService => new ShipmentOrderStatusMappingService( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( ShipmentStatusUpdateService::class, fn(): ShipmentStatusUpdateService => new ShipmentStatusUpdateService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( RussianPostTrackingApiClient::class ), $this->container->get( RussianPostTrackingStatusMapper::class ), $this->container->get( ShipmentActualCostResolver::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
-		$this->container->register( ShipmentStatusAutoSyncService::class, fn(): ShipmentStatusAutoSyncService => new ShipmentStatusAutoSyncService( $this->container->get( SettingsRepository::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ), null, $this->container->get( CdekOrderStatusService::class ), null, $this->container->get( CarrierShipmentAdapterRegistry::class ), $this->container->get( DpdEventSyncService::class ), $this->container->get( DpdSettings::class ) ) );
+		$this->container->register( ShipmentStatusAutoSyncService::class, fn(): ShipmentStatusAutoSyncService => new ShipmentStatusAutoSyncService( $this->container->get( SettingsRepository::class ), $this->container->get( PlatformRuntimeSettings::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ), null, $this->container->get( CdekOrderStatusService::class ), null, $this->container->get( CarrierShipmentAdapterRegistry::class ), $this->container->get( DpdEventSyncService::class ), $this->container->get( DpdSettings::class ) ) );
 		$this->container->register( ShipmentStatusAutoSyncCron::class, fn(): ShipmentStatusAutoSyncCron => new ShipmentStatusAutoSyncCron( $this->container->get( ShipmentStatusAutoSyncService::class ) ) );
 		$this->container->register( ShipmentBacklogService::class, fn(): ShipmentBacklogService => new ShipmentBacklogService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( RussianPostOtpravkaApiClient::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentActualCostService::class ), $this->container->get( RussianPostShipmentActualCostExtractor::class ), $this->container->get( ShipmentCreationAttemptService::class ) ) );
 		$this->container->register( RussianPostPassportPointNormalizer::class, fn(): RussianPostPassportPointNormalizer => new RussianPostPassportPointNormalizer() );
@@ -1059,7 +1061,7 @@ final class Plugin {
 				$this->container->get( RussianPostPickupDiagnosticsService::class )
 			)
 		);
-		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );
+		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( PlatformRuntimeSettings::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
 		$this->container->register( JetLogisticGeographyAdminPage::class, fn(): JetLogisticGeographyAdminPage => new JetLogisticGeographyAdminPage( $this->container->get( JetLogisticGeographyImportService::class ), $this->container->get( JetLogisticCitiesCsvClient::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ), $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticCredentials::class ), $this->container->get( JetLogisticApiDiagnosticService::class ) ) );
 		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ), $this->container->get( JetLogisticApiDiagnosticService::class ) ) );
@@ -1196,10 +1198,38 @@ final class Plugin {
 		add_action( 'plugins_loaded', array( $this, 'boot_modules' ), 20 );
 		register_activation_hook( $this->environment->plugin_file(), array( $this, 'activate' ) );
 		register_deactivation_hook( $this->environment->plugin_file(), array( $this, 'deactivate' ) );
+		if ( $this->platform_runtime_enabled() ) {
+			$this->register_checkout_runtime_hooks();
+		}
+
+		if ( is_admin() ) {
+			$this->register_admin_preparation_hooks();
+			if ( $this->platform_runtime_enabled() ) {
+				$this->register_order_runtime_hooks();
+			}
+		}
+		$this->container->get( RussianPostPickupImporter::class )->register();
+		$this->container->get( DpdPickupPointAutoSync::class )->register();
+		$this->container->get( OzonDeliveryPickupScheduler::class )->register();
+		add_action( YandexDeliveryGeoPipelineV2Runner::CRON_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_step' ) );
+		add_action( YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_start' ) );
+		$this->container->get( YandexDeliveryGeoPipelineV2Runner::class )->ensure_schedule();
+		add_action( 'rest_api_init', array( $this->container->get( PickupPointsRestController::class ), 'register' ) );
+		if ( $this->platform_runtime_enabled() ) {
+			$this->register_order_background_runtime_hooks();
+		}
+	}
+
+	private function platform_runtime_enabled(): bool {
+		return $this->container->get( PlatformRuntimeSettings::class )->runtime_enabled();
+	}
+
+	private function register_checkout_runtime_hooks(): void {
 		$this->container->get( DeliveryQuoteCacheManager::class )->register();
 		$this->container->get( ShippingMethodRegistrar::class )->register();
 		$this->container->get( CheckoutLocationAjax::class )->register();
 		$this->container->get( AddressSuggestionAjax::class )->register();
+		add_action( 'rest_api_init', array( $this->container->get( CheckoutPickupPointRestController::class ), 'register' ) );
 		if ( $this->container->get( CheckoutFeatureGate::class )->enabled() ) {
 			$this->container->get( CheckoutRateRenderer::class )->register();
 			$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
@@ -1213,36 +1243,34 @@ final class Plugin {
 			$this->container->get( CheckoutDebugPanel::class )->register();
 			$this->container->get( SelfPickupDiscountService::class )->register();
 		}
+	}
 
-		if ( is_admin() ) {
-			$this->container->get( AdminNotices::class )->register();
-			$this->container->get( AdminMenu::class )->register();
-			$this->container->get( SettingsAdminPage::class )->register();
-			$this->container->get( CalendarAdminPage::class )->register();
-			$this->container->get( LocationsAdminPage::class )->register();
-			$this->container->get( RulesAdminPage::class )->register();
-			$this->container->get( OrderDeliveryRecalculationAdminController::class )->register();
-			$this->container->get( DeliveryServicesAdminPage::class )->register();
-			$this->container->get( ShipmentStatusesAdminPage::class )->register();
-			$this->container->get( OrderDeliveryMetabox::class )->register();
-			$this->container->get( OrderShipmentsMetabox::class )->register();
-			$this->container->get( ShipmentDocumentDownloadService::class )->register();
-		}
-		$this->container->get( RussianPostPickupImporter::class )->register();
+	private function register_admin_preparation_hooks(): void {
+		$this->container->get( AdminNotices::class )->register();
+		$this->container->get( AdminMenu::class )->register();
+		$this->container->get( SettingsAdminPage::class )->register();
+		$this->container->get( CalendarAdminPage::class )->register();
+		$this->container->get( LocationsAdminPage::class )->register();
+		$this->container->get( RulesAdminPage::class )->register();
+		$this->container->get( DeliveryServicesAdminPage::class )->register();
+		$this->container->get( ShipmentStatusesAdminPage::class )->register();
+	}
+
+	private function register_order_runtime_hooks(): void {
+		$this->container->get( OrderDeliveryRecalculationAdminController::class )->register();
+		$this->container->get( OrderDeliveryMetabox::class )->register();
+		$this->container->get( OrderShipmentsMetabox::class )->register();
+		$this->container->get( ShipmentDocumentDownloadService::class )->register();
+	}
+
+	private function register_order_background_runtime_hooks(): void {
 		$this->container->get( ShipmentStatusAutoSyncCron::class )->register();
-		$this->container->get( DpdPickupPointAutoSync::class )->register();
-		$this->container->get( OzonDeliveryPickupScheduler::class )->register();
 		add_action( ShipmentCostAnalyticsIndexer::SHIPMENT_CHANGED_HOOK, array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_shipment_changed' ), 10, 3 );
 		add_action( ShipmentCostAnalyticsIndexer::SHIPMENT_DELETED_HOOK, array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_shipment_changed' ), 10, 2 );
 		add_action( 'wdc_delivery_calculation_changed', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_shipment_changed' ), 10, 1 );
 		add_action( 'woocommerce_before_delete_order', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
 		add_action( 'woocommerce_trash_order', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
 		add_action( 'woocommerce_untrash_order', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_restored' ), 10, 1 );
-		add_action( YandexDeliveryGeoPipelineV2Runner::CRON_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_step' ) );
-		add_action( YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_start' ) );
-		$this->container->get( YandexDeliveryGeoPipelineV2Runner::class )->ensure_schedule();
-		add_action( 'rest_api_init', array( $this->container->get( PickupPointsRestController::class ), 'register' ) );
-		add_action( 'rest_api_init', array( $this->container->get( CheckoutPickupPointRestController::class ), 'register' ) );
 	}
 
 	public function boot_modules(): void {

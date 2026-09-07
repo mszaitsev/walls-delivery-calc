@@ -6,6 +6,7 @@ use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Admin\ShipmentStatusesAdminPage;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
@@ -226,6 +227,7 @@ $registry = new CarrierShipmentAdapterRegistry(
 );
 $service = new ShipmentStatusAutoSyncService(
 	$settings,
+	new PlatformRuntimeSettings( $settings ),
 	$repository,
 	$status_updates,
 	$order_status_mapping,

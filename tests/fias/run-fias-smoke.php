@@ -13,6 +13,7 @@ use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
 use WallsShop\WDC\Locations\Fias\FiasEndpoints;
@@ -131,7 +132,7 @@ fias_smoke_assert( '********' === $credentials->masked_token(), 'Masked token mu
 fias_smoke_assert( ! str_contains( $credentials->masked_token(), 'raw-secret-token' ), 'Raw token must not appear in masked output.' );
 
 ob_start();
-( new SettingsAdminPage( $settings, $credentials ) )->render_page();
+( new SettingsAdminPage( $settings, new PlatformRuntimeSettings( $settings ), $credentials ) )->render_page();
 $settings_html = (string) ob_get_clean();
 fias_smoke_assert( ! str_contains( $settings_html, 'raw-secret-token' ), 'Raw token must never appear in settings UI.' );
 fias_smoke_assert( str_contains( $settings_html, '********' ), 'Settings UI must show only token mask.' );

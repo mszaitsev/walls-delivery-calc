@@ -27,6 +27,7 @@ use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Rules\Domain\Rule;
@@ -374,7 +375,7 @@ rp_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для кур�
 
 $GLOBALS['wdc_rp_options'] = array();
 $settings = new SettingsRepository();
-$admin = new SettingsAdminPage( $settings, null, null, null, new RussianPostSettings( $settings ) );
+$admin = new SettingsAdminPage( $settings, new PlatformRuntimeSettings( $settings ), null, null, null, new RussianPostSettings( $settings ) );
 ob_start();
 $admin->render_page();
 $rendered = (string) ob_get_clean();
@@ -384,7 +385,7 @@ $sanitized = $admin->sanitize_settings( array( 'checkout_sort_mode' => 'fastest'
 rp_smoke_assert( ! array_key_exists( 'russian_post_worldwide_parcel', $sanitized ), 'Platform settings sanitize must not write Russian Post service-specific settings.' );
 
 $settings->replace( array( 'russian_post_worldwide_parcel' => array( 'enabled' => false, 'max_package_weight_g' => 12345 ) ) );
-$admin = new SettingsAdminPage( $settings, null, null, null, new RussianPostSettings( $settings ) );
+$admin = new SettingsAdminPage( $settings, new PlatformRuntimeSettings( $settings ), null, null, null, new RussianPostSettings( $settings ) );
 $sanitized = $admin->sanitize_settings(
 	array(
 		'russian_post_worldwide_parcel' => array(

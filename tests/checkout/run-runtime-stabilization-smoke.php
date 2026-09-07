@@ -96,7 +96,7 @@ if ( ! function_exists( 'register_deactivation_hook' ) ) {
 
 if ( ! function_exists( 'is_admin' ) ) {
 	function is_admin(): bool {
-		return false;
+		return (bool) ( $GLOBALS['wdc_test_is_admin'] ?? false );
 	}
 }
 
@@ -157,6 +157,16 @@ if ( ! function_exists( 'wp_create_nonce' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_nonce_field' ) ) {
+	function wp_nonce_field( string|int $action = -1, string $name = '_wpnonce', bool $referer = true, bool $display = true ): string {
+		$field = '<input type="hidden" name="' . esc_attr( $name ) . '" value="' . esc_attr( wp_create_nonce( $action ) ) . '">';
+		if ( $display ) {
+			echo $field;
+		}
+		return $field;
+	}
+}
+
 if ( ! function_exists( 'wp_verify_nonce' ) ) {
 	function wp_verify_nonce( string $nonce, string $action ): bool {
 		return 'nonce-' . $action === $nonce;
@@ -194,6 +204,22 @@ if ( ! function_exists( 'selected' ) ) {
 			echo $result;
 		}
 		return $result;
+	}
+}
+
+if ( ! function_exists( 'checked' ) ) {
+	function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
+		$result = (string) $checked === (string) $current ? ' checked="checked"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+		return $result;
+	}
+}
+
+if ( ! function_exists( 'submit_button' ) ) {
+	function submit_button( string $text = 'Save Changes' ): void {
+		echo '<button type="submit" class="button button-primary">' . esc_html( $text ) . '</button>';
 	}
 }
 
@@ -490,6 +516,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Services\KeyboardLayoutTransformer;
@@ -505,16 +532,38 @@ use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 use WallsShop\WDC\Shipments\Admin\ShipmentCostAnalyticsAdminSection;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsIndexer;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsService;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostThresholdPolicy;
 use WallsShop\WDC\Shipments\Analytics\Storage\ShipmentCostAnalyticsRepository;
 use WallsShop\WDC\Shipments\Analytics\Storage\ShipmentCostAnalyticsTable;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 
 function runtime_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
 	}
+}
+
+function runtime_smoke_reset_hooks(): void {
+	$GLOBALS['wdc_test_actions'] = array();
+	$GLOBALS['wdc_test_filters'] = array();
+	$GLOBALS['wdc_test_scripts'] = array();
+	$GLOBALS['wdc_test_localized_scripts'] = array();
+	$GLOBALS['wdc_test_styles'] = array();
+}
+
+function runtime_smoke_has_action_callback( string $hook, string $class ): bool {
+	foreach ( $GLOBALS['wdc_test_actions'][ $hook ] ?? array() as $entry ) {
+		$callback = $entry[0] ?? null;
+		if ( is_array( $callback ) && is_object( $callback[0] ?? null ) && $callback[0] instanceof $class ) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 function runtime_smoke_environment(): PluginEnvironment {
@@ -588,7 +637,17 @@ runtime_smoke_assert( NewShippingMethod::class !== $settings_property->getDeclar
 runtime_smoke_assert( $settings_property->isPublic(), 'Inherited WC_Settings_API::$settings must remain public.' );
 
 $settings = new SettingsRepository();
-$gate     = new CheckoutFeatureGate( $settings );
+$runtime_settings = new PlatformRuntimeSettings( $settings );
+$gate     = new CheckoutFeatureGate( $settings, $runtime_settings );
+$settings->replace( array() );
+runtime_smoke_assert( $runtime_settings->runtime_enabled(), 'Missing legacy runtime setting must keep WDC runtime enabled.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
+runtime_smoke_assert( $runtime_settings->runtime_enabled(), 'Explicit enabled runtime setting must enable WDC runtime.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );
+runtime_smoke_assert( ! $runtime_settings->runtime_enabled(), 'Explicit disabled runtime setting must disable WDC runtime.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, 'definitely-not-bool' );
+runtime_smoke_assert( $runtime_settings->runtime_enabled(), 'Invalid persisted runtime setting must normalize to the safe enabled default.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
 runtime_smoke_assert( ! $gate->enabled(), 'Feature gate must be false by default.' );
 $settings->set( 'enable_new_checkout_shipping', false );
 runtime_smoke_assert( ! $gate->enabled(), 'Feature gate must be false when enable_new_checkout_shipping is disabled.' );
@@ -602,6 +661,9 @@ $settings->set( 'show_checkout_debug_panel', false );
 runtime_smoke_assert( ! $gate->debug_panel_enabled(), 'Debug panel gate must require show_checkout_debug_panel.' );
 $settings->set( 'show_checkout_debug_panel', true );
 runtime_smoke_assert( $gate->debug_panel_enabled(), 'Debug panel gate must require both checkout and debug settings.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );
+runtime_smoke_assert( ! $gate->enabled(), 'Checkout feature gate must require the platform runtime switch.' );
+runtime_smoke_assert( ! $gate->debug_panel_enabled(), 'Debug panel gate must also require the platform runtime switch.' );
 $settings->replace( array() );
 
 $plugin = new Plugin( runtime_smoke_environment() );
@@ -623,6 +685,22 @@ runtime_smoke_assert( str_contains( $overview_html, 'Очистить кеш т�
 runtime_smoke_assert( str_contains( $overview_html, 'wdc_overview_action' ), 'Overview page must render overview POST action field.' );
 runtime_smoke_assert( ! str_contains( $overview_html, 'Флаги функций' ), 'Overview page must not render the legacy feature flags section.' );
 runtime_smoke_assert( ! str_contains( $overview_html, 'Требования' ), 'Overview page must not render the requirements section.' );
+
+$settings_page = $container->get( SettingsAdminPage::class );
+ob_start();
+$settings_page->render_page();
+$settings_html = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $settings_html, 'Использовать WDC в WooCommerce' ), 'Platform settings page must render the WooCommerce runtime switch.' );
+runtime_smoke_assert( str_contains( $settings_html, PlatformRuntimeSettings::RUNTIME_ENABLED_KEY ), 'Runtime switch must be stored through the platform settings key.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );
+ob_start();
+$settings_page->render_page();
+$disabled_settings_html = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $disabled_settings_html, 'WDC настроен, но интеграция с WooCommerce сейчас отключена.' ), 'Settings page must show an informational notice when runtime is disabled.' );
+$_POST = array( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => array( 'bad' ) );
+$sanitized_settings = $settings_page->sanitize_settings( $_POST );
+runtime_smoke_assert( false === $sanitized_settings[ PlatformRuntimeSettings::RUNTIME_ENABLED_KEY ], 'Submitted invalid runtime switch value must normalize to disabled through checkbox semantics.' );
+$settings->replace( array() );
 $legacy_class = 'Feature' . 'Flags';
 foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) ) as $src_file ) {
 	if ( ! $src_file instanceof SplFileInfo || 'php' !== $src_file->getExtension() ) {
@@ -692,6 +770,64 @@ runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'
 /** @var ShippingMethodRegistrar $registrar */
 $registrar = $container->get( ShippingMethodRegistrar::class );
 runtime_smoke_assert( array() === $registrar->register_shipping_method( array() ), 'Shipping method registration must be disabled while feature gate is false.' );
+
+runtime_smoke_reset_hooks();
+$GLOBALS['wdc_test_options']['wdc_core_settings'] = array(
+	PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => false,
+	'enable_new_checkout_shipping' => true,
+);
+$runtime_disabled_plugin = new Plugin( runtime_smoke_environment() );
+$runtime_disabled_plugin->register();
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_filters']['woocommerce_shipping_methods'] ), 'Checkout shipping method filter must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutLocationAjax::ACTION] ), 'Checkout location AJAX must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_select_domestic_tariff'] ), 'Checkout tariff selector AJAX must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend checkout assets must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController::class ), 'Checkout pickup REST routes must not register when platform runtime is disabled.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\PickupPointsRestController::class ), 'Carrier pickup/admin preparation REST routes must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions'][ ShipmentStatusAutoSyncCron::HOOK ] ), 'Shipment status autosync callback must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions'][ ShipmentCostAnalyticsIndexer::SHIPMENT_CHANGED_HOOK ] ), 'Shipment analytics mutation indexer must not register when platform runtime is disabled.' );
+
+$GLOBALS['wdc_test_is_admin'] = true;
+runtime_smoke_reset_hooks();
+$runtime_disabled_admin_plugin = new Plugin( runtime_smoke_environment() );
+$runtime_disabled_admin_plugin->register();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['admin_menu'] ), 'WDC admin menu/pages must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_dpd_geography_import_status'] ), 'Carrier geography import admin AJAX must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_ozon_delivery_pickup_status'] ), 'Carrier pickup catalog import admin AJAX must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_gar_import_status'] ), 'Locations/geography admin AJAX must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['add_meta_boxes_shop_order'] ), 'Order delivery metabox must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['add_meta_boxes'] ), 'Shipment order metabox must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_order_delivery_recalculate_preview'] ), 'Order delivery recalculation AJAX must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_preview_shipment'] ), 'Shipment preview AJAX must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['admin_post_wdc_download_shipment_document'] ), 'Shipment document download action must not register when platform runtime is disabled.' );
+
+$GLOBALS['wdc_test_options']['wdc_core_settings'] = array(
+	PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
+	'enable_new_checkout_shipping' => true,
+);
+runtime_smoke_reset_hooks();
+$runtime_enabled_admin_plugin = new Plugin( runtime_smoke_environment() );
+$runtime_enabled_admin_plugin->register();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_filters']['woocommerce_shipping_methods'] ), 'Runtime enabled must preserve checkout shipping method registration.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['add_meta_boxes_shop_order'] ), 'Runtime enabled must preserve order delivery metabox registration.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['add_meta_boxes'] ), 'Runtime enabled must preserve Shipment Framework metabox registration.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions'][ ShipmentStatusAutoSyncCron::HOOK ] ), 'Runtime enabled must preserve shipment autosync cron registration.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions'][ ShipmentCostAnalyticsIndexer::SHIPMENT_CHANGED_HOOK ] ), 'Runtime enabled must preserve shipment analytics mutation hook registration.' );
+
+$disabled_autosync_settings = new SettingsRepository();
+$disabled_autosync_settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );
+$disabled_autosync = new ShipmentStatusAutoSyncService(
+	$disabled_autosync_settings,
+	new PlatformRuntimeSettings( $disabled_autosync_settings ),
+	$container->get( \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository::class ),
+	$container->get( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class )
+);
+$disabled_autosync_result = $disabled_autosync->run( 'cron' );
+runtime_smoke_assert( 'runtime_disabled' === (string) ( $disabled_autosync_result['status'] ?? '' ), 'Already scheduled order-related autosync execution must stop when platform runtime is disabled.' );
+$GLOBALS['wdc_test_is_admin'] = false;
+$GLOBALS['wdc_test_options']['wdc_core_settings'] = array();
+runtime_smoke_reset_hooks();
+
 $city_selector_config = $registrar->city_selector_config();
 runtime_smoke_assert( 'https://example.test/wp-admin/admin-ajax.php' === $city_selector_config['ajax_url'], 'City selector config must expose AJAX URL.' );
 runtime_smoke_assert( 3 === $city_selector_config['min_chars'], 'City selector config must require three characters.' );
@@ -1071,7 +1207,7 @@ $admin_menu->render_page();
 $clear_success_html = (string) ob_get_clean();
 runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_admin', $GLOBALS['wpdb']->options ) && str_contains( $clear_success_html, 'Кеш тарифов доставки очищен' ) && str_contains( $clear_success_html, 'Удалено записей: 1' ), 'Overview cache clear action must render success notice after clear.' );
 
-$settings_page = new SettingsAdminPage( $settings );
+$settings_page = new SettingsAdminPage( $settings, $runtime_settings );
 $legacy_location_limit_key = 'location' . '_search' . '_limit';
 runtime_smoke_assert( 0 === $settings->get_int( $legacy_location_limit_key, 0 ), 'SettingsRepository must not default the legacy location limit key.' );
 runtime_smoke_assert( 100 === $settings->get_int( 'checkout_location_search_limit', 0 ), 'SettingsRepository must default checkout_location_search_limit to 100.' );
@@ -1111,7 +1247,8 @@ runtime_smoke_assert( 'fallback' === $fallback->rates[0]->carrier_key, 'Fallback
 
 $debug_session = new CheckoutSessionManager();
 $debug_session->save_debug( array( 'rates_count' => 1, 'fallback_used' => true ) );
-$debug_gate = new CheckoutFeatureGate( new SettingsRepository() );
+$debug_gate_settings = new SettingsRepository();
+$debug_gate = new CheckoutFeatureGate( $debug_gate_settings, new PlatformRuntimeSettings( $debug_gate_settings ) );
 ob_start();
 ( new CheckoutDebugPanel( $debug_session, $debug_gate ) )->render();
 $debug_output = (string) ob_get_clean();
@@ -1127,7 +1264,7 @@ $settings->replace(
 	)
 );
 ob_start();
-( new CheckoutDebugPanel( $debug_session, new CheckoutFeatureGate( $settings ) ) )->render();
+( new CheckoutDebugPanel( $debug_session, new CheckoutFeatureGate( $settings, new PlatformRuntimeSettings( $settings ) ) ) )->render();
 $debug_output = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $debug_output, 'Отладка checkout WDC' ), 'Debug panel must render when explicitly enabled.' );
 

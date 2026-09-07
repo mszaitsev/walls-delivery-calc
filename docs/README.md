@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.6
+Version: 0.155.7
+
+0.155.7 adds a global platform runtime setting, `Использовать WDC в WooCommerce`, stored in the existing `wdc_core_settings` option as `woocommerce_runtime_enabled`. When disabled, WDC admin pages, Delivery Services, carrier settings, geography/import/catalog tools, diagnostics, rules, calendars, and preparation background jobs remain available, but WDC does not register WooCommerce checkout integrations, order metabox/recalculation/shipment actions, shipment document downloads, shipment status autosync, or order-related shipment analytics hooks. The missing legacy value defaults to enabled, so upgrading an existing 0.155.6 production site does not unexpectedly disable runtime.
 
 0.155.6 extends Rule Engine application conditions with a full-cart total condition. Persisted `order_total` conditions keep their existing shipping-package math and stored key, but the admin UI now labels them `Сумма доставляемых товаров`; new `cart_total` conditions are labeled `Сумма всей корзины` and compare against `RuleEvaluationContext::all_cart_items_total()`, the same typed post-discount full-cart item total introduced for 0.155.5 operation bases.
 

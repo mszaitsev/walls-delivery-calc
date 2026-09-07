@@ -43,6 +43,7 @@ final class SettingsRepository {
 			array(
 			'shop_processing_days'          => 1,
 			self::SHOP_PROCESSING_WORKING_DAYS_KEY => 2,
+			PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
 			'auto_generate_next_year'       => true,
 			'enable_new_checkout_shipping' => false,
 			'checkout_sort_mode'            => 'cheapest',

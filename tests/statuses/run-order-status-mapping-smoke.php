@@ -6,6 +6,7 @@ use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
@@ -190,6 +191,7 @@ $terminal_order = new OrderStatusMappingSmokeOrder(
 $GLOBALS['wdc_order_status_mapping_orders'] = array( $terminal_order );
 $terminal_autosync = new ShipmentStatusAutoSyncService(
 	$settings,
+	new PlatformRuntimeSettings( $settings ),
 	$repository,
 	$status_updates,
 	$mapping,
@@ -250,6 +252,7 @@ order_status_mapping_assert( 1 === (int) $terminal_stats['order_statuses_skipped
 $settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
 $autosync = new ShipmentStatusAutoSyncService(
 	$settings,
+	new PlatformRuntimeSettings( $settings ),
 	$repository,
 	$status_updates,
 	$mapping,
@@ -287,6 +290,7 @@ order_status_mapping_assert( 1 === (int) $stats['shipments_updated'] && 1 === (i
 
 $autosync_error = new ShipmentStatusAutoSyncService(
 	$settings,
+	new PlatformRuntimeSettings( $settings ),
 	$repository,
 	$status_updates,
 	$mapping,

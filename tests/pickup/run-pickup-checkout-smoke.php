@@ -20,6 +20,7 @@ use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\Services\PickupPointLocationResolver;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 
@@ -870,7 +871,8 @@ $old_long_key = implode( '_', array( 'card', 'label' ) );
 pickup_checkout_assert( str_contains( $point_type_source, "'label' => 'Отделение Почты России'" ) && str_contains( $point_type_source, "russian_post_domestic_point_type_{\$key}_label" ) && str_contains( $point_type_source, "\$result['OPS']['enabled'] = true" ) && ! str_contains( $point_type_source, $old_short_key ) && ! str_contains( $point_type_source, $old_long_key ), 'Pickup type settings must provide only label and auto-enable OPS.' );
 $type_settings_values = ( new RussianPostPickupPointTypeSettings( new SettingsRepository() ) )->sanitize_admin_values( array( 'russian_post_domestic_point_type_ops_enabled' => '1', 'russian_post_domestic_point_type_ops_label' => 'Новое название' ) );
 pickup_checkout_assert( 'Новое название' === (string) $type_settings_values['russian_post_domestic_point_type_ops_label']['value'] && ! array_key_exists( "russian_post_domestic_point_type_ops_{$old_short_key}", $type_settings_values ) && ! array_key_exists( "russian_post_domestic_point_type_ops_{$old_long_key}", $type_settings_values ), 'Admin save must keep only enabled and label keys for each type.' );
-$settings_admin = new SettingsAdminPage( new SettingsRepository() );
+$settings_repository = new SettingsRepository();
+$settings_admin = new SettingsAdminPage( $settings_repository, new PlatformRuntimeSettings( $settings_repository ) );
 $email_options = $settings_admin->available_email_options();
 pickup_checkout_assert( isset( $email_options['new_order'], $email_options['customer_processing_order'], $email_options['wc_order_status_manager_custom_status'] ), 'Email settings must be built dynamically from WC()->mailer()->get_emails(), including custom Order Status Manager IDs.' );
 $email_settings = $settings_admin->sanitize_settings( array( 'pickup_email_card_enabled_emails' => array( 'new_order', 'wc_order_status_manager_custom_status', 'missing_email' ) ) );

@@ -231,6 +231,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -511,7 +512,7 @@ function checkout_selection_registrar( CheckoutSelectionSmokeCarrier $carrier, C
 	$settings->set( 'enable_new_checkout_shipping', true );
 
 	return new ShippingMethodRegistrar(
-		new CheckoutFeatureGate( $settings ),
+		new CheckoutFeatureGate( $settings, new PlatformRuntimeSettings( $settings ) ),
 		$settings,
 		checkout_selection_orchestrator( $carrier ),
 		new WooCommercePackageMapper( null, $session ),

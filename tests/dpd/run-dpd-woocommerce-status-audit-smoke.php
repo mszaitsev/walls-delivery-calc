@@ -14,6 +14,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
@@ -109,7 +110,7 @@ function dpd_woo_audit_context( array $orders, array $mapping, bool $confirm = t
 	$order_mapping = new ShipmentOrderStatusMappingService( $settings_repository );
 	$events = new DpdEventSyncService( $client, $dpd_settings, $dpd_repository, new DpdEventNormalizer(), new DpdStatusMapping( $settings_repository ), $order_mapping );
 	$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( $dpd_settings ), shipment_test_actual_cost_resolver(), $client, null, new DpdShipmentButtonPolicy() );
-	$autosync = new ShipmentStatusAutoSyncService( $settings_repository, $order_repository, ( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor(), $order_mapping, null, null, null, new CarrierShipmentAdapterRegistry( array( $adapter ) ), $events, $dpd_settings );
+	$autosync = new ShipmentStatusAutoSyncService( $settings_repository, new PlatformRuntimeSettings( $settings_repository ), $order_repository, ( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor(), $order_mapping, null, null, null, new CarrierShipmentAdapterRegistry( array( $adapter ) ), $events, $dpd_settings );
 	$registration = new DpdOrderRegistrationService( new DpdShipmentPayloadBuilder( $dpd_settings ), $client, $dpd_repository, $events );
 	return array( $soap, $events, $dpd_repository, $autosync, $registration );
 }
