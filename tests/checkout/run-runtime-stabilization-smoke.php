@@ -530,6 +530,7 @@ use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
+use WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter;
 use WallsShop\WDC\Shipments\Admin\ShipmentCostAnalyticsAdminSection;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsIndexer;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
@@ -750,6 +751,7 @@ runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_nopriv_' . Ch
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_after_shipping_rate'] ), 'Checkout rate renderer hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_review_order_before_shipping'] ), 'Address renderer hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must register when platform runtime is enabled.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_order_status_changed', ShopProcessingOrderQueueCounter::class ), 'Passive shop processing queue cache invalidation must register when platform runtime is enabled.' );
 
 /** @var ShippingMethodRegistrar $registrar */
 $registrar = $container->get( ShippingMethodRegistrar::class );
@@ -768,6 +770,7 @@ runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_select_
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend checkout assets must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController::class ), 'Checkout pickup REST routes must not register when platform runtime is disabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\PickupPointsRestController::class ), 'Carrier pickup/admin preparation REST routes must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_order_status_changed', ShopProcessingOrderQueueCounter::class ), 'Passive shop processing queue cache invalidation must remain registered when platform runtime is disabled.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions'][ ShipmentStatusAutoSyncCron::HOOK ] ), 'Shipment status autosync callback must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions'][ ShipmentCostAnalyticsIndexer::SHIPMENT_CHANGED_HOOK ] ), 'Shipment analytics mutation indexer must not register when platform runtime is disabled.' );
 
@@ -797,6 +800,14 @@ runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['add_meta_boxes_shop_o
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['add_meta_boxes'] ), 'Runtime enabled must preserve Shipment Framework metabox registration.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions'][ ShipmentStatusAutoSyncCron::HOOK ] ), 'Runtime enabled must preserve shipment autosync cron registration.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions'][ ShipmentCostAnalyticsIndexer::SHIPMENT_CHANGED_HOOK ] ), 'Runtime enabled must preserve shipment analytics mutation hook registration.' );
+
+$plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
+$order_background_offset = strpos( $plugin_source, 'private function register_order_background_runtime_hooks' );
+$boot_modules_offset = strpos( $plugin_source, 'public function boot_modules' );
+runtime_smoke_assert( false !== $order_background_offset && false !== $boot_modules_offset, 'Plugin source must expose order background runtime and boot_modules boundaries.' );
+$order_background_source = substr( $plugin_source, $order_background_offset, $boot_modules_offset - $order_background_offset );
+runtime_smoke_assert( str_contains( $plugin_source, 'register_passive_runtime_bookkeeping_hooks' ), 'Plugin composition root must expose a passive runtime bookkeeping boundary.' );
+runtime_smoke_assert( ! str_contains( $order_background_source, 'woocommerce_order_status_changed' ), 'Passive shop processing cache invalidation must not be registered inside order background runtime hooks.' );
 
 $disabled_autosync_settings = new SettingsRepository();
 $disabled_autosync_settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );

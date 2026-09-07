@@ -9,6 +9,8 @@ $GLOBALS['wdc_shop_processing_transients'] = array();
 $GLOBALS['wdc_shop_processing_order_queries'] = array();
 $GLOBALS['wdc_shop_processing_order_total'] = 0;
 $GLOBALS['wdc_shop_processing_throw_query'] = false;
+$GLOBALS['wdc_shop_processing_scripts'] = array();
+$GLOBALS['wdc_shop_processing_localized_scripts'] = array();
 
 function shop_processing_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -63,8 +65,28 @@ function wc_get_logger(): object {
 	};
 }
 
+function wp_enqueue_script( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false, bool $in_footer = false ): void {
+	$GLOBALS['wdc_shop_processing_scripts'][ $handle ] = compact( 'src', 'deps', 'ver', 'in_footer' );
+}
+
+function wp_localize_script( string $handle, string $object_name, array $l10n ): void {
+	$GLOBALS['wdc_shop_processing_localized_scripts'][ $handle ][ $object_name ] = $l10n;
+}
+
+function admin_url( string $path = '' ): string {
+	return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
+}
+
+function wp_create_nonce( string $action ): string {
+	return 'nonce-' . $action;
+}
+
 function current_time( string $type = 'mysql' ): string {
 	return '2026-05-21 12:00:00';
+}
+
+function trailingslashit( string $value ): string {
+	return rtrim( $value, '/\\' ) . '/';
 }
 
 if ( ! class_exists( 'wpdb' ) ) {
@@ -160,6 +182,7 @@ use WallsShop\WDC\Calendar\Services\YearGenerator;
 use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver;
+use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Address\Address;
@@ -269,6 +292,9 @@ $global_settings_property->setValue( $admin, $settings );
 $counter_property = $admin_reflection->getProperty( 'shop_processing_queue_counter' );
 $counter_property->setAccessible( true );
 $counter_property->setValue( $admin, $counter );
+$environment_property = $admin_reflection->getProperty( 'environment' );
+$environment_property->setAccessible( true );
+$environment_property->setValue( $admin, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), 'https://example.test/wp-content/plugins/wdc/', '0.155.8' ) );
 $render = $admin_reflection->getMethod( 'render_global_delivery_settings_form' );
 $render->setAccessible( true );
 ob_start();
@@ -276,8 +302,25 @@ $render->invoke( $admin );
 $html = ob_get_clean() ?: '';
 shop_processing_assert( str_contains( $html, 'wdc_shop_processing_mode' ) && str_contains( $html, 'Фиксированное количество дней' ) && str_contains( $html, 'Динамически по количеству заказов' ), 'Delivery Services admin must render processing mode select.' );
 shop_processing_assert( str_contains( $html, 'wdc_shop_processing_working_days' ) && str_contains( $html, 'wdc_shop_processing_dynamic_orders_per_day' ), 'Delivery Services admin must render fixed and dynamic capacity fields.' );
+shop_processing_assert( str_contains( $html, 'data-wdc-shop-processing-mode="fixed"' ), 'Fixed shop processing row must expose an explicit visibility marker.' );
+shop_processing_assert( 3 === substr_count( $html, 'data-wdc-shop-processing-mode="dynamic"' ), 'Dynamic shop processing rows must expose explicit visibility markers.' );
 shop_processing_assert( str_contains( $html, 'wc-processing' ) && str_contains( $html, 'wc-on-hold' ) && str_contains( $html, 'multiple' ), 'Delivery Services admin must render WooCommerce status multi-select from canonical statuses.' );
 shop_processing_assert( str_contains( $html, '>0 дней<' ) && str_contains( $html, '>1 день<' ) && str_contains( $html, '>2 дня<' ), 'Dynamic extra days select must expose exactly 0/1/2 labels.' );
+
+$GLOBALS['wdc_shop_processing_scripts'] = array();
+$_GET = array( 'page' => DeliveryServicesAdminPage::MENU_SLUG );
+$admin->enqueue_assets();
+shop_processing_assert( isset( $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing'] ), 'Shop processing visibility script must enqueue on the Delivery Services list page.' );
+shop_processing_assert( str_ends_with( (string) $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing']['src'], '/assets/admin/delivery-services-shop-processing.js' ), 'Shop processing visibility script must use the dedicated admin asset.' );
+$GLOBALS['wdc_shop_processing_scripts'] = array();
+$_GET = array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'service' => 'russian_post' );
+$admin->enqueue_assets();
+shop_processing_assert( ! isset( $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing'] ), 'Shop processing visibility script must not enqueue on service detail tabs.' );
+$GLOBALS['wdc_shop_processing_scripts'] = array();
+$_GET = array( 'page' => 'wdc-platform-settings' );
+$admin->enqueue_assets();
+shop_processing_assert( ! isset( $GLOBALS['wdc_shop_processing_scripts']['wdc-delivery-services-shop-processing'] ), 'Shop processing visibility script must not enqueue outside Delivery Services.' );
+$_GET = array();
 
 $_POST = array(
 	SettingsRepository::SHOP_PROCESSING_MODE_KEY => 'dynamic',
@@ -297,7 +340,24 @@ shop_processing_assert( array( 'wc-processing' ) === $settings->shop_processing_
 shop_processing_assert( 1 === $settings->shop_processing_dynamic_extra_days(), 'Admin save must normalize invalid extra days to safe default 1.' );
 shop_processing_assert( (int) get_option( 'wdc_shop_processing_queue_count_generation', 1 ) > $before_generation, 'Admin settings save must invalidate dynamic order-count cache.' );
 
+$_POST = array(
+	SettingsRepository::SHOP_PROCESSING_MODE_KEY => 'fixed',
+	SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY => '8',
+	SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDERS_PER_DAY_KEY => '20',
+	SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDER_STATUSES_KEY => array( 'wc-on-hold', 'completed' ),
+	SettingsRepository::SHOP_PROCESSING_DYNAMIC_EXTRA_DAYS_KEY => '2',
+);
+$save->invoke( $admin );
+shop_processing_assert( SettingsRepository::SHOP_PROCESSING_MODE_FIXED === $settings->shop_processing_mode(), 'Admin save must persist fixed mode.' );
+shop_processing_assert( 8 === $settings->shop_processing_working_days(), 'Admin save must preserve fixed field values when dynamic fields are hidden by JS.' );
+shop_processing_assert( 20 === $settings->shop_processing_dynamic_orders_per_day(), 'Admin save must preserve dynamic capacity when fixed mode is selected.' );
+shop_processing_assert( array( 'wc-on-hold', 'wc-completed' ) === $settings->shop_processing_dynamic_order_statuses(), 'Admin save must preserve dynamic statuses when fixed mode is selected.' );
+shop_processing_assert( 2 === $settings->shop_processing_dynamic_extra_days(), 'Admin save must preserve dynamic extra days when fixed mode is selected.' );
+
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Application/ShopProcessingOrderQueueCounter.php' );
 shop_processing_assert( str_contains( $source, 'wc_get_orders' ) && str_contains( $source, "'paginate' => true" ) && str_contains( $source, "'return'   => 'ids'" ) && ! str_contains( $source, "'limit' => -1" ), 'Order queue counter must use a paginated WooCommerce count query and must not load every order.' );
+$js_source = str_replace( "\r\n", "\n", (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/delivery-services-shop-processing.js' ) );
+shop_processing_assert( str_contains( $js_source, 'DOMContentLoaded' ) && str_contains( $js_source, "addEventListener( 'change'" ) && str_contains( $js_source, 'row.hidden' ), 'Shop processing visibility script must apply initial state and listen for mode changes.' );
+shop_processing_assert( ! str_contains( $js_source, "value = ''" ) && ! str_contains( $js_source, '.remove(' ), 'Shop processing visibility script must not clear or remove hidden field values.' );
 
 echo "Shop processing days smoke passed.\n";

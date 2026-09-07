@@ -4,6 +4,8 @@ PEK checkout remains the source of trusted destination terminal selection for sh
 
 Version: 0.155.8
 
+0.155.8 adds fixed/dynamic shop processing working days without adding calendar math to checkout. Dynamic mode resolves only an integer shop working-day count from `extra_processing_days + ceil(active_orders / orders_per_day)`, counts selected canonical WooCommerce `wc-*` statuses through a paginated HPOS-compatible `wc_get_orders()` total query, caches that aggregate for 5 minutes by status fingerprint/generation, and invalidates the cache from a passive `woocommerce_order_status_changed` hook registered outside the global WDC WooCommerce runtime gate. Runtime off still prevents checkout/order/shipment runtime registration; the passive invalidation hook only expires WDC's own queue-count cache.
+
 0.155.6 does not change checkout mapping beyond reusing the existing full-cart total context for Rule Engine `cart_total` conditions. `WooCommercePackageMapper` remains the boundary that separates shipping package `contents_cost` from full cart item total.
 
 0.155.5 adds full-cart item total propagation for Rule Engine cart bases. `WooCommercePackageMapper` keeps `QuoteRequest::order_total` as the current shipping package `contents_cost` for backward-compatible physical/shipping-item rules, and separately reads `WC()->cart->get_cart_contents_total()` into `all_cart_items_total` for `% от всей корзины` rules. Fresh carrier quotes and checkout selection preservation are otherwise unchanged.

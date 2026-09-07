@@ -223,6 +223,15 @@ final class DeliveryServicesAdminPage {
 				$this->asset_version(),
 				true
 			);
+			if ( '' === $service && '' === $tab ) {
+				wp_enqueue_script(
+					'wdc-delivery-services-shop-processing',
+					$this->asset_url( 'assets/admin/delivery-services-shop-processing.js' ),
+					array(),
+					$this->asset_version(),
+					true
+				);
+			}
 			wp_localize_script(
 				'wdc-manual-delivery-admin',
 				'wdcManualDeliveryAdmin',
@@ -1781,20 +1790,20 @@ final class DeliveryServicesAdminPage {
 						</select>
 					</td>
 				</tr>
-				<tr>
+				<tr data-wdc-shop-processing-mode="fixed">
 					<th scope="row"><label for="wdc_shop_processing_working_days"><?php echo esc_html__( 'Рабочих дней на обработку заказа магазином', 'walls-delivery-calc' ); ?></label></th>
 					<td>
 						<input id="wdc_shop_processing_working_days" class="small-text" type="number" min="0" max="365" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY ); ?>" value="<?php echo esc_attr( (string) $value ); ?>">
 						<p class="description"><?php echo esc_html__( 'Используется в фиксированном режиме. Текущий день не учитывается. Рабочие и выходные дни определяются по «Календарю магазина».', 'walls-delivery-calc' ); ?></p>
 					</td>
 				</tr>
-				<tr>
+				<tr data-wdc-shop-processing-mode="dynamic">
 					<th scope="row"><label for="wdc_shop_processing_dynamic_orders_per_day"><?php echo esc_html__( 'Заказов, собираемых за один рабочий день', 'walls-delivery-calc' ); ?></label></th>
 					<td>
 						<input id="wdc_shop_processing_dynamic_orders_per_day" class="small-text" type="number" min="1" max="10000" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDERS_PER_DAY_KEY ); ?>" value="<?php echo esc_attr( (string) $dynamic_capacity ); ?>">
 					</td>
 				</tr>
-				<tr>
+				<tr data-wdc-shop-processing-mode="dynamic">
 					<th scope="row"><label for="wdc_shop_processing_dynamic_order_statuses"><?php echo esc_html__( 'Статусы заказов, учитываемые в очереди', 'walls-delivery-calc' ); ?></label></th>
 					<td>
 						<select id="wdc_shop_processing_dynamic_order_statuses" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDER_STATUSES_KEY ); ?>[]" multiple size="6" style="min-width: 260px;">
@@ -1805,7 +1814,7 @@ final class DeliveryServicesAdminPage {
 						<p class="description"><?php echo esc_html__( 'Пустой список безопасно считается пустой очередью, а не всеми заказами.', 'walls-delivery-calc' ); ?></p>
 					</td>
 				</tr>
-				<tr>
+				<tr data-wdc-shop-processing-mode="dynamic">
 					<th scope="row"><label for="wdc_shop_processing_dynamic_extra_days"><?php echo esc_html__( 'Дополнительных рабочих дней на обработку', 'walls-delivery-calc' ); ?></label></th>
 					<td>
 						<select id="wdc_shop_processing_dynamic_extra_days" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_DYNAMIC_EXTRA_DAYS_KEY ); ?>">

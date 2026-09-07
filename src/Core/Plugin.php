@@ -1217,6 +1217,7 @@ final class Plugin {
 		add_action( YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_start' ) );
 		$this->container->get( YandexDeliveryGeoPipelineV2Runner::class )->ensure_schedule();
 		add_action( 'rest_api_init', array( $this->container->get( PickupPointsRestController::class ), 'register' ) );
+		$this->register_passive_runtime_bookkeeping_hooks();
 		if ( $this->platform_runtime_enabled() ) {
 			$this->register_order_background_runtime_hooks();
 		}
@@ -1263,8 +1264,11 @@ final class Plugin {
 		$this->container->get( ShipmentDocumentDownloadService::class )->register();
 	}
 
-	private function register_order_background_runtime_hooks(): void {
+	private function register_passive_runtime_bookkeeping_hooks(): void {
 		add_action( 'woocommerce_order_status_changed', array( $this->container->get( ShopProcessingOrderQueueCounter::class ), 'invalidate' ), 10, 4 );
+	}
+
+	private function register_order_background_runtime_hooks(): void {
 		$this->container->get( ShipmentStatusAutoSyncCron::class )->register();
 		add_action( ShipmentCostAnalyticsIndexer::SHIPMENT_CHANGED_HOOK, array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_shipment_changed' ), 10, 3 );
 		add_action( ShipmentCostAnalyticsIndexer::SHIPMENT_DELETED_HOOK, array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_shipment_changed' ), 10, 2 );

@@ -13,6 +13,7 @@ C:.
 |   |   |   .gitkeep
 |   |   |   calendar-admin.css
 |   |   |   calendar-admin.js
+|   |   |   delivery-services-shop-processing.js
 |   |   |   dpd-geography-import.js
 |   |   |   locations-admin.css
 |   |   |   manual-delivery-services.js
