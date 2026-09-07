@@ -13,6 +13,7 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentStatusAjaxController;
@@ -352,6 +353,7 @@ $GLOBALS['wdc_status_smoke_autosync_orders'] = array( $jet_autosync_order );
 $GLOBALS['wdc_status_smoke_transients'] = array();
 $jet_autosync_result = ( new ShipmentStatusAutoSyncService(
 	$autosync_settings,
+	new PlatformRuntimeSettings( $autosync_settings ),
 	$autosync_repository,
 	( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor(),
 	new ShipmentOrderStatusMappingService( $autosync_settings ),

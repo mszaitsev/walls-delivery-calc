@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
 
@@ -20,6 +21,7 @@ final class SettingsAdminPage {
 
 	public function __construct(
 		private SettingsRepository $settings,
+		private PlatformRuntimeSettings $runtime_settings,
 		private ?FiasCredentials $fias_credentials = null,
 		private ?AddressSuggestionSettings $suggestion_settings = null,
 		private ?DaDataTokenPool $token_pool = null,
@@ -55,6 +57,9 @@ final class SettingsAdminPage {
 			<?php if ( '' !== $message ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( $message ); ?></p></div>
 			<?php endif; ?>
+			<?php if ( ! $this->runtime_settings->runtime_enabled() ) : ?>
+				<div class="notice notice-info"><p><?php echo esc_html__( 'WDC настроен, но интеграция с WooCommerce сейчас отключена.', 'walls-delivery-calc' ); ?></p></div>
+			<?php endif; ?>
 			<?php if ( $this->fias_credentials instanceof FiasCredentials && ! $this->fias_credentials->encryption_ready() ) : ?>
 				<div class="notice notice-warning"><p><?php echo esc_html__( 'APP_ENCRYPTION_KEY не задан. API-токен ФИАС/ГАР не будет сохранен, пока ключ шифрования не настроен.', 'walls-delivery-calc' ); ?></p></div>
 			<?php endif; ?>
@@ -69,8 +74,11 @@ final class SettingsAdminPage {
 				<table class="form-table" role="presentation">
 					<tbody>
 						<tr>
-							<th scope="row"><?php echo esc_html__( 'Включить новую систему доставки', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="enable_new_checkout_shipping" value="1" <?php checked( ! empty( $values['enable_new_checkout_shipping'] ) ); ?>> <?php echo esc_html__( 'Регистрировать новый способ доставки и checkout-интерфейс.', 'walls-delivery-calc' ); ?></label></td>
+							<th scope="row"><?php echo esc_html__( 'Использовать WDC в WooCommerce', 'walls-delivery-calc' ); ?></th>
+							<td>
+								<label><input type="checkbox" name="<?php echo esc_attr( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY ); ?>" value="1" <?php checked( $this->runtime_settings->runtime_enabled() ); ?>> <?php echo esc_html__( 'Подключать WDC к checkout и рабочим заказам WooCommerce.', 'walls-delivery-calc' ); ?></label>
+								<p class="description"><?php echo esc_html__( 'При отключении настройки страницы и инструменты WDC остаются доступны для настройки, импорта географии и подготовки служб доставки, но WDC не подключается к оформлению заказа и рабочим заказам WooCommerce.', 'walls-delivery-calc' ); ?></p>
+							</td>
 						</tr>
 						<tr>
 							<th scope="row"><label for="wdc_checkout_sort_mode"><?php echo esc_html__( 'Режим сортировки вариантов доставки', 'walls-delivery-calc' ); ?></label></th>
@@ -196,7 +204,7 @@ final class SettingsAdminPage {
 		$dadata_suggestions_count   = isset( $data['dadata_suggestions_count'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_count'] ) ) : 10;
 
 		$settings = array(
-			'enable_new_checkout_shipping' => ! empty( $data['enable_new_checkout_shipping'] ),
+			PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => $this->checked_scalar( $data[ PlatformRuntimeSettings::RUNTIME_ENABLED_KEY ] ?? null ),
 			'checkout_sort_mode'           => $sort_mode,
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
 			'include_region_in_checkout_city_picker_query' => ! array_key_exists( 'include_region_in_checkout_city_picker_query', $data ) ? false : ! empty( $data['include_region_in_checkout_city_picker_query'] ),
@@ -303,6 +311,14 @@ final class SettingsAdminPage {
 
 	private function absint( mixed $value ): int {
 		return function_exists( 'absint' ) ? absint( $value ) : abs( (int) $value );
+	}
+
+	private function checked_scalar( mixed $value ): bool {
+		if ( ! is_scalar( $value ) ) {
+			return false;
+		}
+
+		return in_array( strtolower( trim( (string) $value ) ), array( '1', 'true', 'yes', 'on' ), true );
 	}
 
 	private function handle_post(): string {

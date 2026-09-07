@@ -4,7 +4,9 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.155.6
+Version: 0.155.7
+
+Version 0.155.7 adds the typed `PlatformRuntimeSettings` service around the existing `SettingsRepository`. `SettingsAdminPage`, `CheckoutDebugPanel`, and `ShipmentStatusAutoSyncService` receive that service through required constructor injection. `Plugin.php` uses the platform runtime switch as the only global WooCommerce runtime gate: when runtime is enabled, the full checkout runtime is registered without a second rollout flag; when runtime is disabled, checkout runtime is not registered. `CheckoutDebugPanel` keeps its own `show_checkout_debug_panel` setting but also requires platform runtime. `ShipmentStatusAutoSyncService` refuses order-related execution with `status=runtime_disabled` when the WordPress plugin is active but WooCommerce runtime is disabled. `Plugin.php` remains the composition root and owns the registration gate through `register_checkout_runtime_hooks()`, `register_order_runtime_hooks()`, `register_order_background_runtime_hooks()`, and `register_admin_preparation_hooks()`.
 
 Version 0.155.6 requires no new DI service. The new Rule Engine `cart_total` condition consumes the existing `RuleEvaluationContext::all_cart_items_total()` value supplied by the checkout boundary in 0.155.5.
 
@@ -84,7 +86,7 @@ Version 0.133.9 registers `PekQuoteCargoBuilder`, `PekQuoteRequestBuilder`, `Pek
 
 ## Current Notes
 
-`CheckoutFeatureGate` is wired in `Plugin.php` with `SettingsRepository` only. Runtime checkout components depend on the gate rather than reading `enable_new_checkout_shipping` directly.
+Checkout runtime registration is owned by `Plugin.php` and depends only on `PlatformRuntimeSettings`. Runtime checkout components do not read a separate checkout rollout flag.
 
 `DeliveryLeadTimeNormalizer` is wired in `Plugin.php` and is the checkout/order-admin runtime component that reads delivery lead-time settings. Calendar arithmetic stays in `DeliveryDateCalculator`; carriers, order metaboxes, and WooCommerce renderers consume normalized `DeliveryRate` values instead of constructing planned dates themselves.
 

@@ -614,7 +614,6 @@ C:.
 |   |           CheckoutAddressRenderer.php
 |   |           CheckoutDebugPanel.php
 |   |           CheckoutDeliveryTypeSelector.php
-|   |           CheckoutFeatureGate.php
 |   |           CheckoutLocationFingerprint.php
 |   |           CheckoutRateRenderer.php
 |   |           CheckoutSessionManager.php
@@ -721,6 +720,7 @@ C:.
 |   |   |       EncryptionService.php
 |   |   |
 |   |   \---Settings
+|   |           PlatformRuntimeSettings.php
 |   |           SettingsRepository.php
 |   |
 |   +---Locations

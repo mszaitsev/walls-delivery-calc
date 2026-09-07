@@ -214,7 +214,6 @@ use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
-use WallsShop\WDC\Checkout\WooCommerce\CheckoutFeatureGate;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
@@ -508,10 +507,8 @@ function checkout_selection_method( CheckoutSelectionSmokeCarrier $carrier, Chec
 
 function checkout_selection_registrar( CheckoutSelectionSmokeCarrier $carrier, CheckoutSessionManager $session ): ShippingMethodRegistrar {
 	$settings = new SettingsRepository();
-	$settings->set( 'enable_new_checkout_shipping', true );
 
 	return new ShippingMethodRegistrar(
-		new CheckoutFeatureGate( $settings ),
 		$settings,
 		checkout_selection_orchestrator( $carrier ),
 		new WooCommercePackageMapper( null, $session ),

@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\Application;
 use Throwable;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Dpd\DpdEventSyncService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -37,6 +38,7 @@ final class ShipmentStatusAutoSyncService {
 
 	public function __construct(
 		private SettingsRepository $settings,
+		private PlatformRuntimeSettings $runtime_settings,
 		private OrderShipmentRepository $repository,
 		private ShipmentStatusUpdateService $status_updates,
 		private ?ShipmentOrderStatusMappingService $order_status_mapping = null,
@@ -54,6 +56,9 @@ final class ShipmentStatusAutoSyncService {
 	 */
 	public function run( string $trigger_type = 'cron' ): array {
 		$trigger_type = in_array( $trigger_type, array( 'cron', 'manual' ), true ) ? $trigger_type : 'manual';
+		if ( ! $this->runtime_settings->runtime_enabled() ) {
+			return array_merge( $this->empty_stats(), array( 'trigger_type' => $trigger_type, 'status' => 'runtime_disabled' ) );
+		}
 		if ( ! $this->enabled() ) {
 			return array_merge( $this->empty_stats(), array( 'trigger_type' => $trigger_type, 'status' => 'disabled' ) );
 		}

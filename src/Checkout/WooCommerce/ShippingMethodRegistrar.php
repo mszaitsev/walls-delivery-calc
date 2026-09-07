@@ -21,7 +21,6 @@ defined( 'ABSPATH' ) || exit;
 
 final class ShippingMethodRegistrar {
 	public function __construct(
-		private CheckoutFeatureGate $feature_gate,
 		private SettingsRepository $settings,
 		private CheckoutOrchestrator $orchestrator,
 		private WooCommercePackageMapper $package_mapper,
@@ -39,12 +38,10 @@ final class ShippingMethodRegistrar {
 
 	public function register(): void {
 		add_filter( 'woocommerce_shipping_methods', array( $this, 'register_shipping_method' ) );
-		if ( $this->feature_gate->enabled() ) {
-			add_filter( 'woocommerce_shipping_chosen_method', array( $this, 'preserve_chosen_wdc_method' ), 10, 3 );
-			add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
-			add_action( 'wp_ajax_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
-			add_action( 'wp_ajax_nopriv_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
-		}
+		add_filter( 'woocommerce_shipping_chosen_method', array( $this, 'preserve_chosen_wdc_method' ), 10, 3 );
+		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+		add_action( 'wp_ajax_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
+		add_action( 'wp_ajax_nopriv_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
 	}
 
 	/**
@@ -52,7 +49,7 @@ final class ShippingMethodRegistrar {
 	 * @return array<string,string>
 	 */
 	public function register_shipping_method( array $methods ): array {
-		if ( ! $this->feature_gate->enabled() || ! class_exists( '\WC_Shipping_Method' ) ) {
+		if ( ! class_exists( '\WC_Shipping_Method' ) ) {
 			return $methods;
 		}
 
@@ -147,7 +144,7 @@ final class ShippingMethodRegistrar {
 	}
 
 	public function enqueue_assets(): void {
-		if ( ! $this->feature_gate->enabled() || ! function_exists( 'wp_enqueue_style' ) ) {
+		if ( ! function_exists( 'wp_enqueue_style' ) ) {
 			return;
 		}
 

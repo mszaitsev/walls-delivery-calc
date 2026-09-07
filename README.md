@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.155.6
+Version: 0.155.7
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.6 extends Rule Engine application conditions with `cart_total` (`Сумма всей корзины`) while keeping persisted `order_total` rules backward-compatible as package-local `Сумма доставляемых товаров`. Both values use post-discount item totals already supplied through typed checkout context; Rule Engine remains independent of WooCommerce globals.
+Current stage: 0.155.7 adds a global operational switch, `Использовать WDC в WooCommerce`, that can keep the WordPress plugin active for setup/imports/diagnostics while disabling WDC checkout, WooCommerce order admin, and order/shipment runtime integrations. When enabled, it registers the full WDC WooCommerce runtime without a second checkout rollout flag. Missing legacy settings remain runtime-enabled for production upgrades.
 
 ## Quick Start
 
