@@ -1,6 +1,6 @@
 # New Carrier Guide
 
-Version: 0.155.6
+Version: 0.155.8
 
 0.155.6 does not change carrier implementation responsibilities. The new Rule Engine `cart_total` condition consumes checkout context; carriers should not calculate WooCommerce cart totals themselves.
 
@@ -91,7 +91,7 @@ Responsibility: convert `QuoteRequest` into `DeliveryQuote`, including source AE
 
 If a carrier pricing API needs recipient phone during quote, use the generic canonical `QuoteRequest.customer_context['recipient_phone']` produced from standard WooCommerce `billing_phone`. Carrier-owned operational fallback phones may be applied only inside that carrier's request builder/settings boundary, must not replace a valid customer phone, and must not be included in logs, diagnostics, calculation metadata, or quote cache keys.
 
-Carriers must return the raw carrier lead time as structured `DateRange` data. Do not add shop processing days, do not convert carrier working days with calendars inside a carrier, and do not bake the lead time into the title. The shared checkout pipeline applies `shop_processing_working_days` with `CalendarTypes::SHOE`, optionally converts service lead time with `CalendarTypes::CARRIER_RU` when `delivery_days_are_working` is enabled, then runs rules and formats the final title/comment.
+Carriers must return the raw carrier lead time as structured `DateRange` data. Do not add shop processing days, do not convert carrier working days with calendars inside a carrier, and do not bake the lead time into the title. The shared checkout pipeline resolves shop processing working days through the fixed/dynamic shop-processing settings, applies them with `CalendarTypes::SHOP`, optionally converts service lead time with `CalendarTypes::CARRIER_RU` when `delivery_days_are_working` is enabled, then runs rules and formats the final title/comment.
 
 Rule simulation support is required for AEI-backed carriers. Reuse the production quote path from simulation input to canonical `QuoteRequest`; the rules page must not maintain a separate carrier request builder or carrier-specific UI branch.
 

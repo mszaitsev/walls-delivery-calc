@@ -78,6 +78,7 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter;
 use WallsShop\WDC\Packaging\PackagingApplicationResult;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
@@ -113,6 +114,7 @@ final class DeliveryServicesAdminPage {
 		private ManualDeliveryWeightRangeRepository $manual_delivery_weight_ranges,
 		private DeliveryServiceKeyRenameService $delivery_service_key_rename,
 		private ManualPickupPointRepository $manual_pickup_points,
+		private ShopProcessingOrderQueueCounter $shop_processing_queue_counter,
 		private ?DeliveryServiceSettingsRepository $settings = null,
 		private ?RussianPostSettings $russian_post_settings = null,
 		private ?RussianPostCountriesAdminPage $russian_post_countries = null,
@@ -221,6 +223,15 @@ final class DeliveryServicesAdminPage {
 				$this->asset_version(),
 				true
 			);
+			if ( ! $this->requested_service() instanceof DeliveryService ) {
+				wp_enqueue_script(
+					'wdc-delivery-services-shop-processing',
+					$this->asset_url( 'assets/admin/delivery-services-shop-processing.js' ),
+					array(),
+					$this->asset_version(),
+					true
+				);
+			}
 			wp_localize_script(
 				'wdc-manual-delivery-admin',
 				'wdcManualDeliveryAdmin',
@@ -1678,8 +1689,7 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 
-		$service_key = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
-		$service = '' !== $service_key ? $this->services->find_by_service_key( $service_key ) : null;
+		$service = $this->requested_service();
 		?>
 		<div class="wrap">
 			<h1><?php echo esc_html__( 'Службы доставки', 'walls-delivery-calc' ); ?></h1>
@@ -1692,6 +1702,12 @@ final class DeliveryServicesAdminPage {
 			<?php endif; ?>
 		</div>
 		<?php
+	}
+
+	private function requested_service(): ?DeliveryService {
+		$service_key = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
+
+		return '' !== $service_key ? $this->services->find_by_service_key( $service_key ) : null;
 	}
 
 	private function render_table(): void {
@@ -1759,17 +1775,59 @@ final class DeliveryServicesAdminPage {
 	}
 
 	private function render_global_delivery_settings_form(): void {
+		$mode = $this->global_settings instanceof SettingsRepository ? $this->global_settings->shop_processing_mode() : SettingsRepository::SHOP_PROCESSING_MODE_FIXED;
 		$value = $this->global_settings instanceof SettingsRepository ? $this->global_settings->shop_processing_working_days() : 2;
+		$dynamic_capacity = $this->global_settings instanceof SettingsRepository ? $this->global_settings->shop_processing_dynamic_orders_per_day() : 20;
+		$dynamic_statuses = $this->global_settings instanceof SettingsRepository ? $this->global_settings->shop_processing_dynamic_order_statuses() : array( 'wc-processing', 'wc-on-hold' );
+		$dynamic_extra_days = $this->global_settings instanceof SettingsRepository ? $this->global_settings->shop_processing_dynamic_extra_days() : 1;
+		$status_options = function_exists( 'wc_get_order_statuses' ) ? wc_get_order_statuses() : array();
 		?>
 		<form method="post" style="max-width: 760px; margin: 20px 0;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 			<input type="hidden" name="wdc_delivery_services_action" value="save_global_delivery_settings">
 			<table class="form-table" role="presentation">
 				<tr>
+					<th scope="row"><label for="wdc_shop_processing_mode"><?php echo esc_html__( 'Режим расчёта времени обработки магазином', 'walls-delivery-calc' ); ?></label></th>
+					<td>
+						<select id="wdc_shop_processing_mode" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_MODE_KEY ); ?>">
+							<option value="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_MODE_FIXED ); ?>" <?php selected( SettingsRepository::SHOP_PROCESSING_MODE_FIXED, $mode ); ?>><?php echo esc_html__( 'Фиксированное количество дней', 'walls-delivery-calc' ); ?></option>
+							<option value="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_MODE_DYNAMIC ); ?>" <?php selected( SettingsRepository::SHOP_PROCESSING_MODE_DYNAMIC, $mode ); ?>><?php echo esc_html__( 'Динамически по количеству заказов', 'walls-delivery-calc' ); ?></option>
+						</select>
+					</td>
+				</tr>
+				<tr data-wdc-shop-processing-mode="fixed">
 					<th scope="row"><label for="wdc_shop_processing_working_days"><?php echo esc_html__( 'Рабочих дней на обработку заказа магазином', 'walls-delivery-calc' ); ?></label></th>
 					<td>
 						<input id="wdc_shop_processing_working_days" class="small-text" type="number" min="0" max="365" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY ); ?>" value="<?php echo esc_attr( (string) $value ); ?>">
-						<p class="description"><?php echo esc_html__( 'Текущий день не учитывается. Рабочие и выходные дни определяются по «Календарю магазина».', 'walls-delivery-calc' ); ?></p>
+						<p class="description"><?php echo esc_html__( 'Используется в фиксированном режиме. Текущий день не учитывается. Рабочие и выходные дни определяются по «Календарю магазина».', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
+				<tr data-wdc-shop-processing-mode="dynamic">
+					<th scope="row"><label for="wdc_shop_processing_dynamic_orders_per_day"><?php echo esc_html__( 'Заказов, собираемых за один рабочий день', 'walls-delivery-calc' ); ?></label></th>
+					<td>
+						<input id="wdc_shop_processing_dynamic_orders_per_day" class="small-text" type="number" min="1" max="10000" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDERS_PER_DAY_KEY ); ?>" value="<?php echo esc_attr( (string) $dynamic_capacity ); ?>">
+					</td>
+				</tr>
+				<tr data-wdc-shop-processing-mode="dynamic">
+					<th scope="row"><label for="wdc_shop_processing_dynamic_order_statuses"><?php echo esc_html__( 'Статусы заказов, учитываемые в очереди', 'walls-delivery-calc' ); ?></label></th>
+					<td>
+						<select id="wdc_shop_processing_dynamic_order_statuses" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDER_STATUSES_KEY ); ?>[]" multiple size="6" style="min-width: 260px;">
+							<?php foreach ( $status_options as $status_key => $status_label ) : ?>
+								<option value="<?php echo esc_attr( (string) $status_key ); ?>" <?php selected( in_array( (string) $status_key, $dynamic_statuses, true ) ); ?>><?php echo esc_html( (string) $status_label ); ?></option>
+							<?php endforeach; ?>
+						</select>
+						<p class="description"><?php echo esc_html__( 'Пустой список безопасно считается пустой очередью, а не всеми заказами.', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
+				<tr data-wdc-shop-processing-mode="dynamic">
+					<th scope="row"><label for="wdc_shop_processing_dynamic_extra_days"><?php echo esc_html__( 'Дополнительных рабочих дней на обработку', 'walls-delivery-calc' ); ?></label></th>
+					<td>
+						<select id="wdc_shop_processing_dynamic_extra_days" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_DYNAMIC_EXTRA_DAYS_KEY ); ?>">
+							<?php foreach ( array( 0 => '0 дней', 1 => '1 день', 2 => '2 дня' ) as $extra_days => $extra_label ) : ?>
+								<option value="<?php echo esc_attr( (string) $extra_days ); ?>" <?php selected( $extra_days, $dynamic_extra_days ); ?>><?php echo esc_html( $extra_label ); ?></option>
+							<?php endforeach; ?>
+						</select>
+						<p class="description"><?php echo esc_html__( 'В динамическом режиме количество дней рассчитывается по текущей очереди заказов: дополнительные дни + округлённое вверх отношение количества заказов к дневной производительности.', 'walls-delivery-calc' ); ?></p>
 					</td>
 				</tr>
 			</table>
@@ -5540,6 +5598,21 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 
 		$value = max( 0, min( 365, (int) ( $_POST[ SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY ] ?? 2 ) ) );
 		$this->global_settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $value );
+		$mode = sanitize_key( wp_unslash( $_POST[ SettingsRepository::SHOP_PROCESSING_MODE_KEY ] ?? SettingsRepository::SHOP_PROCESSING_MODE_FIXED ) );
+		$this->global_settings->set( SettingsRepository::SHOP_PROCESSING_MODE_KEY, SettingsRepository::SHOP_PROCESSING_MODE_DYNAMIC === $mode ? SettingsRepository::SHOP_PROCESSING_MODE_DYNAMIC : SettingsRepository::SHOP_PROCESSING_MODE_FIXED );
+		$capacity = max( 1, min( 10000, (int) ( $_POST[ SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDERS_PER_DAY_KEY ] ?? 20 ) ) );
+		$this->global_settings->set( SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDERS_PER_DAY_KEY, $capacity );
+		$statuses = $_POST[ SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDER_STATUSES_KEY ] ?? array();
+		$statuses = is_array( $statuses ) ? array_map( 'wp_unslash', $statuses ) : array();
+		$statuses = $this->global_settings->normalize_order_statuses( $statuses );
+		if ( function_exists( 'wc_get_order_statuses' ) ) {
+			$available_statuses = $this->global_settings->normalize_order_statuses( array_keys( wc_get_order_statuses() ) );
+			$statuses = array_values( array_intersect( $statuses, $available_statuses ) );
+		}
+		$this->global_settings->set( SettingsRepository::SHOP_PROCESSING_DYNAMIC_ORDER_STATUSES_KEY, $statuses );
+		$extra_days = (int) ( $_POST[ SettingsRepository::SHOP_PROCESSING_DYNAMIC_EXTRA_DAYS_KEY ] ?? 1 );
+		$this->global_settings->set( SettingsRepository::SHOP_PROCESSING_DYNAMIC_EXTRA_DAYS_KEY, in_array( $extra_days, array( 0, 1, 2 ), true ) ? $extra_days : 1 );
+		$this->shop_processing_queue_counter->invalidate();
 	}
 
 	private function save_russian_post_domestic_settings( int $service_id ): void {

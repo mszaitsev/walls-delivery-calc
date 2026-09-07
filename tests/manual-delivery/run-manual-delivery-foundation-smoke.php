@@ -1106,7 +1106,10 @@ $registry->register( $carrier );
 $service_registry = new DeliveryServiceRegistry( $services, $registry );
 $packaging_calculator = new PackagingWeightCalculator( new SettingsRepository() );
 $lead_time = new DeliveryLeadTimeNormalizer(
-	new SettingsRepository(),
+	new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver(
+		new SettingsRepository(),
+		new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 )
+	),
 	$settings_repo,
 	new DeliveryDateCalculator( new CalendarService( new CalendarRepository(), new YearGenerator(), new SettingsRepository(), new TimezoneService() ), new TimezoneService(), new DeliveryDateFormatter() ),
 	new DeliveryDateFormatter()

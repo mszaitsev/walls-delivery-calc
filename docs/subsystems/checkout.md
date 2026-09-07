@@ -2,7 +2,9 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.155.6
+Version: 0.155.8
+
+0.155.8 adds fixed/dynamic shop processing working days without adding calendar math to checkout. Dynamic mode resolves only an integer shop working-day count from `extra_processing_days + ceil(active_orders / orders_per_day)`, counts selected canonical WooCommerce `wc-*` statuses through a paginated HPOS-compatible `wc_get_orders()` total query, caches that aggregate for 5 minutes by status fingerprint/generation, and invalidates the cache from a passive `woocommerce_order_status_changed` hook registered outside the global WDC WooCommerce runtime gate. Runtime off still prevents checkout/order/shipment runtime registration; the passive invalidation hook only expires WDC's own queue-count cache.
 
 0.155.6 does not change checkout mapping beyond reusing the existing full-cart total context for Rule Engine `cart_total` conditions. `WooCommercePackageMapper` remains the boundary that separates shipping package `contents_cost` from full cart item total.
 
@@ -74,7 +76,7 @@ Checkout and order-admin recalculation use the same runtime order:
 4. delivery date rules;
 5. planned date.
 
-Carrier adapters return the raw carrier `DateRange`. `DeliveryLeadTimeNormalizer` adds the global `shop_processing_working_days` setting, default `2`, using `CalendarTypes::SHOP`, then converts carrier working days through `CalendarTypes::CARRIER_RU` only when the service-level `delivery_days_are_working` checkbox is enabled. That checkbox defaults to `false`.
+Carrier adapters return the raw carrier `DateRange`. `DeliveryLeadTimeNormalizer` asks `ShopProcessingDaysResolver` for the shop processing working-day count, then applies it through `CalendarTypes::SHOP`; fixed mode preserves the global `shop_processing_working_days` setting, default `2`. Dynamic mode uses `extra_processing_days + ceil(active_orders / orders_per_day)` from Delivery Services settings, where active orders are counted for selected canonical WooCommerce `wc-*` statuses through a cached HPOS-compatible `wc_get_orders()` paginated total query. After shop processing is normalized, carrier working days are converted through `CalendarTypes::CARRIER_RU` only when the service-level `delivery_days_are_working` checkbox is enabled. That checkbox defaults to `false`.
 
 The current calculation day is not counted for shop processing, and the handoff day is not counted when carrier working days are converted. Rules run only after the base duration is normalized into calendar days. The planned date is calculated after rules from the final minimum delivery-days boundary, so checkout comments and order metadata stay aligned with rule changes.
 

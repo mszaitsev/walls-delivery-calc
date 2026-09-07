@@ -241,6 +241,7 @@ use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutAddressRenderer;
@@ -308,6 +309,7 @@ use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
+use WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter;
 use WallsShop\WDC\Packaging\PackagingBuilder;
 use WallsShop\WDC\Packaging\PackagingBuilderConfig;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
@@ -470,6 +472,8 @@ final class Plugin {
 		$this->container->register( Logger::class, fn(): Logger => new Logger() );
 		$this->container->register( SettingsRepository::class, fn(): SettingsRepository => new SettingsRepository() );
 		$this->container->register( PlatformRuntimeSettings::class, fn(): PlatformRuntimeSettings => new PlatformRuntimeSettings( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( ShopProcessingOrderQueueCounter::class, fn(): ShopProcessingOrderQueueCounter => new ShopProcessingOrderQueueCounter( $this->container->get( Logger::class ) ) );
+		$this->container->register( ShopProcessingDaysResolver::class, fn(): ShopProcessingDaysResolver => new ShopProcessingDaysResolver( $this->container->get( SettingsRepository::class ), $this->container->get( ShopProcessingOrderQueueCounter::class ) ) );
 		$this->container->register( EncryptionService::class, fn(): EncryptionService => new EncryptionService() );
 		$this->container->register( MigrationManager::class, fn(): MigrationManager => new MigrationManager( $this->environment->version(), $this->environment->plugin_dir() . 'database/migrations' ) );
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
@@ -813,7 +817,7 @@ final class Plugin {
 		$this->container->register(
 			DeliveryLeadTimeNormalizer::class,
 			fn(): DeliveryLeadTimeNormalizer => new DeliveryLeadTimeNormalizer(
-				$this->container->get( SettingsRepository::class ),
+				$this->container->get( ShopProcessingDaysResolver::class ),
 				$this->container->get( DeliveryServiceSettingsRepository::class ),
 				$this->container->get( DeliveryDateCalculator::class ),
 				$this->container->get( DeliveryDateFormatter::class )
@@ -1078,6 +1082,7 @@ final class Plugin {
 				$this->container->get( ManualDeliveryWeightRangeRepository::class ),
 				$this->container->get( DeliveryServiceKeyRenameService::class ),
 				$this->container->get( ManualPickupPointRepository::class ),
+				$this->container->get( ShopProcessingOrderQueueCounter::class ),
 				$this->container->get( DeliveryServiceSettingsRepository::class ),
 				$this->container->get( RussianPostSettings::class ),
 				$this->container->get( RussianPostCountriesAdminPage::class ),
@@ -1212,6 +1217,7 @@ final class Plugin {
 		add_action( YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_start' ) );
 		$this->container->get( YandexDeliveryGeoPipelineV2Runner::class )->ensure_schedule();
 		add_action( 'rest_api_init', array( $this->container->get( PickupPointsRestController::class ), 'register' ) );
+		$this->register_passive_runtime_bookkeeping_hooks();
 		if ( $this->platform_runtime_enabled() ) {
 			$this->register_order_background_runtime_hooks();
 		}
@@ -1256,6 +1262,10 @@ final class Plugin {
 		$this->container->get( OrderDeliveryMetabox::class )->register();
 		$this->container->get( OrderShipmentsMetabox::class )->register();
 		$this->container->get( ShipmentDocumentDownloadService::class )->register();
+	}
+
+	private function register_passive_runtime_bookkeeping_hooks(): void {
+		add_action( 'woocommerce_order_status_changed', array( $this->container->get( ShopProcessingOrderQueueCounter::class ), 'invalidate' ), 10, 4 );
 	}
 
 	private function register_order_background_runtime_hooks(): void {

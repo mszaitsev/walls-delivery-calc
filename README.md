@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.155.7
+Version: 0.155.8
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.7 adds a global operational switch, `Использовать WDC в WooCommerce`, that can keep the WordPress plugin active for setup/imports/diagnostics while disabling WDC checkout, WooCommerce order admin, and order/shipment runtime integrations. When enabled, it registers the full WDC WooCommerce runtime without a second checkout rollout flag. Missing legacy settings remain runtime-enabled for production upgrades.
+Current stage: 0.155.8 adds fixed/dynamic shop processing working days on Delivery Services. Existing installs stay in fixed mode and keep `shop_processing_working_days` semantics. Dynamic mode uses `extra_processing_days + ceil(active_orders / orders_per_day)`, counts selected WooCommerce order statuses through the HPOS-compatible `wc_get_orders()` paginated total boundary, caches the aggregate for 5 minutes, and invalidates it on order status changes and processing-settings saves.
 
 ## Quick Start
 

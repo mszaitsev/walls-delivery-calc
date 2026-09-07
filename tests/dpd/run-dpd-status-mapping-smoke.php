@@ -201,6 +201,7 @@ $page = new DeliveryServicesAdminPage(
 	manual_delivery_weight_ranges: new ManualDeliveryWeightRangeRepository( $GLOBALS['wpdb'] ),
 	delivery_service_key_rename: new DeliveryServiceKeyRenameService( new DeliveryServiceRepository( $GLOBALS['wpdb'] ), new RuleRepository( $GLOBALS['wpdb'] ) ),
 	manual_pickup_points: new ManualPickupPointRepository( $GLOBALS['wpdb'] ),
+	shop_processing_queue_counter: new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 ),
 	dpd_status_mapping: $mapping
 );
 $service = $GLOBALS['wpdb']->get_row( "SELECT * FROM wp_wdc_delivery_services WHERE service_key = 'dpd' AND deleted = 0 LIMIT 1", ARRAY_A );
