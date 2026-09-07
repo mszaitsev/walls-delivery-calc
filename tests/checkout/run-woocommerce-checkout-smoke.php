@@ -643,8 +643,7 @@ function wc_checkout_smoke_lead_time_normalizer( int $processing_days = 0 ): Del
 	$timezone = new TimezoneService();
 	$formatter = new DeliveryDateFormatter();
 
-	return new DeliveryLeadTimeNormalizer(
-		$settings,
+	return new DeliveryLeadTimeNormalizer( new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver( $settings, new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 ) ),
 		new DeliveryServiceSettingsRepository(),
 		new DeliveryDateCalculator( new CalendarService( new CalendarRepository(), new YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
 		$formatter

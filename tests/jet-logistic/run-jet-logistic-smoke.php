@@ -1126,7 +1126,7 @@ $orchestrator = new CheckoutOrchestrator(
 	new FallbackRateFactory(),
 	new CarrierExecutionGuard( new CheckoutLogger() ),
 	new CheckoutLogger(),
-	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
+	new DeliveryLeadTimeNormalizer( new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver( $core_settings, new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 ) ), new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
 	null,
 	new DeliveryServiceRegistry( $service_repo, $carrier_registry ),
 	$service_manager
@@ -1157,7 +1157,7 @@ $rule_order_orchestrator = new CheckoutOrchestrator(
 	new FallbackRateFactory(),
 	new CarrierExecutionGuard( new CheckoutLogger() ),
 	new CheckoutLogger(),
-	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter )
+	new DeliveryLeadTimeNormalizer( new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver( $core_settings, new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 ) ), new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter )
 );
 $rule_order_result = $rule_order_orchestrator->calculate(
 	new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Астана' ), $insurance_request( 10000 )->package, 'card', Money::from_rubles( 10000 ), '2026-07-28', array( 'selected_location_id' => 10 ) ),
@@ -1195,7 +1195,7 @@ $orchestrator_atbasar = new CheckoutOrchestrator(
 	new FallbackRateFactory(),
 	new CarrierExecutionGuard( new CheckoutLogger() ),
 	new CheckoutLogger(),
-	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
+	new DeliveryLeadTimeNormalizer( new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver( $core_settings, new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 ) ), new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
 	null,
 	new DeliveryServiceRegistry( $service_repo, $atbasar_carrier_registry ),
 	$service_manager
@@ -1219,7 +1219,7 @@ $backend_recovery_orchestrator = new CheckoutOrchestrator(
 	new FallbackRateFactory(),
 	new CarrierExecutionGuard( new CheckoutLogger() ),
 	new CheckoutLogger(),
-	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
+	new DeliveryLeadTimeNormalizer( new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver( $core_settings, new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 ) ), new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
 	null,
 	new DeliveryServiceRegistry( $service_repo, $backend_recovery_registry ),
 	$service_manager
@@ -1253,7 +1253,7 @@ $orchestrator_mismatch = new CheckoutOrchestrator(
 	new FallbackRateFactory(),
 	new CarrierExecutionGuard( new CheckoutLogger() ),
 	new CheckoutLogger(),
-	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
+	new DeliveryLeadTimeNormalizer( new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver( $core_settings, new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 ) ), new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
 	null,
 	new DeliveryServiceRegistry( $service_repo, $mismatch_carrier_registry ),
 	$service_manager

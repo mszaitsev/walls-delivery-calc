@@ -603,6 +603,7 @@ C:.
 |   |   |       DeliveryLeadTimeNormalizer.php
 |   |   |       FallbackRateFactory.php
 |   |   |       RuleAppliedRateBuilder.php
+|   |   |       ShopProcessingDaysResolver.php
 |   |   |
 |   |   +---Sorting
 |   |   |       RateSorter.php
@@ -790,6 +791,7 @@ C:.
 |   |           OrderDeliveryRecalculationService.php
 |   |           OrderDeliveryReplacementService.php
 |   |           OrderQuoteRequestMapper.php
+|   |           ShopProcessingOrderQueueCounter.php
 |   |
 |   +---Packaging
 |   |       PackagingApplicationResult.php
@@ -1095,6 +1097,7 @@ C:.
     |       run-pickup-provider-routing-smoke.js
     |       run-pickup-provider-routing-smoke.php
     |       run-runtime-stabilization-smoke.php
+    |       run-shop-processing-days-smoke.php
     |       run-woocommerce-checkout-smoke.php
     |
     +---delivery-services

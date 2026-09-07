@@ -466,7 +466,10 @@ function checkout_selection_orchestrator( CheckoutSelectionSmokeCarrier $carrier
 		new CarrierExecutionGuard( $logger ),
 		$logger,
 		new DeliveryLeadTimeNormalizer(
-			new SettingsRepository(),
+			new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver(
+				new SettingsRepository(),
+				new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new Logger(), static fn( array $statuses ): int => 0 )
+			),
 			new DeliveryServiceSettingsRepository(),
 			new DeliveryDateCalculator( new CalendarService( new CalendarRepository(), new YearGenerator(), new SettingsRepository(), new TimezoneService() ), new TimezoneService(), new DeliveryDateFormatter() ),
 			new DeliveryDateFormatter()

@@ -10,13 +10,12 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
-use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class DeliveryLeadTimeNormalizer {
 	public function __construct(
-		private SettingsRepository $settings,
+		private ShopProcessingDaysResolver $shop_processing_days,
 		private DeliveryServiceSettingsRepository $service_settings,
 		private DeliveryDateCalculator $calculator,
 		private DeliveryDateFormatter $formatter
@@ -24,7 +23,7 @@ final class DeliveryLeadTimeNormalizer {
 	}
 
 	public function normalize( DeliveryRate $rate, ?DeliveryService $service, QuoteRequest $request ): DeliveryRate {
-		$processing_days = $this->settings->shop_processing_working_days();
+		$processing_days = $this->shop_processing_days->resolve();
 		$carrier_working = $service instanceof DeliveryService && null !== $service->id
 			? $this->service_settings->delivery_days_are_working( (int) $service->id )
 			: false;

@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.7
+Version: 0.155.8
+
+0.155.8 adds fixed/dynamic shop processing working days to the existing Delivery Services settings page. The persisted fixed key `shop_processing_working_days` remains unchanged and mode defaults to `fixed`, so production upgrades keep the same lead-time math until an administrator enables dynamic mode. Dynamic mode stores `shop_processing_dynamic_orders_per_day`, `shop_processing_dynamic_order_statuses`, and `shop_processing_dynamic_extra_days`; the formula is `extra_processing_days + ceil(active_orders / orders_per_day)` with extra days limited to `0/1/2`. Active orders are counted for the selected canonical WooCommerce `wc-*` statuses through the HPOS-compatible `wc_get_orders()` paginated total boundary, cached for 5 minutes by normalized status fingerprint, invalidated on `woocommerce_order_status_changed` and settings saves, and then fed into the existing shop calendar pipeline owned by `DeliveryDateCalculator`.
 
 0.155.7 adds a global platform runtime setting, `Использовать WDC в WooCommerce`, stored in the existing `wdc_core_settings` option as `woocommerce_runtime_enabled`. When disabled, WDC admin pages, Delivery Services, carrier settings, geography/import/catalog tools, diagnostics, rules, calendars, and preparation background jobs remain available, but WDC does not register WooCommerce checkout integrations, order metabox/recalculation/shipment actions, shipment document downloads, shipment status autosync, or order-related shipment analytics hooks. When enabled, the full WDC WooCommerce runtime is registered without a separate partial-checkout rollout flag. The missing legacy value defaults to enabled, so upgrading an existing 0.155.6 production site does not unexpectedly disable runtime.
 

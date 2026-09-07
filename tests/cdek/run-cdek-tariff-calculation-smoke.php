@@ -484,8 +484,7 @@ function cdek_tariff_lead_time_normalizer( int $processing_days = 0 ): \WallsSho
 	$timezone = new \WallsShop\WDC\Calendar\Services\TimezoneService();
 	$formatter = new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter();
 
-	return new \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer(
-		$settings,
+	return new \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer( new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver( $settings, new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 ) ),
 		new \WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository( $db ),
 		new \WallsShop\WDC\Calendar\Services\DeliveryDateCalculator( new \WallsShop\WDC\Calendar\Services\CalendarService( new \WallsShop\WDC\Calendar\Storage\CalendarRepository( $db ), new \WallsShop\WDC\Calendar\Services\YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
 		$formatter

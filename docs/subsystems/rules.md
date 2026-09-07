@@ -1,6 +1,6 @@
 # Rules
 
-Version: 0.155.6
+Version: 0.155.8
 
 0.155.6 adds a full-cart application condition to the Rule Engine. Existing persisted `condition_type=order_total` is not renamed and still evaluates the current WooCommerce shipping package total after sale prices/coupons; only its UI label changes from `Сумма заказа` to `Сумма доставляемых товаров`. New persisted `condition_type=cart_total` is labeled `Сумма всей корзины` and evaluates `RuleEvaluationContext::all_cart_items_total()`, which includes all cart item lines after sale prices/coupons and excludes shipping, fees, and taxes. Non-Woo contexts keep the typed fallback `all_cart_items_total() = order_total`.
 
@@ -16,7 +16,7 @@ Rules may change price, delivery days/date, availability, labels/comments, or de
 
 Manual delivery pricing is calculated before Rule Engine evaluation. The manual tariff minimum for `per_kg` is part of the manual base formula, while the DeliveryService minimum price and round-up-to-ruble settings remain generic post-processing after rules. Rule Engine must not contain manual-specific pricing branches.
 
-Delivery-day rules run after checkout normalizes raw carrier lead time into calendar days. The canonical order is carrier raw lead time -> shop processing calendar -> carrier working-day conversion -> delivery date rules -> planned date. Because the global `shop_processing_working_days` setting now applies automatically, older manual processing-day additions in rules should be removed manually by an administrator to avoid double-increasing delivery time.
+Delivery-day rules run after checkout normalizes raw carrier lead time into calendar days. The canonical order is carrier raw lead time -> resolved shop processing working days -> shop processing calendar -> carrier working-day conversion -> delivery date rules -> planned date. Fixed mode uses the global `shop_processing_working_days` setting; dynamic mode resolves the same shop-processing slot from the cached WooCommerce order queue. Older manual processing-day additions in rules should be removed manually by an administrator to avoid double-increasing delivery time.
 
 PEK light-cargo bag/plombing surcharges are store-owned base-price adjustments, not Rule Engine rules. For PEK, `api_base_price_rub` already includes the configured non-zero bag and/or plombing surcharge before rules run, while the pure carrier `costTotal` is stored separately as `pek_carrier_base_price_rub`/`pek_carrier_price_kopecks`. Formula visualization may add `Добавлен мешок и пломбировка`, `Добавлен мешок`, or `Добавлена пломбировка` before rule operations, including when no regular rule applies. These comments are not added to `applied_rules`, and `price_delta_rub` is calculated from the adjusted base so PEK store surcharges are not counted as rule effects.
 

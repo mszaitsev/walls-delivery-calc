@@ -17,6 +17,12 @@ defined( 'ABSPATH' ) || exit;
 
 final class SettingsRepository {
 	public const SHOP_PROCESSING_WORKING_DAYS_KEY = 'shop_processing_working_days';
+	public const SHOP_PROCESSING_MODE_KEY = 'shop_processing_mode';
+	public const SHOP_PROCESSING_MODE_FIXED = 'fixed';
+	public const SHOP_PROCESSING_MODE_DYNAMIC = 'dynamic';
+	public const SHOP_PROCESSING_DYNAMIC_ORDERS_PER_DAY_KEY = 'shop_processing_dynamic_orders_per_day';
+	public const SHOP_PROCESSING_DYNAMIC_ORDER_STATUSES_KEY = 'shop_processing_dynamic_order_statuses';
+	public const SHOP_PROCESSING_DYNAMIC_EXTRA_DAYS_KEY = 'shop_processing_dynamic_extra_days';
 	private const OPTION_NAME = 'wdc_core_settings';
 
 	/**
@@ -43,6 +49,10 @@ final class SettingsRepository {
 			array(
 			'shop_processing_days'          => 1,
 			self::SHOP_PROCESSING_WORKING_DAYS_KEY => 2,
+			self::SHOP_PROCESSING_MODE_KEY => self::SHOP_PROCESSING_MODE_FIXED,
+			self::SHOP_PROCESSING_DYNAMIC_ORDERS_PER_DAY_KEY => 20,
+			self::SHOP_PROCESSING_DYNAMIC_ORDER_STATUSES_KEY => array( 'wc-processing', 'wc-on-hold' ),
+			self::SHOP_PROCESSING_DYNAMIC_EXTRA_DAYS_KEY => 1,
 			PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
 			'auto_generate_next_year'       => true,
 			'checkout_sort_mode'            => 'cheapest',
@@ -166,6 +176,29 @@ final class SettingsRepository {
 		return max( 0, $this->get_int( self::SHOP_PROCESSING_WORKING_DAYS_KEY, 2 ) );
 	}
 
+	public function shop_processing_mode(): string {
+		$mode = $this->get_string( self::SHOP_PROCESSING_MODE_KEY, self::SHOP_PROCESSING_MODE_FIXED );
+
+		return self::SHOP_PROCESSING_MODE_DYNAMIC === $mode ? self::SHOP_PROCESSING_MODE_DYNAMIC : self::SHOP_PROCESSING_MODE_FIXED;
+	}
+
+	public function shop_processing_dynamic_orders_per_day(): int {
+		return max( 1, min( 10000, $this->get_int( self::SHOP_PROCESSING_DYNAMIC_ORDERS_PER_DAY_KEY, 20 ) ) );
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	public function shop_processing_dynamic_order_statuses(): array {
+		return $this->normalize_order_statuses( $this->get_array( self::SHOP_PROCESSING_DYNAMIC_ORDER_STATUSES_KEY, array( 'wc-processing', 'wc-on-hold' ) ) );
+	}
+
+	public function shop_processing_dynamic_extra_days(): int {
+		$value = $this->get_int( self::SHOP_PROCESSING_DYNAMIC_EXTRA_DAYS_KEY, 1 );
+
+		return in_array( $value, array( 0, 1, 2 ), true ) ? $value : 1;
+	}
+
 	/**
 	 * @return array<string|int, mixed>
 	 */
@@ -173,5 +206,37 @@ final class SettingsRepository {
 		$value = $this->all()[ $key ] ?? $default;
 
 		return is_array( $value ) ? $value : $default;
+	}
+
+	/**
+	 * @param array<string|int, mixed> $statuses
+	 * @return list<string>
+	 */
+	public function normalize_order_statuses( array $statuses ): array {
+		return self::normalize_order_status_values( $statuses );
+	}
+
+	/**
+	 * @param array<string|int, mixed> $statuses
+	 * @return list<string>
+	 */
+	public static function normalize_order_status_values( array $statuses ): array {
+		$normalized = array();
+		foreach ( $statuses as $status ) {
+			if ( ! is_scalar( $status ) ) {
+				continue;
+			}
+			$status = strtolower( trim( (string) $status ) );
+			$status = preg_replace( '/[^a-z0-9_-]+/', '', $status ) ?? '';
+			if ( '' === $status ) {
+				continue;
+			}
+			if ( ! str_starts_with( $status, 'wc-' ) ) {
+				$status = 'wc-' . $status;
+			}
+			$normalized[] = $status;
+		}
+
+		return array_values( array_unique( $normalized ) );
 	}
 }
