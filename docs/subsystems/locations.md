@@ -1,6 +1,8 @@
 # Locations And Pickup
 
-Version: 0.155.5
+Version: 0.155.6
+
+0.155.6 does not change destination/location semantics. Rule Engine `cart_total` conditions reuse existing full-cart totals and do not affect `CheckoutLocationFingerprint`, pickup destination binding, or location resolution.
 
 0.155.5 does not change destination/location semantics. Rule Engine full-cart bases use WooCommerce cart item totals and do not affect `CheckoutLocationFingerprint`, pickup destination binding, or location resolution.
 

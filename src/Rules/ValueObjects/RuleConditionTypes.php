@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Rules\ValueObjects;
 
 final class RuleConditionTypes {
 	public const ORDER_TOTAL    = 'order_total';
+	public const CART_TOTAL     = 'cart_total';
 	public const ITEMS_COUNT    = 'items_count';
 	public const PAYMENT_METHOD = 'payment_method';
 	public const CITY           = 'city';
@@ -25,6 +26,7 @@ final class RuleConditionTypes {
 	public static function all(): array {
 		return array(
 			self::ORDER_TOTAL,
+			self::CART_TOTAL,
 			self::ITEMS_COUNT,
 			self::PAYMENT_METHOD,
 			self::CITY,

@@ -1175,7 +1175,8 @@ final class RulesAdminPage {
 
 	private function condition_type_label( string $value ): string {
 		return array(
-			RuleConditionTypes::ORDER_TOTAL    => __( 'сумма заказа', 'walls-delivery-calc' ),
+			RuleConditionTypes::ORDER_TOTAL    => __( 'сумма доставляемых товаров', 'walls-delivery-calc' ),
+			RuleConditionTypes::CART_TOTAL     => __( 'сумма всей корзины', 'walls-delivery-calc' ),
 			RuleConditionTypes::ITEMS_COUNT    => __( 'количество товаров', 'walls-delivery-calc' ),
 			RuleConditionTypes::PAYMENT_METHOD => __( 'способ оплаты', 'walls-delivery-calc' ),
 			RuleConditionTypes::CITY           => __( 'город', 'walls-delivery-calc' ),

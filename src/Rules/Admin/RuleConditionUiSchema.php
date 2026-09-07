@@ -21,7 +21,14 @@ final class RuleConditionUiSchema {
 	public function definitions( array $payment_methods = array(), array $countries = array() ): array {
 		return array(
 			RuleConditionTypes::ORDER_TOTAL => array(
-				'label'     => __( 'Сумма заказа', 'walls-delivery-calc' ),
+				'label'     => __( 'Сумма доставляемых товаров', 'walls-delivery-calc' ),
+				'operators' => self::NUMERIC_OPERATORS,
+				'input'     => 'number',
+				'storage'   => 'value_number',
+				'unit'      => __( 'руб.', 'walls-delivery-calc' ),
+			),
+			RuleConditionTypes::CART_TOTAL => array(
+				'label'     => __( 'Сумма всей корзины', 'walls-delivery-calc' ),
 				'operators' => self::NUMERIC_OPERATORS,
 				'input'     => 'number',
 				'storage'   => 'value_number',

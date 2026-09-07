@@ -35,6 +35,7 @@ final class ConditionEvaluator {
 	private function context_value( string $type, RuleEvaluationContext $context ): int|float|string {
 		return match ( $type ) {
 			RuleConditionTypes::ORDER_TOTAL    => $context->order_total->get_rubles(),
+			RuleConditionTypes::CART_TOTAL     => $context->all_cart_items_total()->get_rubles(),
 			RuleConditionTypes::ITEMS_COUNT    => $context->package->get_total_quantity(),
 			RuleConditionTypes::PAYMENT_METHOD => $context->payment_method,
 			RuleConditionTypes::CITY           => '' !== $context->destination->city ? $context->destination->city : $context->destination->settlement,

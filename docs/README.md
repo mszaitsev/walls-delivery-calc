@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.5
+Version: 0.155.6
+
+0.155.6 extends Rule Engine application conditions with a full-cart total condition. Persisted `order_total` conditions keep their existing shipping-package math and stored key, but the admin UI now labels them `Сумма доставляемых товаров`; new `cart_total` conditions are labeled `Сумма всей корзины` and compare against `RuleEvaluationContext::all_cart_items_total()`, the same typed post-discount full-cart item total introduced for 0.155.5 operation bases.
 
 0.155.5 extends the Rule Engine `Изменить цену` action with full-cart percentage bases while keeping persisted rule keys backward-compatible. `percent_of_order` and `percent_of_order_and_delivery` still use the WooCommerce shipping package `contents_cost` and are shown as `% от физ. товаров` and `% от физ. товаров и доставки`; new `percent_of_cart` and `percent_of_cart_and_delivery` use all cart item lines after sale prices/coupons and exclude shipping, fees, and taxes. WooCommerce supplies the full cart total at checkout mapping time; `RuleEvaluator` remains Woo-independent through `RuleEvaluationContext::all_cart_items_total()`.
 

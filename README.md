@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.155.5
+Version: 0.155.6
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.5 extends Rule Engine price-change bases. Existing persisted `percent_of_order` rules keep their package-local math and are relabeled as `% от физ. товаров`; new `percent_of_cart` bases use the full WooCommerce cart item total after coupons/sale prices without shipping, fees, or taxes.
+Current stage: 0.155.6 extends Rule Engine application conditions with `cart_total` (`Сумма всей корзины`) while keeping persisted `order_total` rules backward-compatible as package-local `Сумма доставляемых товаров`. Both values use post-discount item totals already supplied through typed checkout context; Rule Engine remains independent of WooCommerce globals.
 
 ## Quick Start
 

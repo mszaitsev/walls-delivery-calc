@@ -1,6 +1,8 @@
 # New Carrier Guide
 
-Version: 0.155.5
+Version: 0.155.6
+
+0.155.6 does not change carrier implementation responsibilities. The new Rule Engine `cart_total` condition consumes checkout context; carriers should not calculate WooCommerce cart totals themselves.
 
 0.155.5 does not change carrier implementation responsibilities. New Rule Engine `% от всей корзины` bases receive their totals from checkout context; carriers should keep emitting rates from current `QuoteRequest` data and must not calculate WooCommerce cart totals themselves.
 

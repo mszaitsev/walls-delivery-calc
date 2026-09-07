@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.155.5
+Version: 0.155.6
+
+0.155.6 reuses the 0.155.5 typed full-cart context for Rule Engine conditions. The old `order_total` condition remains package-local for backward compatibility, and the new `cart_total` condition reads `RuleEvaluationContext::all_cart_items_total()` without adding WooCommerce calls to Rule Engine domain/services.
 
 0.155.5 keeps Rule Engine architecture generic while adding full-cart price bases. WooCommerce-derived full cart item totals enter only through `WooCommercePackageMapper` and typed `QuoteRequest`/`RuleEvaluationContext` fields; `RuleEvaluator`, rule value objects, and Rule Engine services stay independent of WooCommerce globals. Shipment Framework architecture is unchanged.
 
