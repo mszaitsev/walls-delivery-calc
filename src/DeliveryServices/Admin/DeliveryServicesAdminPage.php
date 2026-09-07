@@ -1477,33 +1477,68 @@ final class DeliveryServicesAdminPage {
 		}
 
 		$redirect_url = '';
+		$transaction_started = $this->begin_create_transaction();
+		if ( ! $transaction_started ) {
+			$this->create_errors = array( 'storage_failed' );
+			return;
+		}
+
 		try {
 			$id = $this->services->insert_service( $data );
 			if ( $id <= 0 ) {
-				$this->create_errors = array( 'storage_failed' );
+				$this->rollback_create_transaction();
+				$this->create_errors = $this->services->service_key_exists( (string) $data['service_key'] )
+					? array( 'service_key_duplicate' )
+					: array( 'storage_failed' );
 				return;
 			}
 			$service = $this->services->find_by_id( $id );
 			if ( ! $service instanceof DeliveryService || null === $service->id || (string) $data['service_key'] !== $service->service_key ) {
+				$this->rollback_create_transaction();
 				$this->create_errors = array( 'storage_failed' );
 				return;
 			}
 
-			$this->save_manual_delivery_settings( (int) $service->id );
+			$this->save_manual_delivery_settings( (int) $service->id, true );
 			$countries = $this->countries_from_post();
 			$this->countries->replace_countries( (int) $service->id, $countries );
 			$this->save_manual_delivery_geography( (int) $service->id, $countries );
-			$this->clear_delivery_quote_cache();
+			if ( ! $this->commit_create_transaction() ) {
+				$this->rollback_create_transaction();
+				$this->create_errors = array( 'storage_failed' );
+				return;
+			}
 			$redirect_url = $this->service_tab_url_by_key( $service->service_key, 'main' );
 		} catch ( \InvalidArgumentException ) {
+			$this->rollback_create_transaction();
 			$this->create_errors = array( 'manual_settings_invalid' );
 		} catch ( \Throwable ) {
+			$this->rollback_create_transaction();
 			$this->create_errors = array( 'storage_failed' );
 		}
 		if ( '' !== $redirect_url ) {
+			$this->clear_delivery_quote_cache();
 			wp_safe_redirect( $redirect_url );
 			exit;
 		}
+	}
+
+	private function begin_create_transaction(): bool {
+		global $wpdb;
+
+		return false !== $wpdb->query( 'START TRANSACTION' );
+	}
+
+	private function commit_create_transaction(): bool {
+		global $wpdb;
+
+		return false !== $wpdb->query( 'COMMIT' );
+	}
+
+	private function rollback_create_transaction(): void {
+		global $wpdb;
+
+		$wpdb->query( 'ROLLBACK' );
 	}
 
 	/**
@@ -5132,7 +5167,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			&& DeliveryService::TYPE_MANUAL === $service->service_type;
 	}
 
-	private function save_manual_delivery_settings( int $service_id ): void {
+	private function save_manual_delivery_settings( int $service_id, bool $use_existing_transaction = false ): void {
 		if ( array_key_exists( 'manual_pricing_mode', $_POST ) ) {
 			$mode = sanitize_key( wp_unslash( $_POST['manual_pricing_mode'] ?? ManualDeliverySettings::PRICING_MODE_FLAT ) );
 			$ranges = ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === $mode ? $this->manual_weight_ranges_from_post() : array();
@@ -5150,7 +5185,11 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				)
 			);
 			if ( ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === $mode ) {
-				$this->manual_delivery_weight_ranges->replace_ranges( $service_id, $ranges );
+				if ( $use_existing_transaction ) {
+					$this->manual_delivery_weight_ranges->replace_ranges_in_current_transaction( $service_id, $ranges );
+				} else {
+					$this->manual_delivery_weight_ranges->replace_ranges( $service_id, $ranges );
+				}
 			}
 		}
 		if ( array_key_exists( 'manual_delivery_type', $_POST ) ) {
@@ -5159,7 +5198,11 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				sanitize_key( wp_unslash( $_POST['manual_delivery_type'] ?? ManualDeliverySettings::DELIVERY_TYPE_COURIER ) ),
 				sanitize_text_field( wp_unslash( $_POST['manual_delivery_type_label'] ?? '' ) )
 			);
-			$this->manual_pickup_points->replace_points( $service_id, $this->manual_pickup_points_from_post() );
+			if ( $use_existing_transaction ) {
+				$this->manual_pickup_points->replace_points_in_current_transaction( $service_id, $this->manual_pickup_points_from_post() );
+			} else {
+				$this->manual_pickup_points->replace_points( $service_id, $this->manual_pickup_points_from_post() );
+			}
 		}
 		if ( array_key_exists( 'manual_delivery_min_days', $_POST ) || array_key_exists( 'manual_delivery_max_days', $_POST ) ) {
 			$this->manual_delivery_settings->save_delivery_days(

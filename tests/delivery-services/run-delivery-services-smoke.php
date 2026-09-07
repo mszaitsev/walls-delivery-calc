@@ -92,13 +92,62 @@ if ( ! class_exists( 'wpdb' ) ) {
 		/** @var array<int,array<string,mixed>> */
 		public array $queries = array();
 		public bool $fail_next_query = false;
+		public ?string $fail_next_query_contains = null;
+		public ?string $fail_next_insert_table_contains = null;
+		public ?string $race_duplicate_key_on_failed_service_insert = null;
+		/** @var array<int,string> */
+		public array $insert_attempts = array();
+		/** @var array<string,mixed>|null */
+		private ?array $transaction_snapshot = null;
+		/** @var array<string,mixed>|null */
+		private ?array $pending_race_duplicate_row = null;
 		private int $condition_insert_id = 0;
 
 		public function get_charset_collate(): string { return 'DEFAULT CHARSET=utf8mb4'; }
 		public function query( string $query ): bool {
+			$trimmed = trim( $query );
 			$this->queries[] = array( 'query' => $query );
+			if ( 'START TRANSACTION' === $trimmed ) {
+				$this->transaction_snapshot = array(
+					'insert_id' => $this->insert_id,
+					'condition_insert_id' => $this->condition_insert_id,
+					'services' => $this->services,
+					'settings' => $this->settings,
+					'countries' => $this->countries,
+					'rules' => $this->rules,
+					'conditions' => $this->conditions,
+				);
+				return true;
+			}
+			if ( 'ROLLBACK' === $trimmed ) {
+				if ( null !== $this->transaction_snapshot ) {
+					$this->insert_id = (int) $this->transaction_snapshot['insert_id'];
+					$this->condition_insert_id = (int) $this->transaction_snapshot['condition_insert_id'];
+					$this->services = $this->transaction_snapshot['services'];
+					$this->settings = $this->transaction_snapshot['settings'];
+					$this->countries = $this->transaction_snapshot['countries'];
+					$this->rules = $this->transaction_snapshot['rules'];
+					$this->conditions = $this->transaction_snapshot['conditions'];
+				}
+				$this->transaction_snapshot = null;
+				if ( null !== $this->pending_race_duplicate_row ) {
+					$row = $this->pending_race_duplicate_row;
+					$row['id'] = ++$this->insert_id;
+					$this->services[] = $row;
+					$this->pending_race_duplicate_row = null;
+				}
+				return true;
+			}
+			if ( 'COMMIT' === $trimmed ) {
+				$this->transaction_snapshot = null;
+				return true;
+			}
 			if ( $this->fail_next_query ) {
 				$this->fail_next_query = false;
+				return false;
+			}
+			if ( null !== $this->fail_next_query_contains && str_contains( $query, $this->fail_next_query_contains ) ) {
+				$this->fail_next_query_contains = null;
 				return false;
 			}
 			if ( str_contains( $query, 'wdc_delivery_service_countries' ) && str_starts_with( strtoupper( trim( $query ) ), 'DELETE ' ) ) {
@@ -116,6 +165,20 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return $query;
 		}
 		public function insert( string $table, array $data, array $format = array() ): bool {
+			$this->insert_attempts[] = $table;
+			if (
+				null !== $this->race_duplicate_key_on_failed_service_insert
+				&& str_contains( $table, 'wdc_delivery_services' )
+				&& (string) ( $data['service_key'] ?? '' ) === $this->race_duplicate_key_on_failed_service_insert
+			) {
+				$this->pending_race_duplicate_row = array_merge( $data, array( 'deleted' => 0 ) );
+				$this->race_duplicate_key_on_failed_service_insert = null;
+				return false;
+			}
+			if ( null !== $this->fail_next_insert_table_contains && str_contains( $table, $this->fail_next_insert_table_contains ) ) {
+				$this->fail_next_insert_table_contains = null;
+				return false;
+			}
 			$data['id'] = ++$this->insert_id;
 			if ( str_contains( $table, 'wdc_delivery_service_settings' ) ) {
 				$this->settings[] = $data;
@@ -446,6 +509,21 @@ function wdc_ds_post_create( DeliveryServicesAdminPage $admin, array $post ): ?s
 	}
 
 	return null;
+}
+
+/** @return array<int,string> */
+function wdc_ds_queries_since( wpdb $db, int $offset ): array {
+	return array_values( array_map( static fn ( array $row ): string => (string) ( $row['query'] ?? '' ), array_slice( $db->queries, $offset ) ) );
+}
+
+function wdc_ds_contains_query( array $queries, string $needle ): bool {
+	foreach ( $queries as $query ) {
+		if ( str_contains( $query, $needle ) ) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 $rp = $services->ensure_russian_post_service();
@@ -810,6 +888,7 @@ wdc_ds_assert( str_contains( $create_html, 'Используется как те
 wdc_ds_assert( str_contains( $create_html, 'Отмена' ) && str_contains( $create_html, 'admin.php?page=' . DeliveryServicesAdminPage::MENU_SLUG ), 'Create form must render a Cancel link back to the list page.' );
 
 $manual_create_count = count( $GLOBALS['wpdb']->services );
+$success_query_offset = count( $GLOBALS['wpdb']->queries );
 $redirect = wdc_ds_post_create(
 	$create_admin,
 	array(
@@ -832,12 +911,16 @@ $manual_local = $services->find_by_service_key( 'manual_local' );
 wdc_ds_assert( $manual_local instanceof DeliveryService && ManualDeliverySettings::CARRIER_KEY === $manual_local->carrier_key && DeliveryService::TYPE_MANUAL === $manual_local->service_type, 'Valid manual service create must persist a manual DeliveryService.' );
 wdc_ds_assert( null !== $redirect && str_contains( $redirect, 'page=' . DeliveryServicesAdminPage::MENU_SLUG ) && str_contains( $redirect, 'service=manual_local' ) && str_contains( $redirect, 'tab=main' ), 'Successful create must redirect to the new service edit page.' );
 wdc_ds_assert( count( $GLOBALS['wpdb']->services ) === $manual_create_count + 1, 'Successful create must insert exactly one service.' );
+$success_queries = wdc_ds_queries_since( $GLOBALS['wpdb'], $success_query_offset );
+wdc_ds_assert( wdc_ds_contains_query( $success_queries, 'START TRANSACTION' ) && wdc_ds_contains_query( $success_queries, 'COMMIT' ) && ! wdc_ds_contains_query( $success_queries, 'ROLLBACK' ), 'Successful create must wrap persistence in BEGIN/COMMIT without rollback.' );
 
 $duplicate_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$duplicate_query_offset = count( $GLOBALS['wpdb']->queries );
 $duplicate_redirect = wdc_ds_post_create( $duplicate_admin, array( 'service_key' => 'manual_local', 'title' => 'Duplicate Manual', 'minimum_price_rub' => '5' ) );
 $duplicate_html = wdc_ds_render_admin_page( $duplicate_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
 wdc_ds_assert( null === $duplicate_redirect && str_contains( $duplicate_html, 'Service key уже используется другой службой доставки.' ) && str_contains( $duplicate_html, 'Duplicate Manual' ) && str_contains( $duplicate_html, 'manual_local' ), 'Duplicate manual key must stay on create screen with submitted values.' );
 wdc_ds_assert( count( $GLOBALS['wpdb']->services ) === $manual_create_count + 1, 'Duplicate manual key must not create a service.' );
+wdc_ds_assert( ! wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], $duplicate_query_offset ), 'START TRANSACTION' ), 'Precheck duplicate must fail before starting a transaction.' );
 
 $builtin_duplicate_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
 wdc_ds_assert( null === wdc_ds_post_create( $builtin_duplicate_admin, array( 'service_key' => CdekSettings::SERVICE_KEY, 'title' => 'Duplicate CDEK' ) ), 'Duplicate builtin/carrier key must not redirect as successful create.' );
@@ -891,6 +974,53 @@ wdc_ds_assert( $nonce_failed && $before_nonce === count( $GLOBALS['wpdb']->servi
 
 $manual_edit_html = wdc_ds_render_admin_page( $create_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'service' => 'manual_local' ) );
 wdc_ds_assert( str_contains( $manual_edit_html, 'Manual Local' ) && str_contains( $manual_edit_html, 'name="wdc_delivery_services_action" value="save_main"' ), 'Existing edit page must remain available after create route split.' );
+
+$main_wpdb = $GLOBALS['wpdb'];
+$GLOBALS['wpdb'] = new wpdb();
+$rollback_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$rollback_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$rollback_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$rollback_admin = wdc_ds_admin_page( $rollback_services, $rollback_countries, $rollback_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wpdb']->fail_next_query_contains = 'wdc_delivery_service_countries';
+$rollback_redirect = wdc_ds_post_create(
+	$rollback_admin,
+	array(
+		'service_key' => 'manual_rollback',
+		'title' => 'Manual Rollback',
+		'countries' => 'RU',
+		'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT,
+		'manual_flat_price_rub' => '250',
+	)
+);
+$rollback_html = wdc_ds_render_admin_page( $rollback_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $rollback_redirect && str_contains( $rollback_html, 'Служба доставки не создана.' ), 'Downstream country persistence failure must stay on create screen with storage error.' );
+wdc_ds_assert( wdc_ds_contains_query( $GLOBALS['wpdb']->insert_attempts, 'wdc_delivery_services' ), 'Downstream failure test must attempt the service INSERT before failing later persistence.' );
+wdc_ds_assert( wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'START TRANSACTION' ) && wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'ROLLBACK' ) && ! wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'COMMIT' ), 'Downstream persistence failure must rollback the create transaction without commit.' );
+wdc_ds_assert( null === $rollback_services->find_by_service_key( 'manual_rollback' ) && ! $rollback_services->service_key_exists( 'manual_rollback' ), 'Rollback after downstream failure must remove the partial service row and free the service key.' );
+wdc_ds_assert( null !== wdc_ds_post_create( $rollback_admin, array( 'service_key' => 'manual_rollback', 'title' => 'Manual Rollback Retry', 'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'manual_flat_price_rub' => '250' ) ), 'Create with the same key must be retryable after downstream rollback.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$race_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$race_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$race_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$race_admin = wdc_ds_admin_page( $race_services, $race_countries, $race_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wpdb']->race_duplicate_key_on_failed_service_insert = 'manual_race';
+$race_redirect = wdc_ds_post_create( $race_admin, array( 'service_key' => 'manual_race', 'title' => 'Manual Race' ) );
+$race_html = wdc_ds_render_admin_page( $race_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $race_redirect && str_contains( $race_html, 'Service key уже используется другой службой доставки.' ) && ! str_contains( $race_html, 'Служба доставки не создана.' ), 'Duplicate race on strict INSERT must render the duplicate validation error, not generic storage failure.' );
+wdc_ds_assert( wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'START TRANSACTION' ) && wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'ROLLBACK' ), 'Duplicate race must rollback before the repeated uniqueness lookup.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$generic_failure_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$generic_failure_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$generic_failure_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$generic_failure_admin = wdc_ds_admin_page( $generic_failure_services, $generic_failure_countries, $generic_failure_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_services';
+$generic_failure_redirect = wdc_ds_post_create( $generic_failure_admin, array( 'service_key' => 'manual_insert_failure', 'title' => 'Manual Insert Failure' ) );
+$generic_failure_html = wdc_ds_render_admin_page( $generic_failure_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $generic_failure_redirect && str_contains( $generic_failure_html, 'Служба доставки не создана.' ) && ! str_contains( $generic_failure_html, 'Service key уже используется' ), 'Generic strict INSERT failure with a still-free key must render storage_failed.' );
+wdc_ds_assert( null === $generic_failure_services->find_by_service_key( 'manual_insert_failure' ) && ! $generic_failure_services->service_key_exists( 'manual_insert_failure' ), 'Generic strict INSERT failure must not leave a service row.' );
+$GLOBALS['wpdb'] = $main_wpdb;
 
 $GLOBALS['wpdb']->rules[] = array( 'id' => 1, 'name' => 'Service rule', 'enabled' => 1, 'priority' => 10, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'fixed_test', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::MULTIPLY, 'operation_value' => 2, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
 $GLOBALS['wpdb']->rules[] = array( 'id' => 2, 'name' => 'Default rule', 'enabled' => 1, 'priority' => 20, 'target_type' => RuleRepository::TARGET_DEFAULT, 'target_value' => '', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::DECREASE, 'operation_value' => 100, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );

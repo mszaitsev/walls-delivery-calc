@@ -43,11 +43,17 @@ final class DeliveryServiceSettingsRepository {
 		);
 
 		if ( null !== $existing ) {
-			$this->wpdb->update( $this->table(), $row, array( 'id' => (int) $existing ), array( '%d', '%s', '%s', '%s', '%d', '%s' ), array( '%d' ) );
+			$result = $this->wpdb->update( $this->table(), $row, array( 'id' => (int) $existing ), array( '%d', '%s', '%s', '%s', '%d', '%s' ), array( '%d' ) );
+			if ( false === $result ) {
+				throw new \RuntimeException( 'Failed to update delivery service setting.' );
+			}
 			return;
 		}
 
-		$this->wpdb->insert( $this->table(), $row, array( '%d', '%s', '%s', '%s', '%d', '%s' ) );
+		$result = $this->wpdb->insert( $this->table(), $row, array( '%d', '%s', '%s', '%s', '%d', '%s' ) );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Failed to insert delivery service setting.' );
+		}
 	}
 
 	public function delete_setting( int $service_id, string $key ): void {

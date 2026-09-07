@@ -37,32 +37,21 @@ final class ManualDeliveryWeightRangeRepository {
 
 		$this->wpdb->query( 'START TRANSACTION' );
 		try {
-			$this->checked_delete( $service_id );
-			$table = $this->table();
-			$now = current_time( 'mysql' );
-			foreach ( $normalized as $index => $range ) {
-				$result = $this->wpdb->insert(
-					$table,
-					array(
-						'service_id' => $service_id,
-						'from_weight_g' => $range->from_weight_g,
-						'to_weight_g' => $range->to_weight_g,
-						'price_kopecks' => $range->price_kopecks,
-						'sort_order' => $index + 1,
-						'created_at' => $now,
-						'updated_at' => $now,
-					),
-					array( '%d', '%d', '%d', '%d', '%d', '%s', '%s' )
-				);
-				if ( false === $result ) {
-					throw new RuntimeException( 'Failed to save manual delivery weight range.' );
-				}
-			}
+			$this->replace_normalized_ranges( $service_id, $normalized );
 			$this->wpdb->query( 'COMMIT' );
 		} catch ( \Throwable $exception ) {
 			$this->wpdb->query( 'ROLLBACK' );
 			throw $exception;
 		}
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>|ManualDeliveryWeightRange> $ranges
+	 */
+	public function replace_ranges_in_current_transaction( int $service_id, array $ranges ): void {
+		$normalized = $this->normalize_ranges( $ranges );
+		$this->validate_ranges( $normalized );
+		$this->replace_normalized_ranges( $service_id, $normalized );
 	}
 
 	public function clear( int $service_id ): void {
@@ -129,6 +118,33 @@ final class ManualDeliveryWeightRangeRepository {
 		$result = $this->wpdb->delete( $this->table(), array( 'service_id' => $service_id ), array( '%d' ) );
 		if ( false === $result ) {
 			throw new RuntimeException( 'Failed to clear manual delivery weight ranges.' );
+		}
+	}
+
+	/**
+	 * @param array<int,ManualDeliveryWeightRange> $ranges
+	 */
+	private function replace_normalized_ranges( int $service_id, array $ranges ): void {
+		$this->checked_delete( $service_id );
+		$table = $this->table();
+		$now = current_time( 'mysql' );
+		foreach ( $ranges as $index => $range ) {
+			$result = $this->wpdb->insert(
+				$table,
+				array(
+					'service_id' => $service_id,
+					'from_weight_g' => $range->from_weight_g,
+					'to_weight_g' => $range->to_weight_g,
+					'price_kopecks' => $range->price_kopecks,
+					'sort_order' => $index + 1,
+					'created_at' => $now,
+					'updated_at' => $now,
+				),
+				array( '%d', '%d', '%d', '%d', '%d', '%s', '%s' )
+			);
+			if ( false === $result ) {
+				throw new RuntimeException( 'Failed to save manual delivery weight range.' );
+			}
 		}
 	}
 
