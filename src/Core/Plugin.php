@@ -245,7 +245,9 @@ use WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutAddressRenderer;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutCartTotalsResolver;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryMessages;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutLocationFingerprint;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
@@ -274,6 +276,7 @@ use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Settings\CheckoutDeliveryMessageSettings;
 use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
@@ -915,6 +918,9 @@ final class Plugin {
 		$this->container->register( PickupPointPresentationResolver::class, fn(): PickupPointPresentationResolver => new PickupPointPresentationResolver() );
 		$this->container->register( PickupPointCardRenderer::class, fn(): PickupPointCardRenderer => new PickupPointCardRenderer( $this->container->get( PickupPointPresentationResolver::class ) ) );
 		$this->container->register( CheckoutRateRenderer::class, fn(): CheckoutRateRenderer => new CheckoutRateRenderer( $this->container->get( CheckoutSessionManager::class ), $this->container->get( PickupPointCardRenderer::class ) ) );
+		$this->container->register( CheckoutDeliveryMessageSettings::class, fn(): CheckoutDeliveryMessageSettings => new CheckoutDeliveryMessageSettings( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( CheckoutCartTotalsResolver::class, fn(): CheckoutCartTotalsResolver => new CheckoutCartTotalsResolver() );
+		$this->container->register( CheckoutDeliveryMessages::class, fn(): CheckoutDeliveryMessages => new CheckoutDeliveryMessages( $this->container->get( CheckoutDeliveryMessageSettings::class ), $this->container->get( CheckoutCartTotalsResolver::class ) ) );
 		$this->container->register(
 			CheckoutDeliveryTypeSelector::class,
 			fn(): CheckoutDeliveryTypeSelector => new CheckoutDeliveryTypeSelector(
@@ -1235,6 +1241,7 @@ final class Plugin {
 		$this->container->get( AddressSuggestionAjax::class )->register();
 		add_action( 'rest_api_init', array( $this->container->get( CheckoutPickupPointRestController::class ), 'register' ) );
 		$this->container->get( CheckoutRateRenderer::class )->register();
+		$this->container->get( CheckoutDeliveryMessages::class )->register();
 		$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
 		$this->container->get( CheckoutSortSelector::class )->register();
 		$this->container->get( CheckoutAddressRuntime::class )->register();

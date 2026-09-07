@@ -614,7 +614,9 @@ C:.
 |   |   |
 |   |   \---WooCommerce
 |   |           CheckoutAddressRenderer.php
+|   |           CheckoutCartTotalsResolver.php
 |   |           CheckoutDebugPanel.php
+|   |           CheckoutDeliveryMessages.php
 |   |           CheckoutDeliveryTypeSelector.php
 |   |           CheckoutLocationFingerprint.php
 |   |           CheckoutRateRenderer.php
@@ -722,6 +724,7 @@ C:.
 |   |   |       EncryptionService.php
 |   |   |
 |   |   \---Settings
+|   |           CheckoutDeliveryMessageSettings.php
 |   |           PlatformRuntimeSettings.php
 |   |           SettingsRepository.php
 |   |
@@ -1091,6 +1094,7 @@ C:.
     |
     +---checkout
     |       run-checkout-city-selector-smoke.js
+    |       run-checkout-delivery-messages-smoke.php
     |       run-checkout-location-picker-smoke.php
     |       run-checkout-selection-smoke.php
     |       run-checkout-smoke.php

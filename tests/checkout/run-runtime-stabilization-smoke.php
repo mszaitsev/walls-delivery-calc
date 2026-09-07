@@ -491,6 +491,7 @@ use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryMessages;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
@@ -750,6 +751,7 @@ runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutL
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_nopriv_' . CheckoutLocationAjax::ACTION] ), 'Location AJAX endpoint must register for guests.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_after_shipping_rate'] ), 'Checkout rate renderer hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_review_order_before_shipping'] ), 'Address renderer hook must register when platform runtime is enabled.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must register in the full checkout runtime.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_order_status_changed', ShopProcessingOrderQueueCounter::class ), 'Passive shop processing queue cache invalidation must register when platform runtime is enabled.' );
 
@@ -768,6 +770,7 @@ runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_filters']['woocommerce_shippin
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutLocationAjax::ACTION] ), 'Checkout location AJAX must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_select_domestic_tariff'] ), 'Checkout tariff selector AJAX must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend checkout assets must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController::class ), 'Checkout pickup REST routes must not register when platform runtime is disabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\PickupPointsRestController::class ), 'Carrier pickup/admin preparation REST routes must remain registered when platform runtime is disabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_order_status_changed', ShopProcessingOrderQueueCounter::class ), 'Passive shop processing queue cache invalidation must remain registered when platform runtime is disabled.' );
@@ -1507,7 +1510,7 @@ $sort_selector->render();
 $sort_two_output = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $sort_two_output, 'wdc-checkout-sort-row' ) && str_contains( $sort_two_output, 'wdc_platform_checkout_sort_mode' ), 'Sort selector must render only when two or more WDC rates are available.' );
 $checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
-runtime_smoke_assert( str_contains( $checkout_sort_js, 'function relocateSortControl()' ) && str_contains( $checkout_sort_js, 'prependTo( $shippingCell )' ) && str_contains( $checkout_sort_js, 'updated_checkout' ), 'Checkout sort JS must move the selector into the shipping row before the methods list.' );
+runtime_smoke_assert( str_contains( $checkout_sort_js, 'function relocateDeliveryControls()' ) && str_contains( $checkout_sort_js, 'function relocateDeliveryMessages()' ) && str_contains( $checkout_sort_js, 'function relocateSortControl( $messages )' ) && str_contains( $checkout_sort_js, 'prependTo( $shippingCell )' ) && str_contains( $checkout_sort_js, 'insertAfter( $messages )' ) && ! str_contains( $checkout_sort_js, '.clone(' ) && str_contains( $checkout_sort_js, 'updated_checkout' ), 'Checkout sort JS must move delivery messages into the shipping row, place sort after them, and keep the no-message prepend fallback.' );
 $courier_address_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/courier-address-summary.js' );
 foreach ( array( 'billing_address_1', 'shipping_address_1', 'billing_postcode', 'shipping_postcode', 'billing_city', 'shipping_city', 'updated_checkout', 'input[name^="shipping_method"]', 'required = required', 'aria-required', 'data-wdc-courier-address-summary', 'wdcCourierAddressSummary', 'addressParts', '.join(\', \')', 'target.focus()', 'selectedItem.contains(summary)', 'shipToDifferent && shipToDifferent.checked', '!billingAddress && shippingAddress', 'marker.getAttribute(\'data-wdc-added\') === \'true\'', 'var address1 = value(addressField)', 'var hasAddress1 = address1 !== \'\'', 'valueNode.textContent = hasAddress1 ? address : \'\'', 'valueNode.hidden = !hasAddress1', 'warningNode.hidden = hasAddress1' ) as $needle ) {
         runtime_smoke_assert( str_contains( $courier_address_js, $needle ), 'Courier address summary JS must contain ' . $needle . '.' );

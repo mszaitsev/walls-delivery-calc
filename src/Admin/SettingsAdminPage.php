@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Infrastructure\Settings\CheckoutDeliveryMessageSettings;
 use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
@@ -92,6 +93,48 @@ final class SettingsAdminPage {
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Показывать отладочный блок checkout администраторам', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="show_checkout_debug_panel" value="1" <?php checked( ! empty( $values['show_checkout_debug_panel'] ) ); ?>> <?php echo esc_html__( 'Отладка скрыта по умолчанию.', 'walls-delivery-calc' ); ?></label></td>
+						</tr>
+						<tr><th colspan="2"><h2><?php echo esc_html__( 'Тексты о доставке на checkout', 'walls-delivery-calc' ); ?></h2></th></tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__( 'Показывать информационный текст о доставке', 'walls-delivery-calc' ); ?></th>
+							<td>
+								<label><input type="checkbox" name="<?php echo esc_attr( CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY ); ?>" value="1" <?php checked( ! empty( $values[ CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY ] ) ); ?>> <?php echo esc_html__( 'Выводить обычный текст под заголовком доставки.', 'walls-delivery-calc' ); ?></label>
+								<?php $this->render_checkout_delivery_editor( CheckoutDeliveryMessageSettings::INFO_HTML_KEY, 'wdc_checkout_delivery_info_html', $values, CheckoutDeliveryMessageSettings::DEFAULT_INFO_HTML ); ?>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__( 'Показывать информацию об акции на доставку', 'walls-delivery-calc' ); ?></th>
+							<td>
+								<label><input type="checkbox" name="<?php echo esc_attr( CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY ); ?>" value="1" <?php checked( ! empty( $values[ CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY ] ) ); ?>> <?php echo esc_html__( 'Выводить акционный текст под информационным блоком.', 'walls-delivery-calc' ); ?></label>
+								<p class="description"><?php echo esc_html__( 'Количество считается по формуле: настроенный порог сравнивается с выбранной суммой товаров после скидок. Порог считается достигнутым, когда текущая сумма больше или равна порогу.', 'walls-delivery-calc' ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_checkout_delivery_promo_threshold"><?php echo esc_html__( 'Порог акции, руб.', 'walls-delivery-calc' ); ?></label></th>
+							<td><input id="wdc_checkout_delivery_promo_threshold" type="text" inputmode="decimal" name="checkout_delivery_promo_threshold_rub" value="<?php echo esc_attr( CheckoutDeliveryMessageSettings::format_kopecks_amount( (int) ( $values[ CheckoutDeliveryMessageSettings::PROMO_THRESHOLD_KOPECKS_KEY ] ?? CheckoutDeliveryMessageSettings::DEFAULT_PROMO_THRESHOLD_KOPECKS ) ) ); ?>"></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_checkout_delivery_promo_total_basis"><?php echo esc_html__( 'Сумму для порога считать по', 'walls-delivery-calc' ); ?></label></th>
+							<td>
+								<select id="wdc_checkout_delivery_promo_total_basis" name="<?php echo esc_attr( CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY ); ?>">
+									<option value="<?php echo esc_attr( CheckoutDeliveryMessageSettings::BASIS_ALL_CART_ITEMS ); ?>" <?php selected( (string) ( $values[ CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY ] ?? CheckoutDeliveryMessageSettings::BASIS_ALL_CART_ITEMS ), CheckoutDeliveryMessageSettings::BASIS_ALL_CART_ITEMS ); ?>><?php echo esc_html__( 'Всей корзине', 'walls-delivery-calc' ); ?></option>
+									<option value="<?php echo esc_attr( CheckoutDeliveryMessageSettings::BASIS_SHIPPABLE_CART_ITEMS ); ?>" <?php selected( (string) ( $values[ CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY ] ?? CheckoutDeliveryMessageSettings::BASIS_ALL_CART_ITEMS ), CheckoutDeliveryMessageSettings::BASIS_SHIPPABLE_CART_ITEMS ); ?>><?php echo esc_html__( 'Товарам, требующим доставки', 'walls-delivery-calc' ); ?></option>
+								</select>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__( 'Текст, когда порог ещё не достигнут', 'walls-delivery-calc' ); ?></th>
+							<td>
+								<p class="description"><?php echo esc_html__( 'Доступны placeholders: {s} - порог, {d} - сколько не хватает до порога. Вставляются только числа без валюты.', 'walls-delivery-calc' ); ?></p>
+								<?php $this->render_checkout_delivery_editor( CheckoutDeliveryMessageSettings::PROMO_BELOW_HTML_KEY, 'wdc_checkout_delivery_promo_below_html', $values, CheckoutDeliveryMessageSettings::DEFAULT_PROMO_BELOW_HTML ); ?>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__( 'Текст, когда порог достигнут', 'walls-delivery-calc' ); ?></th>
+							<td>
+								<p class="description"><?php echo esc_html__( 'Доступен placeholder: {s} - порог. Вставляется только число без валюты.', 'walls-delivery-calc' ); ?></p>
+								<?php $this->render_checkout_delivery_editor( CheckoutDeliveryMessageSettings::PROMO_REACHED_HTML_KEY, 'wdc_checkout_delivery_promo_reached_html', $values, CheckoutDeliveryMessageSettings::DEFAULT_PROMO_REACHED_HTML ); ?>
+							</td>
 						</tr>
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Подставлять область в поиск населенного пункта на checkout', 'walls-delivery-calc' ); ?></th>
@@ -202,11 +245,19 @@ final class SettingsAdminPage {
 		$fias_minute_limit          = isset( $data['fias_api_minute_limit'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_minute_limit'] ) ) : 100;
 		$dadata_suggestions_timeout = isset( $data['dadata_suggestions_timeout'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_timeout'] ) ) : 3;
 		$dadata_suggestions_count   = isset( $data['dadata_suggestions_count'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_count'] ) ) : 10;
+		$promo_basis = isset( $data[ CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY ] ) ? sanitize_key( wp_unslash( (string) $data[ CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY ] ) ) : CheckoutDeliveryMessageSettings::BASIS_ALL_CART_ITEMS;
+		if ( ! in_array( $promo_basis, array( CheckoutDeliveryMessageSettings::BASIS_ALL_CART_ITEMS, CheckoutDeliveryMessageSettings::BASIS_SHIPPABLE_CART_ITEMS ), true ) ) {
+			$promo_basis = CheckoutDeliveryMessageSettings::BASIS_ALL_CART_ITEMS;
+		}
 
 		$settings = array(
 			PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => $this->checked_scalar( $data[ PlatformRuntimeSettings::RUNTIME_ENABLED_KEY ] ?? null ),
 			'checkout_sort_mode'           => $sort_mode,
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
+			CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY => ! empty( $data[ CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY ] ),
+			CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY => ! empty( $data[ CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY ] ),
+			CheckoutDeliveryMessageSettings::PROMO_THRESHOLD_KOPECKS_KEY => CheckoutDeliveryMessageSettings::kopecks_from_admin_amount( $data['checkout_delivery_promo_threshold_rub'] ?? CheckoutDeliveryMessageSettings::format_kopecks_amount( CheckoutDeliveryMessageSettings::DEFAULT_PROMO_THRESHOLD_KOPECKS ) ),
+			CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY => $promo_basis,
 			'include_region_in_checkout_city_picker_query' => ! array_key_exists( 'include_region_in_checkout_city_picker_query', $data ) ? false : ! empty( $data['include_region_in_checkout_city_picker_query'] ),
 			'checkout_location_search_limit' => max( 10, min( 500, $checkout_location_limit > 0 ? $checkout_location_limit : 100 ) ),
 			'checkout_location_region_limit' => max( 3, min( 50, $checkout_region_limit > 0 ? $checkout_region_limit : 10 ) ),
@@ -230,7 +281,38 @@ final class SettingsAdminPage {
 			}
 		}
 
+		foreach ( array( CheckoutDeliveryMessageSettings::INFO_HTML_KEY, CheckoutDeliveryMessageSettings::PROMO_BELOW_HTML_KEY, CheckoutDeliveryMessageSettings::PROMO_REACHED_HTML_KEY ) as $html_key ) {
+			if ( array_key_exists( $html_key, $data ) ) {
+				$settings[ $html_key ] = CheckoutDeliveryMessageSettings::sanitize_html( $data[ $html_key ] );
+			}
+		}
+
 		return $settings;
+	}
+
+	/**
+	 * @param array<string,mixed> $values
+	 */
+	private function render_checkout_delivery_editor( string $name, string $editor_id, array $values, string $default ): void {
+		$value = CheckoutDeliveryMessageSettings::sanitize_html( $values[ $name ] ?? $default );
+		$settings = array(
+			'textarea_name' => $name,
+			'textarea_rows' => 5,
+			'media_buttons' => false,
+			'teeny'         => false,
+			'quicktags'     => false,
+			'tinymce'       => array(
+				'toolbar1' => 'bold,italic,underline,strikethrough,forecolor,link,unlink,removeformat',
+				'toolbar2' => '',
+			),
+		);
+		if ( function_exists( 'wp_editor' ) ) {
+			wp_editor( $value, $editor_id, $settings );
+			return;
+		}
+
+		$escaped = function_exists( 'esc_textarea' ) ? esc_textarea( $value ) : esc_html( $value );
+		echo '<textarea id="' . esc_attr( $editor_id ) . '" name="' . esc_attr( $name ) . '" rows="5" class="large-text">' . $escaped . '</textarea>';
 	}
 
 	/**
