@@ -492,7 +492,6 @@ use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
-use WallsShop\WDC\Checkout\WooCommerce\CheckoutFeatureGate;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
@@ -638,7 +637,7 @@ runtime_smoke_assert( $settings_property->isPublic(), 'Inherited WC_Settings_API
 
 $settings = new SettingsRepository();
 $runtime_settings = new PlatformRuntimeSettings( $settings );
-$gate     = new CheckoutFeatureGate( $settings, $runtime_settings );
+$retired_checkout_flag = 'enable_new' . '_checkout_shipping';
 $settings->replace( array() );
 runtime_smoke_assert( $runtime_settings->runtime_enabled(), 'Missing legacy runtime setting must keep WDC runtime enabled.' );
 $settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
@@ -648,28 +647,14 @@ runtime_smoke_assert( ! $runtime_settings->runtime_enabled(), 'Explicit disabled
 $settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, 'definitely-not-bool' );
 runtime_smoke_assert( $runtime_settings->runtime_enabled(), 'Invalid persisted runtime setting must normalize to the safe enabled default.' );
 $settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
-runtime_smoke_assert( ! $gate->enabled(), 'Feature gate must be false by default.' );
-$settings->set( 'enable_new_checkout_shipping', false );
-runtime_smoke_assert( ! $gate->enabled(), 'Feature gate must be false when enable_new_checkout_shipping is disabled.' );
-$settings->set( 'enable_new_checkout_shipping', true );
-runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
-$settings->set( 'enable_new_checkout_shipping', false );
 $settings->set( 'show_checkout_debug_panel', true );
-runtime_smoke_assert( ! $gate->debug_panel_enabled(), 'Debug panel gate must require the checkout feature gate.' );
-$settings->set( 'enable_new_checkout_shipping', true );
-$settings->set( 'show_checkout_debug_panel', false );
-runtime_smoke_assert( ! $gate->debug_panel_enabled(), 'Debug panel gate must require show_checkout_debug_panel.' );
-$settings->set( 'show_checkout_debug_panel', true );
-runtime_smoke_assert( $gate->debug_panel_enabled(), 'Debug panel gate must require both checkout and debug settings.' );
 $settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );
-runtime_smoke_assert( ! $gate->enabled(), 'Checkout feature gate must require the platform runtime switch.' );
-runtime_smoke_assert( ! $gate->debug_panel_enabled(), 'Debug panel gate must also require the platform runtime switch.' );
+runtime_smoke_assert( ! $runtime_settings->runtime_enabled(), 'Platform runtime setting must be the only global checkout runtime switch.' );
 $settings->replace( array() );
 
 $plugin = new Plugin( runtime_smoke_environment() );
 $plugin->register();
 $container = $plugin->container();
-runtime_smoke_assert( $container->get( CheckoutFeatureGate::class ) instanceof CheckoutFeatureGate, 'Composition root must build CheckoutFeatureGate.' );
 runtime_smoke_assert( $container->get( AdminMenu::class ) instanceof AdminMenu, 'Composition root must build AdminMenu.' );
 $admin_menu = $container->get( AdminMenu::class );
 ob_start();
@@ -763,18 +748,18 @@ runtime_smoke_assert( 'Default checkout rule' === $checkout_rules[0]->name, 'Che
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_filters']['woocommerce_shipping_methods'] ), 'Shipping method filter must be registered.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutLocationAjax::ACTION] ), 'Location AJAX endpoint must register for logged-in users.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_nopriv_' . CheckoutLocationAjax::ACTION] ), 'Location AJAX endpoint must register for guests.' );
-runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['woocommerce_after_shipping_rate'] ), 'Checkout rate renderer hook must not register while feature gate is false.' );
-runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['woocommerce_review_order_before_shipping'] ), 'Address renderer hook must not register while feature gate is false.' );
-runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must not register while feature gate is false.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_after_shipping_rate'] ), 'Checkout rate renderer hook must register when platform runtime is enabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_review_order_before_shipping'] ), 'Address renderer hook must register when platform runtime is enabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must register when platform runtime is enabled.' );
 
 /** @var ShippingMethodRegistrar $registrar */
 $registrar = $container->get( ShippingMethodRegistrar::class );
-runtime_smoke_assert( array() === $registrar->register_shipping_method( array() ), 'Shipping method registration must be disabled while feature gate is false.' );
+runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ NewShippingMethod::METHOD_ID ] ), 'Shipping method registration must be enabled by the platform runtime switch without a second checkout flag.' );
 
 runtime_smoke_reset_hooks();
 $GLOBALS['wdc_test_options']['wdc_core_settings'] = array(
 	PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => false,
-	'enable_new_checkout_shipping' => true,
+	$retired_checkout_flag => true,
 );
 $runtime_disabled_plugin = new Plugin( runtime_smoke_environment() );
 $runtime_disabled_plugin->register();
@@ -803,7 +788,7 @@ runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['admin_post_wdc_down
 
 $GLOBALS['wdc_test_options']['wdc_core_settings'] = array(
 	PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
-	'enable_new_checkout_shipping' => true,
+	$retired_checkout_flag => false,
 );
 runtime_smoke_reset_hooks();
 $runtime_enabled_admin_plugin = new Plugin( runtime_smoke_environment() );
@@ -942,8 +927,8 @@ foreach ( $src_iterator as $src_file ) {
 	runtime_smoke_assert( ! str_contains( (string) file_get_contents( $src_file->getPathname() ), 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Courier auto-comment text must not exist in src unless explicitly configured.' );
 }
 
-$settings->set( 'enable_new_checkout_shipping', true );
-runtime_smoke_assert( $gate->enabled(), 'Feature gate must stay enabled through SettingsRepository.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
+$settings->set( $retired_checkout_flag, false );
 runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ NewShippingMethod::METHOD_ID ] ), 'Shipping method registration must be enabled through settings.' );
 $registrar->enqueue_assets();
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must not enqueue.' );
@@ -1213,13 +1198,12 @@ runtime_smoke_assert( 0 === $settings->get_int( $legacy_location_limit_key, 0 ),
 runtime_smoke_assert( 100 === $settings->get_int( 'checkout_location_search_limit', 0 ), 'SettingsRepository must default checkout_location_search_limit to 100.' );
 $sanitized = $settings_page->sanitize_settings(
 	array(
-		'enable_new_checkout_shipping' => '1',
 		'checkout_sort_mode'           => 'unexpected',
 		'show_checkout_debug_panel'    => 'on',
 		'checkout_location_search_limit' => '100',
 	)
 );
-runtime_smoke_assert( true === $sanitized['enable_new_checkout_shipping'], 'enable_new_checkout_shipping must sanitize to true.' );
+runtime_smoke_assert( ! array_key_exists( $retired_checkout_flag, $sanitized ), 'Platform settings save must not write the retired checkout rollout flag.' );
 runtime_smoke_assert( RateSorter::CHEAPEST === $sanitized['checkout_sort_mode'], 'Invalid checkout_sort_mode must fall back to cheapest.' );
 runtime_smoke_assert( true === $sanitized['show_checkout_debug_panel'], 'show_checkout_debug_panel must sanitize to true.' );
 runtime_smoke_assert( ! array_key_exists( $legacy_location_limit_key, $sanitized ), 'Legacy location limit key must not be sanitized.' );
@@ -1229,7 +1213,8 @@ runtime_smoke_assert( 500 === $settings_page->sanitize_settings( array( 'checkou
 
 $GLOBALS['wdc_test_options'] = array(
 	'wdc_core_settings' => array(
-		'enable_new_checkout_shipping' => true,
+		PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
+		$retired_checkout_flag => false,
 		'checkout_sort_mode'           => RateSorter::CHEAPEST,
 		'show_checkout_debug_panel'    => false,
 	),
@@ -1248,9 +1233,9 @@ runtime_smoke_assert( 'fallback' === $fallback->rates[0]->carrier_key, 'Fallback
 $debug_session = new CheckoutSessionManager();
 $debug_session->save_debug( array( 'rates_count' => 1, 'fallback_used' => true ) );
 $debug_gate_settings = new SettingsRepository();
-$debug_gate = new CheckoutFeatureGate( $debug_gate_settings, new PlatformRuntimeSettings( $debug_gate_settings ) );
+$debug_gate_settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
 ob_start();
-( new CheckoutDebugPanel( $debug_session, $debug_gate ) )->render();
+( new CheckoutDebugPanel( $debug_session, $debug_gate_settings, new PlatformRuntimeSettings( $debug_gate_settings ) ) )->render();
 $debug_output = (string) ob_get_clean();
 runtime_smoke_assert( '' === $debug_output, 'Debug panel must be hidden when show_checkout_debug_panel is false.' );
 
@@ -1258,15 +1243,16 @@ $settings->replace(
 	array_merge(
 		$settings->all(),
 		array(
-			'enable_new_checkout_shipping' => true,
+			PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
+			$retired_checkout_flag => false,
 			'show_checkout_debug_panel'    => true,
 		)
 	)
 );
 ob_start();
-( new CheckoutDebugPanel( $debug_session, new CheckoutFeatureGate( $settings, new PlatformRuntimeSettings( $settings ) ) ) )->render();
+( new CheckoutDebugPanel( $debug_session, $settings, new PlatformRuntimeSettings( $settings ) ) )->render();
 $debug_output = (string) ob_get_clean();
-runtime_smoke_assert( str_contains( $debug_output, 'Отладка checkout WDC' ), 'Debug panel must render when explicitly enabled.' );
+runtime_smoke_assert( str_contains( $debug_output, 'Отладка checkout WDC' ), 'Debug panel must render when runtime and debug setting are enabled, regardless of the retired checkout rollout flag.' );
 
 runtime_smoke_assert( 'Калькулятор доставки w.ALL.s' === $method->method_title, 'Shipping method title must be updated.' );
 

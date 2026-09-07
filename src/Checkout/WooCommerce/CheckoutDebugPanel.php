@@ -3,12 +3,16 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutDebugPanel {
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
-		private ?CheckoutFeatureGate $feature_gate = null
+		private SettingsRepository $settings,
+		private PlatformRuntimeSettings $runtime_settings
 	) {
 	}
 
@@ -21,7 +25,7 @@ final class CheckoutDebugPanel {
 			return;
 		}
 
-		if ( ! $this->feature_gate instanceof CheckoutFeatureGate || ! $this->feature_gate->debug_panel_enabled() ) {
+		if ( ! $this->runtime_settings->runtime_enabled() || ! $this->settings->get_bool( 'show_checkout_debug_panel', false ) ) {
 			return;
 		}
 

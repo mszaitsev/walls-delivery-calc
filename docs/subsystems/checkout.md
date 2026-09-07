@@ -62,7 +62,7 @@ Customer-facing delivery comments are persisted from the final selected rate thr
 
 Jet Logistic adds its carrier-specific insurance surcharge before rates enter the generic checkout Rule Engine. The carrier uses discounted cart goods cost, configured insurance percent, and configured minimum rubles to build the `DeliveryRate` base price; `api_base_price_rub` therefore reflects API transport plus Jet insurance, while raw API components remain in `jet_price_*` metadata. The optional Алматы free-courier setting affects only Jet's effective `price_delivery` component for canonical Jet destination `Алматы`.
 
-`CheckoutFeatureGate` is the single runtime policy for enabling the new WooCommerce checkout shipping method and frontend runtime. Its source of truth is the `enable_new_checkout_shipping` setting from the platform settings page. The checkout debug panel uses the same gate and additionally requires `show_checkout_debug_panel`.
+The platform runtime switch is the only global checkout runtime policy. When `woocommerce_runtime_enabled=true`, `Plugin.php` registers the full WooCommerce checkout runtime: WDC shipping method/rates, checkout UI, pickup/address state, validation, order metadata persistence, frontend assets, and checkout pickup REST/state routes. When `woocommerce_runtime_enabled=false`, none of that checkout runtime is registered, while WDC admin/setup/import tools remain available. The checkout debug panel is not a checkout gate; it renders only when platform runtime is enabled and `show_checkout_debug_panel=true`.
 
 ## Delivery Lead Time Pipeline
 

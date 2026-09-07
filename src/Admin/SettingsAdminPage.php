@@ -81,10 +81,6 @@ final class SettingsAdminPage {
 							</td>
 						</tr>
 						<tr>
-							<th scope="row"><?php echo esc_html__( 'Включить новую систему доставки', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="enable_new_checkout_shipping" value="1" <?php checked( ! empty( $values['enable_new_checkout_shipping'] ) ); ?>> <?php echo esc_html__( 'Регистрировать новый способ доставки и checkout-интерфейс.', 'walls-delivery-calc' ); ?></label></td>
-						</tr>
-						<tr>
 							<th scope="row"><label for="wdc_checkout_sort_mode"><?php echo esc_html__( 'Режим сортировки вариантов доставки', 'walls-delivery-calc' ); ?></label></th>
 							<td>
 								<select id="wdc_checkout_sort_mode" name="checkout_sort_mode">
@@ -209,7 +205,6 @@ final class SettingsAdminPage {
 
 		$settings = array(
 			PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => $this->checked_scalar( $data[ PlatformRuntimeSettings::RUNTIME_ENABLED_KEY ] ?? null ),
-			'enable_new_checkout_shipping' => ! empty( $data['enable_new_checkout_shipping'] ),
 			'checkout_sort_mode'           => $sort_mode,
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
 			'include_region_in_checkout_city_picker_query' => ! array_key_exists( 'include_region_in_checkout_city_picker_query', $data ) ? false : ! empty( $data['include_region_in_checkout_city_picker_query'] ),

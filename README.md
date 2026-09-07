@@ -6,7 +6,7 @@ WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.7 adds a global operational switch, `Использовать WDC в WooCommerce`, that can keep the WordPress plugin active for setup/imports/diagnostics while disabling WDC checkout, WooCommerce order admin, and order/shipment runtime integrations. Missing legacy settings remain runtime-enabled for production upgrades.
+Current stage: 0.155.7 adds a global operational switch, `Использовать WDC в WooCommerce`, that can keep the WordPress plugin active for setup/imports/diagnostics while disabling WDC checkout, WooCommerce order admin, and order/shipment runtime integrations. When enabled, it registers the full WDC WooCommerce runtime without a second checkout rollout flag. Missing legacy settings remain runtime-enabled for production upgrades.
 
 ## Quick Start
 

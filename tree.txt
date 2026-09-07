@@ -614,7 +614,6 @@ C:.
 |   |           CheckoutAddressRenderer.php
 |   |           CheckoutDebugPanel.php
 |   |           CheckoutDeliveryTypeSelector.php
-|   |           CheckoutFeatureGate.php
 |   |           CheckoutLocationFingerprint.php
 |   |           CheckoutRateRenderer.php
 |   |           CheckoutSessionManager.php

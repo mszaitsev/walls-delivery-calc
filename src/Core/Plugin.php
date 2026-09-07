@@ -246,7 +246,6 @@ use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutAddressRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
-use WallsShop\WDC\Checkout\WooCommerce\CheckoutFeatureGate;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutLocationFingerprint;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
@@ -471,7 +470,6 @@ final class Plugin {
 		$this->container->register( Logger::class, fn(): Logger => new Logger() );
 		$this->container->register( SettingsRepository::class, fn(): SettingsRepository => new SettingsRepository() );
 		$this->container->register( PlatformRuntimeSettings::class, fn(): PlatformRuntimeSettings => new PlatformRuntimeSettings( $this->container->get( SettingsRepository::class ) ) );
-		$this->container->register( CheckoutFeatureGate::class, fn(): CheckoutFeatureGate => new CheckoutFeatureGate( $this->container->get( SettingsRepository::class ), $this->container->get( PlatformRuntimeSettings::class ) ) );
 		$this->container->register( EncryptionService::class, fn(): EncryptionService => new EncryptionService() );
 		$this->container->register( MigrationManager::class, fn(): MigrationManager => new MigrationManager( $this->environment->version(), $this->environment->plugin_dir() . 'database/migrations' ) );
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
@@ -894,7 +892,6 @@ final class Plugin {
 		$this->container->register(
 			ShippingMethodRegistrar::class,
 			fn(): ShippingMethodRegistrar => new ShippingMethodRegistrar(
-				$this->container->get( CheckoutFeatureGate::class ),
 				$this->container->get( SettingsRepository::class ),
 				$this->container->get( CheckoutOrchestrator::class ),
 				$this->container->get( WooCommercePackageMapper::class ),
@@ -931,7 +928,7 @@ final class Plugin {
 		$this->container->register( PickupMapCheckout::class, fn(): PickupMapCheckout => new PickupMapCheckout( $this->container->get( CheckoutSessionManager::class ), $this->environment, $this->container->get( SettingsRepository::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ) ) );
 		$this->container->register( PickupPointOrderDisplay::class, fn(): PickupPointOrderDisplay => new PickupPointOrderDisplay( $this->container->get( PickupPointCardRenderer::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( OrderDeliveryCustomerCommentsDisplay::class, fn(): OrderDeliveryCustomerCommentsDisplay => new OrderDeliveryCustomerCommentsDisplay( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryCustomerCommentRenderer::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
-		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutFeatureGate::class ) ) );
+		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ), $this->container->get( PlatformRuntimeSettings::class ) ) );
 		$this->container->register( CheckoutAddressRenderer::class, fn(): CheckoutAddressRenderer => new CheckoutAddressRenderer( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( LocationCountryIndexService::class, fn(): LocationCountryIndexService => new LocationCountryIndexService( $this->container->get( LocationRepository::class ) ) );
@@ -1230,19 +1227,17 @@ final class Plugin {
 		$this->container->get( CheckoutLocationAjax::class )->register();
 		$this->container->get( AddressSuggestionAjax::class )->register();
 		add_action( 'rest_api_init', array( $this->container->get( CheckoutPickupPointRestController::class ), 'register' ) );
-		if ( $this->container->get( CheckoutFeatureGate::class )->enabled() ) {
-			$this->container->get( CheckoutRateRenderer::class )->register();
-			$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
-			$this->container->get( CheckoutSortSelector::class )->register();
-			$this->container->get( CheckoutAddressRuntime::class )->register();
-			$this->container->get( CheckoutValidation::class )->register();
-			$this->container->get( OrderShippingMetaPersister::class )->register();
-			$this->container->get( PickupMapCheckout::class )->register();
-			$this->container->get( PickupPointOrderDisplay::class )->register();
-			$this->container->get( OrderDeliveryCustomerCommentsDisplay::class )->register();
-			$this->container->get( CheckoutDebugPanel::class )->register();
-			$this->container->get( SelfPickupDiscountService::class )->register();
-		}
+		$this->container->get( CheckoutRateRenderer::class )->register();
+		$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
+		$this->container->get( CheckoutSortSelector::class )->register();
+		$this->container->get( CheckoutAddressRuntime::class )->register();
+		$this->container->get( CheckoutValidation::class )->register();
+		$this->container->get( OrderShippingMetaPersister::class )->register();
+		$this->container->get( PickupMapCheckout::class )->register();
+		$this->container->get( PickupPointOrderDisplay::class )->register();
+		$this->container->get( OrderDeliveryCustomerCommentsDisplay::class )->register();
+		$this->container->get( CheckoutDebugPanel::class )->register();
+		$this->container->get( SelfPickupDiscountService::class )->register();
 	}
 
 	private function register_admin_preparation_hooks(): void {
