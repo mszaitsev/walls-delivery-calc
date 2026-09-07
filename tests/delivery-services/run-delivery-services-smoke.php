@@ -94,6 +94,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public bool $fail_next_query = false;
 		public ?string $fail_next_query_contains = null;
 		public ?string $fail_next_insert_table_contains = null;
+		public ?string $fail_next_update_table_contains = null;
 		public ?string $race_duplicate_key_on_failed_service_insert = null;
 		/** @var array<int,string> */
 		public array $insert_attempts = array();
@@ -195,6 +196,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return true;
 		}
 		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			if ( null !== $this->fail_next_update_table_contains && str_contains( $table, $this->fail_next_update_table_contains ) ) {
+				$this->fail_next_update_table_contains = null;
+				return false;
+			}
 			$rows =& $this->rows_for_table( $table );
 			foreach ( $rows as $index => $row ) {
 				$matches = true;
@@ -658,6 +663,54 @@ wdc_ds_assert( 1000 === $settings->all_settings( $custom_id )['limits']['max_wei
 $settings->delete_setting( $custom_id, 'endpoint' );
 wdc_ds_assert( null === $settings->get_setting( $custom_id, 'endpoint' ), 'Settings repository must delete values.' );
 
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_service_settings';
+$ordinary_insert_threw = false;
+try {
+	$settings->set_setting( $custom_id, 'ordinary_insert_failure', 'value', 'string' );
+} catch ( RuntimeException ) {
+	$ordinary_insert_threw = true;
+}
+wdc_ds_assert( ! $ordinary_insert_threw && null === $settings->get_setting( $custom_id, 'ordinary_insert_failure' ), 'Ordinary set_setting insert failure must keep baseline no-throw behavior.' );
+$GLOBALS['wpdb']->fail_next_update_table_contains = 'wdc_delivery_service_settings';
+$ordinary_update_threw = false;
+try {
+	$settings->set_setting( $custom_id, 'limits', array( 'max_weight_g' => 2000 ) );
+} catch ( RuntimeException ) {
+	$ordinary_update_threw = true;
+}
+wdc_ds_assert( ! $ordinary_update_threw && 1000 === $settings->all_settings( $custom_id )['limits']['max_weight_g'], 'Ordinary set_setting update failure must keep baseline no-throw behavior.' );
+$settings->set_setting_in_current_transaction( $custom_id, 'strict_success', 'ok', 'string' );
+wdc_ds_assert( 'ok' === $settings->get_setting( $custom_id, 'strict_success' ), 'Strict set_setting_in_current_transaction must write successfully when storage succeeds.' );
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_service_settings';
+$strict_insert_threw = false;
+try {
+	$settings->set_setting_in_current_transaction( $custom_id, 'strict_insert_failure', 'value', 'string' );
+} catch ( RuntimeException ) {
+	$strict_insert_threw = true;
+}
+wdc_ds_assert( $strict_insert_threw, 'Strict set_setting_in_current_transaction insert failure must throw.' );
+$GLOBALS['wpdb']->fail_next_update_table_contains = 'wdc_delivery_service_settings';
+$strict_update_threw = false;
+try {
+	$settings->set_setting_in_current_transaction( $custom_id, 'strict_success', 'changed', 'string' );
+} catch ( RuntimeException ) {
+	$strict_update_threw = true;
+}
+wdc_ds_assert( $strict_update_threw && 'ok' === $settings->get_setting( $custom_id, 'strict_success' ), 'Strict set_setting_in_current_transaction update failure must throw without changing the stored value.' );
+
+$edit_settings_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$edit_settings_method = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->getMethod( 'save_manual_delivery_settings' );
+$edit_settings_method->setAccessible( true );
+$_POST = array( 'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'manual_flat_price_rub' => '111' );
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_service_settings';
+$edit_path_threw = false;
+try {
+	$edit_settings_method->invoke( $edit_settings_admin, $custom_id, false );
+} catch ( RuntimeException ) {
+	$edit_path_threw = true;
+}
+wdc_ds_assert( ! $edit_path_threw, 'Existing edit/save manual settings path must use ordinary set_setting semantics.' );
+
 $countries->replace_countries( $custom_id, array( 'us', 'DE', 'bad', 'US' ) );
 wdc_ds_assert( array( 'DE', 'US' ) === $countries->countries( $custom_id ), 'Country repository must normalize, sort and de-duplicate country codes.' );
 wdc_ds_assert( in_array( 'US', $countries->countries( $custom_id ), true ) && in_array( 'DE', $countries->countries( $custom_id ), true ), 'Country repository must keep valid countries.' );
@@ -976,6 +1029,27 @@ $manual_edit_html = wdc_ds_render_admin_page( $create_admin, array( 'page' => De
 wdc_ds_assert( str_contains( $manual_edit_html, 'Manual Local' ) && str_contains( $manual_edit_html, 'name="wdc_delivery_services_action" value="save_main"' ), 'Existing edit page must remain available after create route split.' );
 
 $main_wpdb = $GLOBALS['wpdb'];
+$GLOBALS['wpdb'] = new wpdb();
+$settings_failure_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$settings_failure_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$settings_failure_settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$settings_failure_admin = wdc_ds_admin_page( $settings_failure_services, $settings_failure_countries, $settings_failure_settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wpdb']->fail_next_insert_table_contains = 'wdc_delivery_service_settings';
+$settings_failure_redirect = wdc_ds_post_create(
+	$settings_failure_admin,
+	array(
+		'service_key' => 'manual_settings_rollback',
+		'title' => 'Manual Settings Rollback',
+		'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT,
+		'manual_flat_price_rub' => '250',
+	)
+);
+$settings_failure_html = wdc_ds_render_admin_page( $settings_failure_admin, array( 'page' => DeliveryServicesAdminPage::MENU_SLUG, 'action' => 'create' ) );
+wdc_ds_assert( null === $settings_failure_redirect && str_contains( $settings_failure_html, 'Служба доставки не создана.' ), 'Strict initial manual settings failure must stay on create screen with storage error.' );
+wdc_ds_assert( wdc_ds_contains_query( $GLOBALS['wpdb']->insert_attempts, 'wdc_delivery_services' ) && wdc_ds_contains_query( $GLOBALS['wpdb']->insert_attempts, 'wdc_delivery_service_settings' ), 'Settings rollback test must insert the service first and then fail a strict settings write.' );
+wdc_ds_assert( wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'START TRANSACTION' ) && wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'ROLLBACK' ) && ! wdc_ds_contains_query( wdc_ds_queries_since( $GLOBALS['wpdb'], 0 ), 'COMMIT' ), 'Strict initial manual settings failure must rollback the create transaction without commit.' );
+wdc_ds_assert( null === $settings_failure_services->find_by_service_key( 'manual_settings_rollback' ) && ! $settings_failure_services->service_key_exists( 'manual_settings_rollback' ), 'Settings failure rollback must remove the partial service row and free the key.' );
+
 $GLOBALS['wpdb'] = new wpdb();
 $rollback_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 $rollback_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );

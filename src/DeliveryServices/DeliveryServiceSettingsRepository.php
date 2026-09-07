@@ -29,6 +29,14 @@ final class DeliveryServiceSettingsRepository {
 	}
 
 	public function set_setting( int $service_id, string $key, mixed $value, string $format = 'json', bool $autoload = false ): void {
+		$this->write_setting( $service_id, $key, $value, $format, $autoload, false );
+	}
+
+	public function set_setting_in_current_transaction( int $service_id, string $key, mixed $value, string $format = 'json', bool $autoload = false ): void {
+		$this->write_setting( $service_id, $key, $value, $format, $autoload, true );
+	}
+
+	private function write_setting( int $service_id, string $key, mixed $value, string $format, bool $autoload, bool $strict ): void {
 		$format = in_array( $format, array( 'json', 'string', 'number', 'bool' ), true ) ? $format : 'json';
 		$row = array(
 			'service_id' => $service_id,
@@ -44,14 +52,14 @@ final class DeliveryServiceSettingsRepository {
 
 		if ( null !== $existing ) {
 			$result = $this->wpdb->update( $this->table(), $row, array( 'id' => (int) $existing ), array( '%d', '%s', '%s', '%s', '%d', '%s' ), array( '%d' ) );
-			if ( false === $result ) {
+			if ( $strict && false === $result ) {
 				throw new \RuntimeException( 'Failed to update delivery service setting.' );
 			}
 			return;
 		}
 
 		$result = $this->wpdb->insert( $this->table(), $row, array( '%d', '%s', '%s', '%s', '%d', '%s' ) );
-		if ( false === $result ) {
+		if ( $strict && false === $result ) {
 			throw new \RuntimeException( 'Failed to insert delivery service setting.' );
 		}
 	}

@@ -5174,7 +5174,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			if ( ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === $mode ) {
 				$this->manual_delivery_weight_ranges->validate_ranges( $ranges );
 			}
-			$this->manual_delivery_settings->save_pricing(
+			$this->save_manual_pricing_settings(
 				$service_id,
 				array(
 					'pricing_mode' => $mode,
@@ -5182,7 +5182,8 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 					'price_per_kg_rub' => wp_unslash( $_POST['manual_price_per_kg_rub'] ?? '' ),
 					'minimum_price_rub' => wp_unslash( $_POST['manual_tariff_minimum_price_rub'] ?? '' ),
 					'billing_weight_step_g' => (int) wp_unslash( $_POST['manual_billing_weight_step_g'] ?? 0 ),
-				)
+				),
+				$use_existing_transaction
 			);
 			if ( ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === $mode ) {
 				if ( $use_existing_transaction ) {
@@ -5193,10 +5194,11 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			}
 		}
 		if ( array_key_exists( 'manual_delivery_type', $_POST ) ) {
-			$this->manual_delivery_settings->save_delivery_type(
+			$this->save_manual_delivery_type_settings(
 				$service_id,
 				sanitize_key( wp_unslash( $_POST['manual_delivery_type'] ?? ManualDeliverySettings::DELIVERY_TYPE_COURIER ) ),
-				sanitize_text_field( wp_unslash( $_POST['manual_delivery_type_label'] ?? '' ) )
+				sanitize_text_field( wp_unslash( $_POST['manual_delivery_type_label'] ?? '' ) ),
+				$use_existing_transaction
 			);
 			if ( $use_existing_transaction ) {
 				$this->manual_pickup_points->replace_points_in_current_transaction( $service_id, $this->manual_pickup_points_from_post() );
@@ -5205,12 +5207,41 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			}
 		}
 		if ( array_key_exists( 'manual_delivery_min_days', $_POST ) || array_key_exists( 'manual_delivery_max_days', $_POST ) ) {
-			$this->manual_delivery_settings->save_delivery_days(
+			$this->save_manual_delivery_days_settings(
 				$service_id,
 				wp_unslash( $_POST['manual_delivery_min_days'] ?? '' ),
-				wp_unslash( $_POST['manual_delivery_max_days'] ?? '' )
+				wp_unslash( $_POST['manual_delivery_max_days'] ?? '' ),
+				$use_existing_transaction
 			);
 		}
+	}
+
+	/** @param array<string,mixed> $values */
+	private function save_manual_pricing_settings( int $service_id, array $values, bool $use_existing_transaction ): void {
+		if ( $use_existing_transaction ) {
+			$this->manual_delivery_settings->save_pricing_in_current_transaction( $service_id, $values );
+			return;
+		}
+
+		$this->manual_delivery_settings->save_pricing( $service_id, $values );
+	}
+
+	private function save_manual_delivery_type_settings( int $service_id, string $type, string $label, bool $use_existing_transaction ): void {
+		if ( $use_existing_transaction ) {
+			$this->manual_delivery_settings->save_delivery_type_in_current_transaction( $service_id, $type, $label );
+			return;
+		}
+
+		$this->manual_delivery_settings->save_delivery_type( $service_id, $type, $label );
+	}
+
+	private function save_manual_delivery_days_settings( int $service_id, mixed $min_days, mixed $max_days, bool $use_existing_transaction ): void {
+		if ( $use_existing_transaction ) {
+			$this->manual_delivery_settings->save_delivery_days_in_current_transaction( $service_id, $min_days, $max_days );
+			return;
+		}
+
+		$this->manual_delivery_settings->save_delivery_days( $service_id, $min_days, $max_days );
 	}
 
 	/** @param array<int,string> $allowed_countries */
