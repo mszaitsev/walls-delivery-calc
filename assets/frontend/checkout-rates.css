@@ -130,8 +130,9 @@
 	vertical-align: top;
 }
 
-.wdc-checkout-delivery-messages-row {
-	display: none;
+.wdc-checkout-delivery-messages-row,
+.wdc-checkout-sort-row {
+	display: none !important;
 }
 
 .wdc-checkout-delivery-messages {
@@ -145,6 +146,7 @@
 .wdc-checkout-delivery-info,
 .wdc-checkout-delivery-promo {
 	margin: 0 0 10px;
+	white-space: pre-line;
 }
 
 .wdc-checkout-delivery-promo {
@@ -190,10 +192,6 @@
 
 .wdc-platform-debug-panel ul {
 	margin: 6px 0 0 18px;
-}
-
-.wdc-checkout-sort-row.wdc-checkout-sort-row--relocated {
-	display: none !important;
 }
 
 .wdc-checkout-sort-inline {

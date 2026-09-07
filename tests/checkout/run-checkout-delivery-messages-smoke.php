@@ -193,7 +193,7 @@ $admin = new SettingsAdminPage( $settings, new PlatformRuntimeSettings( $setting
 $sanitized = $admin->sanitize_settings(
 	array(
 		CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY => '1',
-		CheckoutDeliveryMessageSettings::INFO_HTML_KEY => '<p><strong>Bold</strong> <em>Italic</em> <u>Under</u> <s>Strike</s> <a href="https://example.test">link</a> <span style="color:#ff0000;">red</span><script>alert(1)</script><a href="javascript:alert(1)">bad</a></p><p>Вторая строка</p>Первая строка<br>Вторая строка',
+		CheckoutDeliveryMessageSettings::INFO_HTML_KEY => '<p><strong>Bold</strong> <em>Italic</em> <u>Under</u> <s>Strike</s> <a href="https://example.test">link</a> <span style="color:#ff0000;">red</span><script>alert(1)</script><a href="javascript:alert(1)">bad</a></p><p>Вторая строка</p>Первая строка<br>Вторая строка' . "\nPlain line 1\nPlain line 2",
 		CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY => '1',
 		'checkout_delivery_promo_threshold_rub' => '3499.50',
 		CheckoutDeliveryMessageSettings::PROMO_TOTAL_BASIS_KEY => CheckoutDeliveryMessageSettings::BASIS_SHIPPABLE_CART_ITEMS,
@@ -208,6 +208,7 @@ wdc_delivery_messages_assert( CheckoutDeliveryMessageSettings::BASIS_SHIPPABLE_C
 foreach ( array( '<strong>Bold</strong>', '<em>Italic</em>', '<u>Under</u>', '<s>Strike</s>', 'href="https://example.test"', 'style="color: #ff0000"', '<p>Вторая строка</p>', '<br>' ) as $needle ) {
 	wdc_delivery_messages_assert( str_contains( $sanitized[ CheckoutDeliveryMessageSettings::INFO_HTML_KEY ], $needle ), 'Sanitizer must preserve safe editor formatting: ' . $needle );
 }
+wdc_delivery_messages_assert( str_contains( $sanitized[ CheckoutDeliveryMessageSettings::INFO_HTML_KEY ], "Plain line 1\nPlain line 2" ), 'Sanitizer must preserve plain editor newlines for frontend pre-line rendering.' );
 wdc_delivery_messages_assert( ! str_contains( $sanitized[ CheckoutDeliveryMessageSettings::INFO_HTML_KEY ], '<script' ), 'Sanitizer must strip script tags.' );
 wdc_delivery_messages_assert( ! str_contains( $sanitized[ CheckoutDeliveryMessageSettings::INFO_HTML_KEY ], 'javascript:' ), 'Sanitizer must strip javascript URLs.' );
 wdc_delivery_messages_assert( str_contains( $sanitized[ CheckoutDeliveryMessageSettings::PROMO_BELOW_HTML_KEY ], '{s}' ) && str_contains( $sanitized[ CheckoutDeliveryMessageSettings::PROMO_BELOW_HTML_KEY ], '{d}' ), 'Sanitizer must preserve promo placeholders.' );
@@ -309,13 +310,16 @@ wdc_delivery_messages_assert( false === $roundtrip[ CheckoutDeliveryMessageSetti
 $css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
 wdc_delivery_messages_assert( str_contains( $css, '.woocommerce-checkout .woocommerce-checkout-review-order-table tr.woocommerce-shipping-totals.shipping > th' ), 'Checkout heading spacing CSS must be scoped to the checkout shipping row heading.' );
 wdc_delivery_messages_assert( str_contains( $css, 'tr.cart-discount + tr.woocommerce-shipping-totals.shipping > th' ) && str_contains( $css, 'tr.cart-discount + tr.woocommerce-shipping-totals.shipping > td' ), 'Coupon spacing must use an adjacent cart-discount to shipping-row selector.' );
-wdc_delivery_messages_assert( str_contains( $css, '.wdc-checkout-delivery-messages-row' ) && str_contains( $css, 'display: none;' ), 'Source delivery message row must be hidden until JS relocates its content.' );
+wdc_delivery_messages_assert( str_contains( $css, '.wdc-checkout-delivery-messages-row' ) && str_contains( $css, '.wdc-checkout-sort-row' ) && str_contains( $css, 'display: none !important;' ), 'Source delivery message and sort rows must be hidden until JS relocates their content.' );
+wdc_delivery_messages_assert( str_contains( $css, 'white-space: pre-line;' ), 'Checkout message CSS must render plain editor newlines as visual line breaks.' );
 wdc_delivery_messages_assert( str_contains( $css, '.wdc-checkout-delivery-info p' ) && str_contains( $css, '.wdc-checkout-delivery-promo p' ) && str_contains( $css, 'margin: 0 0 6px;' ), 'Checkout message CSS must preserve paragraph line structure with compact margins.' );
 wdc_delivery_messages_assert( ! str_contains( $css, "\nh3 {" ) && ! str_contains( $css, "\ntable {" ), 'Checkout spacing CSS must not add generic Woo heading/table overrides.' );
 $sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
 foreach ( array( 'function relocateDeliveryControls()', 'function relocateDeliveryMessages()', "'.wdc-checkout-delivery-messages-row'", "'.wdc-checkout-delivery-messages'", '.detach()', 'prependTo( $shippingCell )', 'insertAfter( $messages )', "'.wdc-checkout-sort-inline'" ) as $needle ) {
 	wdc_delivery_messages_assert( str_contains( $sort_js, $needle ), 'Checkout JS must contain relocation contract: ' . $needle );
 }
+wdc_delivery_messages_assert( 2 <= substr_count( $sort_js, '$row.remove();' ), 'Checkout relocation must remove source table rows after moving messages and sort controls.' );
+wdc_delivery_messages_assert( ! str_contains( $sort_js, '--relocated' ) && ! str_contains( $css, '--relocated' ), 'Relocation must not leave persistent hidden --relocated source rows between coupon and shipping rows.' );
 wdc_delivery_messages_assert( ! str_contains( $sort_js, '.clone(' ), 'Checkout relocation must move nodes instead of cloning them.' );
 wdc_delivery_messages_assert( str_contains( $sort_js, '$existing.length' ), 'Checkout delivery message relocation must be idempotent on repeated calls.' );
 

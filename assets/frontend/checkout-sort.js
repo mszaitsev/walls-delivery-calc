@@ -26,8 +26,8 @@
 			return $();
 		}
 
-		$row.addClass( 'wdc-checkout-delivery-messages-row--relocated' );
 		$messages.prependTo( $shippingCell );
+		$row.remove();
 
 		return $messages;
 	}
@@ -52,12 +52,13 @@
 			.append( $( '<span class="wdc-checkout-sort-inline__label" />' ).text( label ) )
 			.append( $select );
 
-		$row.addClass( 'wdc-checkout-sort-row--relocated' );
 		if ( $messages.length ) {
 			$inline.insertAfter( $messages );
+			$row.remove();
 			return;
 		}
 		$inline.prependTo( $shippingCell );
+		$row.remove();
 	}
 
 	function relocateDeliveryControls() {
