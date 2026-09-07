@@ -218,6 +218,18 @@ wdc_delivery_messages_assert( 'A' === CheckoutDeliveryMessageSettings::normalize
 wdc_delivery_messages_assert( 'A<br><br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<p>A</p><p><br></p><p>B</p>' ), 'An intentional empty editor paragraph must render as one blank soft line.' );
 wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( '<div>A</div><div>B</div>' ), 'Top-level editor div blocks must normalize to soft breaks when present.' );
 wdc_delivery_messages_assert( 'A<br>B' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( "A\nB" ), 'Plain editor newlines without HTML tags must normalize to soft breaks.' );
+wdc_delivery_messages_assert( '<strong>A</strong><br><em>B</em><br><span style="color:#ff0000">C</span>' === CheckoutDeliveryMessageSettings::normalize_soft_break_html( "<strong>A</strong>\n\n<em>B</em>\n\n<span style=\"color:#ff0000\">C</span>" ), 'Mixed inline rich HTML newlines must normalize to literal br tags.' );
+$live_info_fragment = '<strong>Подробнее</strong> о <em>вариантах</em> '
+	. '<span style="text-decoration: underline">доставки</span> и '
+	. '<del>условиях</del> можно '
+	. '<span style="text-decoration: underline"><a href="https://walls-shop.ru/about/delivery/">прочитать тут</a></span>'
+	. "\n\n"
+	. 'Вторая строка';
+wdc_delivery_messages_assert( str_contains( CheckoutDeliveryMessageSettings::normalize_soft_break_html( $live_info_fragment ), '</a></span><br>Вторая строка' ), 'Live mixed-inline info HTML must normalize the saved double newline to one br.' );
+$attribute_newline_fragment = "<a\n href=\"https://example.com/path\"\n title=\"Test\">Link</a>\n\nNext";
+$attribute_normalized = CheckoutDeliveryMessageSettings::normalize_soft_break_html( $attribute_newline_fragment );
+wdc_delivery_messages_assert( str_contains( $attribute_normalized, 'href="https://example.com/path"' ) && str_contains( $attribute_normalized, 'title="Test"' ), 'Soft-break normalization must preserve attributes with internal source newlines.' );
+wdc_delivery_messages_assert( ! str_contains( $attribute_normalized, '<br> href=' ) && str_contains( $attribute_normalized, '>Link</a><br>Next' ), 'Soft-break normalization must insert br only in text fragments outside tags.' );
 
 $settings->replace(
 	array_merge(
@@ -284,6 +296,9 @@ $settings->set( CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY, false );
 $soft_info = wdc_delivery_messages_render( $settings );
 wdc_delivery_messages_assert( str_contains( $soft_info, '<div class="wdc-checkout-delivery-info">A<br>B</div>' ), 'Rendered info must contain literal br soft breaks for two editor paragraphs.' );
 wdc_delivery_messages_assert( ! str_contains( $soft_info, '<p>A</p><p>B</p>' ), 'Rendered info must not depend on paragraph display CSS for editor Enter line breaks.' );
+$settings->set( CheckoutDeliveryMessageSettings::INFO_HTML_KEY, $live_info_fragment );
+$soft_live_info = wdc_delivery_messages_render( $settings );
+wdc_delivery_messages_assert( str_contains( $soft_live_info, '</a></span><br>Вторая строка' ), 'Rendered live mixed-inline info must contain a literal br for the saved editor Enter.' );
 
 $settings->set( CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY, false );
 $settings->set( CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY, true );
@@ -297,6 +312,16 @@ wdc_delivery_messages_assert( str_contains( $soft_promo_below, 'От 3500 руб
 WC()->cart->contents_total = 3500.0;
 $soft_promo_reached = wdc_delivery_messages_render( $settings );
 wdc_delivery_messages_assert( str_contains( $soft_promo_reached, 'Достигли 3500 руб.<br>Спасибо' ), 'Rendered reached promo must normalize editor paragraphs after threshold placeholder substitution.' );
+$settings->set(
+	CheckoutDeliveryMessageSettings::PROMO_BELOW_HTML_KEY,
+	'<span style="color: #ff0000">При стоимости товаров от {s} руб. действует акция - добавьте ещё на {d} руб.!</span>'
+	. "\n\n"
+	. '<strong>Сейчас вы видите стоимость доставки без акции</strong>'
+);
+WC()->cart->contents_total = 1990.0;
+$soft_live_promo = wdc_delivery_messages_render( $settings );
+wdc_delivery_messages_assert( str_contains( $soft_live_promo, 'style="color: #ff0000"' ) && str_contains( $soft_live_promo, '3500' ) && str_contains( $soft_live_promo, '1510' ), 'Rendered live promo must preserve color and substitute threshold/difference placeholders.' );
+wdc_delivery_messages_assert( str_contains( $soft_live_promo, '</span><br><strong>Сейчас вы видите стоимость доставки без акции</strong>' ), 'Rendered live promo mixed-inline newline must normalize to one br before the bold line.' );
 
 $settings->set( CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY, false );
 wdc_delivery_messages_assert( ! str_contains( wdc_delivery_messages_render( $settings ), 'wdc-checkout-delivery-promo' ), 'Disabled promo must not render.' );

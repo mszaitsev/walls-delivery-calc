@@ -97,10 +97,12 @@ final class CheckoutDeliveryMessageSettings {
 			return '';
 		}
 
-		if ( ! str_contains( $html, '<' ) ) {
-			return preg_replace( '/\R+/', '<br>', $html ) ?? $html;
-		}
+		$block_normalized = self::normalize_top_level_editor_blocks( $html );
 
+		return self::normalize_text_fragment_line_breaks( null === $block_normalized ? $html : $block_normalized );
+	}
+
+	private static function normalize_top_level_editor_blocks( string $html ): ?string {
 		preg_match_all(
 			'#<(p|div)\b[^>]*>(.*?)</\1>#is',
 			$html,
@@ -109,7 +111,7 @@ final class CheckoutDeliveryMessageSettings {
 		);
 
 		if ( array() === $matches ) {
-			return $html;
+			return null;
 		}
 
 		$lines = array();
@@ -119,7 +121,7 @@ final class CheckoutDeliveryMessageSettings {
 			$start = (int) $match[0][1];
 			$gap = substr( $html, $offset, $start - $offset );
 			if ( '' !== trim( (string) $gap ) ) {
-				return $html;
+				return null;
 			}
 
 			$body = trim( (string) $match[2][0] );
@@ -128,10 +130,81 @@ final class CheckoutDeliveryMessageSettings {
 		}
 
 		if ( '' !== trim( substr( $html, $offset ) ) ) {
-			return $html;
+			return null;
 		}
 
 		return implode( '<br>', $lines );
+	}
+
+	private static function normalize_text_fragment_line_breaks( string $html ): string {
+		$parts = function_exists( 'wp_html_split' )
+			? wp_html_split( $html )
+			: self::split_html_fragments( $html );
+
+		foreach ( $parts as &$part ) {
+			if ( '' === $part || '<' === $part[0] ) {
+				continue;
+			}
+			$part = preg_replace( '/[ \t]*(?:\R[ \t]*)+/', '<br>', $part ) ?? $part;
+		}
+		unset( $part );
+
+		return implode( '', $parts );
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	private static function split_html_fragments( string $html ): array {
+		$parts = array();
+		$length = strlen( $html );
+		$offset = 0;
+
+		while ( $offset < $length ) {
+			$tag_start = strpos( $html, '<', $offset );
+			if ( false === $tag_start ) {
+				$parts[] = substr( $html, $offset );
+				break;
+			}
+
+			if ( $tag_start > $offset ) {
+				$parts[] = substr( $html, $offset, $tag_start - $offset );
+			}
+
+			$tag_end = self::find_html_tag_end( $html, $tag_start );
+			if ( null === $tag_end ) {
+				$parts[] = substr( $html, $tag_start );
+				break;
+			}
+
+			$parts[] = substr( $html, $tag_start, $tag_end - $tag_start + 1 );
+			$offset = $tag_end + 1;
+		}
+
+		return $parts;
+	}
+
+	private static function find_html_tag_end( string $html, int $start ): ?int {
+		$length = strlen( $html );
+		$quote = null;
+		for ( $i = $start + 1; $i < $length; $i++ ) {
+			$char = $html[ $i ];
+			if ( null !== $quote ) {
+				if ( $char === $quote ) {
+					$quote = null;
+				}
+				continue;
+			}
+			if ( '"' === $char || "'" === $char ) {
+				$quote = $char;
+				continue;
+			}
+			if ( '>' === $char ) {
+				return $i;
+			}
+		}
+
+		return null;
 	}
 
 	/**
