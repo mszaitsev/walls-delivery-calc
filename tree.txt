@@ -1103,6 +1103,7 @@ C:.
     |       run-checkout-city-selector-smoke.js
     |       run-checkout-delivery-messages-smoke.php
     |       run-checkout-location-picker-smoke.php
+    |       run-checkout-rate-sorting-smoke.php
     |       run-checkout-selection-smoke.php
     |       run-checkout-smoke.php
     |       run-pickup-map-lifecycle-smoke.js

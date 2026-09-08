@@ -431,7 +431,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	 * @param array<int,DeliveryRate> $rates
 	 */
 	private function tariff_selector_rate( string $group_id, array $rates ): DeliveryRate {
-		$selected = $this->session_manager->selected_tariff( $group_id );
+		$selected = $this->session_manager->has_pending_sort_selection_reset() ? array() : $this->session_manager->selected_tariff( $group_id );
 		$selected_object = (string) ( $selected['object_code'] ?? '' );
 		$active = $rates[0];
 		$selected_found = false;
@@ -567,10 +567,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	}
 
 	private function sort_mode(): string {
-		$session_mode = $this->session_manager->selected_sort_mode();
-		$mode         = '' !== $session_mode ? $session_mode : $this->settings_repository->get_string( 'checkout_sort_mode', RateSorter::CHEAPEST );
-
-		return RateSorter::FASTEST === $mode ? RateSorter::FASTEST : RateSorter::CHEAPEST;
+		return ( new CheckoutSortSelector( $this->session_manager, $this->settings_repository ) )->current_sort_mode();
 	}
 
 	/**

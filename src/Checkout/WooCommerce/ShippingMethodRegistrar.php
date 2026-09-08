@@ -39,6 +39,7 @@ final class ShippingMethodRegistrar {
 	public function register(): void {
 		add_filter( 'woocommerce_shipping_methods', array( $this, 'register_shipping_method' ) );
 		add_filter( 'woocommerce_shipping_chosen_method', array( $this, 'preserve_chosen_wdc_method' ), 10, 3 );
+		add_filter( 'woocommerce_shipping_packages', array( $this, 'apply_sort_shipping_choices' ), 20 );
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
 		add_action( 'wp_ajax_nopriv_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
@@ -82,6 +83,32 @@ final class ShippingMethodRegistrar {
 		$fresh_method_id = $this->fresh_wdc_rate_id( $chosen_method, $rates );
 
 		return '' !== $fresh_method_id ? $fresh_method_id : $default;
+	}
+
+	/** @param array<int|string,array<string,mixed>> $packages */
+	public function apply_sort_shipping_choices( array $packages ): array {
+		if ( ! $this->session_manager->has_pending_sort_selection_reset() ) {
+			return $packages;
+		}
+		$chosen = function_exists( 'WC' ) && isset( WC()->session ) ? WC()->session->get( 'chosen_shipping_methods', array() ) : array();
+		$chosen = is_array( $chosen ) ? $chosen : array();
+		$first_methods = array();
+		foreach ( $packages as $key => $package ) {
+			$rates = is_array( $package['rates'] ?? null ) ? $package['rates'] : array();
+			$current = (string) ( $chosen[ $key ] ?? '' );
+			if ( '' !== $current && '' === $this->fresh_wdc_rate_id( $current, $rates ) ) {
+				continue;
+			}
+			foreach ( $rates as $rate_id => $rate ) {
+				if ( $this->is_fresh_wdc_rate( (string) $rate_id, $rate ) ) {
+					$first_methods[ $key ] = (string) $rate_id;
+					break;
+				}
+			}
+		}
+		// Woo has already reapplied posted choices; preserve unrelated package selections.
+		$this->session_manager->apply_sort_shipping_choices( $first_methods );
+		return $packages;
 	}
 
 	/**

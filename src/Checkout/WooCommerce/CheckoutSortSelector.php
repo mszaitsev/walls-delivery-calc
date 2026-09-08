@@ -31,7 +31,7 @@ final class CheckoutSortSelector {
 	}
 
 	public function render(): void {
-		if ( $this->wdc_rates_count() < 2 ) {
+		if ( ! $this->enabled() || $this->wdc_rates_count() < 2 ) {
 			return;
 		}
 
@@ -49,21 +49,40 @@ final class CheckoutSortSelector {
 	 * @param array<string,mixed> $data
 	 */
 	private function capture( array $data ): void {
+		if ( ! $this->enabled() ) {
+			$this->current_sort_mode();
+			return;
+		}
 		$mode = isset( $data['wdc_platform_checkout_sort_mode'] ) ? sanitize_key( wp_unslash( (string) $data['wdc_platform_checkout_sort_mode'] ) ) : '';
 		if ( in_array( $mode, array( RateSorter::CHEAPEST, RateSorter::FASTEST ), true ) ) {
-			$previous = $this->session_manager->selected_sort_mode();
-			$this->session_manager->save_sort_mode( $mode );
-			if ( $previous !== $mode ) {
-				$this->clear_shipping_rate_cache();
-			}
+			$this->apply_mode( $mode );
 		}
 	}
 
-	private function current_sort_mode(): string {
-		$session_mode = $this->session_manager->selected_sort_mode();
-		$mode         = '' !== $session_mode ? $session_mode : $this->settings->get_string( 'checkout_sort_mode', RateSorter::CHEAPEST );
+	private function enabled(): bool {
+		return $this->settings->get_bool( 'checkout_sort_selector_enabled', true );
+	}
 
-		return RateSorter::FASTEST === $mode ? RateSorter::FASTEST : RateSorter::CHEAPEST;
+	public function current_sort_mode(): string {
+		$session_mode = $this->session_manager->selected_sort_mode();
+		$mode = $this->enabled() && '' !== $session_mode ? $session_mode : $this->settings->get_string( 'checkout_sort_mode', RateSorter::CHEAPEST );
+		$mode = RateSorter::FASTEST === $mode ? RateSorter::FASTEST : RateSorter::CHEAPEST;
+		if ( ! $this->enabled() ) {
+			$this->apply_mode( $mode );
+		}
+		return $mode;
+	}
+
+	private function apply_mode( string $mode ): void {
+		$previous = $this->session_manager->selected_sort_mode();
+		if ( $previous === $mode ) {
+			return;
+		}
+		if ( in_array( $previous, array( RateSorter::CHEAPEST, RateSorter::FASTEST ), true ) ) {
+			$this->session_manager->reset_selections_for_sort_change();
+		}
+		$this->session_manager->save_sort_mode( $mode );
+		$this->clear_shipping_rate_cache();
 	}
 
 	private function clear_shipping_rate_cache(): void {
@@ -72,8 +91,12 @@ final class CheckoutSortSelector {
 		}
 
 		$session = WC()->session;
-		for ( $index = 0; $index < 20; $index++ ) {
-			$key = 'shipping_for_package_' . $index;
+		$keys = array_map( static fn( int $index ): string => 'shipping_for_package_' . $index, range( 0, 19 ) );
+		if ( method_exists( $session, 'get_session_data' ) ) {
+			$data = $session->get_session_data();
+			$keys = array_filter( array_keys( is_array( $data ) ? $data : array() ), static fn( mixed $key ): bool => is_string( $key ) && str_starts_with( $key, 'shipping_for_package_' ) );
+		}
+		foreach ( $keys as $key ) {
 			if ( method_exists( $session, '__unset' ) ) {
 				$session->__unset( $key );
 				continue;

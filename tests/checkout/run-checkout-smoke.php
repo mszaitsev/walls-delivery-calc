@@ -418,7 +418,7 @@ $sorted = $sorter->sort(
 	),
 	RateSorter::CHEAPEST
 );
-checkout_smoke_assert( array( '100', '200', '300' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Tariff selector rates must group by checkout_group_id and sort by original cost ascending.' );
+checkout_smoke_assert( array( '100', '200', '300' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Tariff selector rates must group by checkout_group_id and sort by final cost ascending.' );
 
 $sorted = $sorter->sort(
 	array(
@@ -428,7 +428,7 @@ $sorted = $sorter->sort(
 	),
 	RateSorter::CHEAPEST
 );
-checkout_smoke_assert( array( '100', '200', '350' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Selector price sorting must ignore final discounted prices.' );
+checkout_smoke_assert( array( '100', '350', '200' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Selector price sorting must use final discounted prices.' );
 
 $sorted = $sorter->sort(
 	array(
@@ -439,7 +439,7 @@ $sorted = $sorter->sort(
 	),
 	RateSorter::CHEAPEST
 );
-checkout_smoke_assert( array( 'yandex:pickup', 'dpd:A', 'dpd:B', 'yandex:courier' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->rate_id, $sorted ), 'Only selector rates must be grouped; ordinary Yandex pickup/courier rates must remain separate methods.' );
+checkout_smoke_assert( array( 'dpd:B', 'dpd:A', 'yandex:pickup', 'yandex:courier' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->rate_id, $sorted ), 'Only selector rates must be grouped; ordinary Yandex pickup/courier rates must remain separate methods.' );
 
 $sorted = $sorter->sort(
 	array(
@@ -449,7 +449,7 @@ $sorted = $sorter->sort(
 	),
 	RateSorter::FASTEST
 );
-checkout_smoke_assert( array( '2', '5', '7' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Tariff selector delivery-days sorting must use original min days ascending.' );
+checkout_smoke_assert( array( '2', '5', '7' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Tariff selector delivery-days sorting must use final min days ascending.' );
 
 $sorted = $sorter->sort(
 	array(
