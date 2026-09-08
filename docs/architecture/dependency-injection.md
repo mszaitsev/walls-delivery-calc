@@ -4,7 +4,9 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.155.14
+Version: 0.155.15
+
+The composition root registers `LocationWriteLock`, `LocationDatabaseBackupService` and `LocationDatabaseBackupAdmin`. The backup service receives the shared lock, `LocationCountryIndexService`, `DeliveryQuoteCacheManager` and `Logger`; the admin owner receives it plus `PluginEnvironment` and `Logger`. `LocationsAdminPage` receives the admin owner and lock; `DpdGeographyImportService` receives the same lock for its locations-writing requests. No service lookup occurs inside these services. Optional trailing constructor dependencies retain existing diagnostic fixtures; production composition always supplies the lock.
 
 0.155.13 replaces the checkout address modal with an inline autocomplete attached to `billing_address_1`. It is enabled only for a canonical RU WDC location with a FIAS identity; manual, unresolved and non-RU destinations keep a plain editable address. `AddressSuggestionAjax` verifies the checkout nonce and active DB location, then uses the dedicated `address_inline` DaData request with a fixed city boundary (street through house, maximum 8 results). It never retries without that boundary. Suggestions cannot change city, region, postcode or WDC location metadata. Manual address text is always allowed.
 

@@ -1,6 +1,29 @@
 # Locations And Pickup
 
-Version: 0.155.6
+Version: 0.155.15
+
+## Administrative Database Backup
+
+The Locations page (`wdc-platform-locations`) offers one logical backup containing the exact historical pair `${wpdb->prefix}wdc_locations` and `${wpdb->prefix}wdc_location_aliases`. It is not a full plugin backup: regions, delivery codes and carrier mapping tables are outside this snapshot. Existing JSONL export/import remains available and unchanged.
+
+- Physical names append `_backup_YYYYMMDD_HHMMSS` using site time. Only strictly named, calendar-valid pairs with the same timestamp are discoverable/restorable. Orphan tables are ignored, not automatically deleted. Page status reads names only, not row counts.
+- Create uses `CREATE TABLE ... LIKE` and `INSERT ... SELECT` for both staging tables, verifies counts (including zero rows), preserves the next AUTO_INCREMENT counter, then atomically publishes both backup names. Only then are previous valid pairs dropped. Any copy failure cleans only new staging tables and retains the previous pair.
+- Restore compares each live/backup `SHOW CREATE TABLE` after excluding table names and volatile AUTO_INCREMENT counters. Incompatible schemas, foreign keys, triggers or inaccessible dependency metadata refuse restoration. Both restore shadows are copied and counted before one four-mapping `RENAME TABLE` swaps the pair. Old live tables are dropped only after success; backup tables and their date remain unchanged.
+- Successful restore marks `wdc_location_country_codes` stale and calls `DeliveryQuoteCacheManager::clear_all_delivery_cache()`: existing quote/transient invalidation, delivery-rate cache version bump and current Woo session rate-cache cleanup. Failed restore does not invalidate caches. No persistent profile matcher/search cache was found.
+- `GET_LOCK('wdc_locations_write_lock', 0)` serializes backup/restore and administrative mutating requests; release is in `finally`. GAR, incremental, JSONL import, display/postcode/coordinate jobs and DPD geography import share this boundary. Backup/restore check unfinished job options while holding the lock, so a gap between batches is not a backup window. DPD is included because its foreign rows write canonical locations.
+- The lock is cooperative and server-wide. External SQL, direct CLI/service callers and runtime coordinate enrichment are not administrative participants: quiesce these writers for an exact snapshot. Hosting must provide CREATE/INSERT/ALTER/DROP/RENAME, named locks and readable schema metadata; provision disk space for paired shadows. Large-table copies run in SQL without PHP row buffers, but request timeouts/connection loss still require operational supervision. Failed cleanup is logged; valid newly published backups are retained. No migration or queue is added.
+- Create/restore are capability-checked (`manage_woocommerce`) nonce-protected POST actions with redirect-after-post. Restore has a confirmation prompt. No table/path parameter from the browser is used.
+
+### GAR Export Script
+
+The GAR/ФИАС CSV section downloads the unchanged `src/Export-GarPlaces.ps1` through nonce/capability-protected `admin-post.php?action=wdc_download_export_gar_places_script`. Only that fixed file can be downloaded, as an attachment without admin HTML. It converts the full XML archive to the existing CSV format; no importer format changes are made.
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "D:\FIAS\Export-GarPlaces.ps1" `
+  -Archive "D:\FIAS\gar_xml_full.zip" `
+  -OutCsv "D:\FIAS\out\gar_places.csv" `
+  -IncludeOptionalCodes
+```
 
 0.155.6 does not change destination/location semantics. Rule Engine `cart_total` conditions reuse existing full-cart totals and do not affect `CheckoutLocationFingerprint`, pickup destination binding, or location resolution.
 

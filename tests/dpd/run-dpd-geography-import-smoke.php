@@ -664,6 +664,8 @@ function wp_tempnam( string $filename = '' ): string|false {
 	return tempnam( sys_get_temp_dir(), 'wdc-dpd-geography-' );
 }
 
+require_once __DIR__ . '/../../src/Core/Autoloader.php';
+( new \WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC', __DIR__ . '/../../src' ) )->register();
 require_once __DIR__ . '/../../src/Domain/Status/DeliveryStatus.php';
 require_once __DIR__ . '/../../src/Shipments/Cdek/CdekStatusMappingService.php';
 require_once __DIR__ . '/../../src/Shipments/Dpd/DpdStatusMapping.php';

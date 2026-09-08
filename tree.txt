@@ -182,6 +182,8 @@ C:.
 |           shipments.md
 |
 +---src
+|   |   Export-GarPlaces.ps1
+|   |
 |   +---Admin
 |   |       AdminMenu.php
 |   |       AdminNotices.php
@@ -735,6 +737,8 @@ C:.
 |   |   |   .gitkeep
 |   |   |
 |   |   +---Admin
+|   |   |       LocationAdminJsonResponse.php
+|   |   |       LocationDatabaseBackupAdmin.php
 |   |   |       LocationsAdminPage.php
 |   |   |
 |   |   +---Coordinates
@@ -773,12 +777,14 @@ C:.
 |   |   |       KeyboardLayoutTransformer.php
 |   |   |       LocationAliasGenerator.php
 |   |   |       LocationCountryIndexService.php
+|   |   |       LocationDatabaseBackupService.php
 |   |   |       LocationDisplayNameFormatter.php
 |   |   |       LocationSearchService.php
 |   |   |
 |   |   +---Storage
 |   |   |       LocationDeliveryCodeRepository.php
 |   |   |       LocationRepository.php
+|   |   |       LocationWriteLock.php
 |   |   |       PlaceRegionMatchResult.php
 |   |   |       RegionRepository.php
 |   |   |
@@ -1164,6 +1170,7 @@ C:.
     +---locations
     |       run-dadata-postcode-fill-smoke.php
     |       run-gar-import-smoke.php
+    |       run-location-database-backup-smoke.php
     |       run-location-delivery-codes-smoke.php
     |       run-location-display-name-smoke.php
     |       run-locations-incremental-update-smoke.php
