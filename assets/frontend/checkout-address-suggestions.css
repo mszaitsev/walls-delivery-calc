@@ -36,3 +36,18 @@
 .wdc-address-autocomplete-primary,
 .wdc-address-autocomplete-secondary { display: block; }
 .wdc-address-autocomplete-secondary { font-size: .85em; color: #666; }
+
+.wdc-address-autocomplete-row.is-loading { display: flex; align-items: center; gap: 10px; }
+.wdc-address-autocomplete-spinner {
+	width: 18px;
+	height: 18px;
+	flex: 0 0 18px;
+	border: 2px solid #c3c4c7;
+	border-top-color: #2271b1;
+	border-radius: 50%;
+	animation: wdc-address-autocomplete-spin .8s linear infinite;
+}
+@keyframes wdc-address-autocomplete-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+	.wdc-address-autocomplete-spinner { animation: none; }
+}

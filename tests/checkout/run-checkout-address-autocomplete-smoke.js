@@ -31,9 +31,12 @@ function harness() {
   }
   function event(target, name, extra = {}) {
     if (name === 'update_checkout') updates++;
-    const e = { target, preventDefault() {}, ...extra };
+    if (name === 'focus') document.activeElement = target;
+    if (name === 'blur' && document.activeElement === target) document.activeElement = null;
+    const e = { target, preventDefault() { this.prevented=true; }, stopPropagation() { this.stopped=true; }, ...extra };
     handlers.slice().filter(h => h.name.split('.')[0] === name && (!h.selector || matches(target, h.selector)))
       .forEach(h => h.fn.call(target, e));
+    return e;
   }
   class Q {
     constructor(items) { this.items = items; this.length = items.length; items.forEach((n, i) => { this[i] = n; }); }
@@ -76,7 +79,7 @@ function harness() {
     requests.push(r); return r;
   };
   vm.runInNewContext(source, { jQuery:$, window, document });
-  return { $, address, requests, event, body, values, get updates() { return updates; },
+  return { $, address, requests, event, body, document, values, get updates() { return updates; },
     flush() { const pending=[...timers.values()]; timers.clear(); pending.forEach(fn => fn()); },
     type(value) { address.value=value; event(address,'input'); },
     box() { return $('.wdc-address-autocomplete'); },
@@ -113,10 +116,46 @@ for (const [field,value] of [['billing_country','BY'],['billing_country','KZ'],[
 h=harness(); h.$('#wdc_platform_location_id').val(''); h.$('#wdc_platform_location_fias_id').val(''); h.type('Ленина'); h.flush(); assert.equal(h.requests.length,0);
 h=harness(); h.type('Ленина'); h.flush(); h.$('#wdc_platform_location_selected_source').val('manual'); h.event(h.body,'wdc:location-selected'); h.requests[0].resolve([house]); assert(!h.box().hasClass('is-open'));
 h=harness(); for(let i=0;i<3;i++) h.event(h.body,'updated_checkout'); h.type('Ленина'); h.flush(); assert.equal(h.requests.length,1,'one handler after refresh');
-h.requests[0].resolve([house]); h.choose(); const value=h.address.value; h.event(h.$('.wdc-address-autocomplete-helper')[0],'mousedown'); assert.equal(h.address.value,value); assert(!h.box().hasClass('is-open'));
+h.requests[0].resolve([house]); h.choose(); h.event(h.$('.wdc-address-autocomplete-helper')[0],'mousedown'); assert.equal(h.address.value,house.input_value); assert(!h.box().hasClass('is-open'));
 assert(!source.includes('wdc-address-picker'));
 h=harness(); h.type('Ленина'); h.flush(); h.requests[0].resolve([]); assert(h.box()[0].html.includes('Подходящих адресов не найдено'));
 h.type('Ленина 10'); h.flush(); h.requests[1].failure({},'error'); assert(h.box()[0].html.includes('Не удалось загрузить подсказки'));
 h.type(''); h.flush(); assert(!h.box().hasClass('is-open'));
-h=harness(); h.type('Ленина'); h.flush(); h.$('#wdc_platform_location_id').val('2'); h.event(h.body,'wdc:location-selected'); h.requests[0].resolve([street]); assert(!h.box().hasClass('is-open')); assert.equal(h.address.value,'Ленина');
+h=harness(); h.type('Ленина'); h.flush(); h.$('#wdc_platform_location_id').val('2'); h.event(h.body,'wdc:location-selected'); h.requests[0].resolve([street]); assert(!h.box().hasClass('is-open')); assert.equal(h.address.value,'');
+for (const alias of ['кв','кв.','квартира','офис','оф.','пом','пом.','помещение','п','п.','каб','кабинет','ап','апарт','апартамент','апартаменты']) {
+  for (const room of ['2','2А','12-Н','4/1']) {
+    h=harness(); h.type('Красный проспект 13 '+alias+' '+room); h.flush();
+    assert.equal(h.requests[0].data.query,'Красный проспект 13',alias+' '+room);
+    assert.equal(h.address.value,'Красный проспект 13 '+alias+' '+room);
+    h.requests[0].resolve([house]); h.choose(); assert.equal(h.address.value,house.input_value+', '+alias+' '+room);
+    const count=h.requests.length; h.type(house.input_value+', '+alias+' 44'); h.flush(); assert.equal(h.requests.length,count);
+  }
+}
+for (const query of ['Красный п проезд 13','Красный 13 кв 2 далее','Красный 13 пятый','проспект 13']) {
+  h=harness(); h.type(query); h.flush(); assert.equal(h.requests[0].data.query,query);
+}
+h=harness(); h.type('Красный 13 Офис 22'); h.flush(); h.requests[0].resolve([house]); h.choose(); assert.equal(h.address.value,house.input_value+', Офис 22');
+h=harness(); h.type('Красный 13 кв 2'); h.flush(); h.requests[0].resolve([street]); h.choose(); assert.equal(h.address.value,street.input_value); assert.equal(h.$('#billing_dadata_status').val(),'street_selected');
+for (const action of ['Enter','Tab','outside','blur','helper']) {
+  h=harness(); h.type('Ленина'); h.flush();
+  assert(h.box()[0].html.includes('wdc-address-autocomplete-spinner'));
+  h.requests[0].resolve([house]); assert(!h.box()[0].html.includes('spinner')); h.choose();
+  let event;
+  if (action==='outside') h.event(h.body,'mousedown');
+  else if (action==='helper') h.event(h.$('.wdc-address-autocomplete-helper')[0],'mousedown');
+  else event=h.event(h.address,action==='blur'?'blur':'keydown',{key:action});
+  assert.equal(h.address.value,house.input_value,action);
+  assert(!h.box().hasClass('is-open'));
+  if(action==='Enter') assert(event.prevented && event.stopped);
+  if(action==='Tab') assert(!event.prevented);
+  if(!['Tab','blur'].includes(action)) assert.notEqual(h.document.activeElement,h.address);
+}
+h=harness(); h.type('Ленина'); h.flush(); h.address.value='ул Ленина, д 10, '; h.event(h.address,'focus');
+const enter=h.event(h.address,'keydown',{key:'Enter'}); assert(enter.prevented && enter.stopped); assert(h.requests[0].aborted);
+h.requests[0].resolve([house]); assert(!h.box().hasClass('is-open')); assert.equal(h.address.value,house.input_value);
+h=harness(); h.address.value=house.input_value+', кв 2'; h.event(h.body,'mousedown'); assert.equal(h.address.value,house.input_value+', кв 2');
+for (const [field,value] of [['billing_country','KZ'],['wdc_platform_location_selected_source','manual'],['wdc_platform_location_id','22']]) {
+  h=harness(); h.type('Ленина'); h.flush(); h.$('#'+field).val(value); h.event(h.body,'updated_checkout'); assert.equal(h.address.value,''); assert(h.requests[0].aborted); assert.equal(h.$('#billing_dadata_house').val(),'');
+}
+h=harness(); h.address.value='Красный проспект 13'; h.event(h.body,'updated_checkout'); assert.equal(h.address.value,'Красный проспект 13');
 console.log('Checkout address autocomplete smoke passed.');

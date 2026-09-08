@@ -246,6 +246,25 @@ checkout_location_picker_assert( array_slice( $brod_regions, 0, 4 ) === array( '
 $ivan_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'ивановка' )['groups'] ?? array() );
 checkout_location_picker_assert( array_slice( $ivan_regions, 0, 6 ) === array( 'Алтайский', 'Амурская', 'Липецкая', 'Московская', 'Тверская', 'Херсонская' ), 'Same-bucket exact Ивановка region groups sort alphabetically even when raw row scores differ.' );
 $mixed_db = new wpdb();
+$moscow_db = new wpdb();
+$moscow_repository = new LocationRepository( $moscow_db );
+foreach ( array(
+	array( 'region_code' => '50', 'region_name' => 'Московская', 'place_name' => 'Москва', 'region_type' => 'обл' ),
+	array( 'region_code' => '77', 'region_name' => 'Москва', 'place_name' => 'Москва', 'region_type' => 'г' ),
+	array( 'region_code' => '01', 'region_name' => 'Алтайский', 'place_name' => 'Москва', 'region_type' => 'край' ),
+	array( 'region_code' => '02', 'region_name' => 'Амурская', 'place_name' => 'Москвино', 'region_type' => 'обл' ),
+) as $index => $row ) {
+	$moscow_repository->save( checkout_location_picker_location( $row + array( 'gar_object_id' => 970000 + $index, 'fias_id' => 'moscow-boost-' . $index, 'display_name' => $row['region_name'] . ', г ' . $row['place_name'] ) ) );
+}
+$moscow_search = new CheckoutLocationSearch( new LocationSearchService( $moscow_repository ) );
+foreach ( array( 'Москва', 'Москв' ) as $query ) {
+	$result = $moscow_search->search_for_picker( $query, 100, 10, '', 'RU' );
+	checkout_location_picker_assert( '77' === $result['groups'][0]['region_key'] && 'moscow-boost-1' === $result['groups'][0]['items'][0]->fias_id && 'moscow-boost-1' === $result['items'][0]->fias_id, 'Moscow city and group lead for ' . $query . ', without boosting Moscow-named settlements in other regions.' );
+}
+$moscow_query_check = new ReflectionMethod( CheckoutLocationSearch::class, 'is_moscow_city_query' );
+checkout_location_picker_assert( false === $moscow_query_check->invoke( $moscow_search, 'Москов' ), 'Москов does not receive the Moscow exception.' );
+$moscow_forced = $moscow_search->search_for_picker( 'Москв', 100, 10, '50', 'RU' );
+checkout_location_picker_assert( 1 === count( $moscow_forced['groups'] ) && '50' === $moscow_forced['groups'][0]['region_key'], 'Moscow boost does not escape forced region.' );
 $mixed_db->regions = array(
 	'22' => array( 'region_name' => 'Алтайский', 'region_type' => 'край' ),
 	'95' => array( 'region_name' => 'Херсонская', 'region_type' => 'обл' ),

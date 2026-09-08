@@ -13,6 +13,8 @@
 	var finalizedComplete = false;
 	var state = 'idle';
 	var contextKey = '';
+	var pendingPremiseTail = '';
+	var isFinishing = false;
 	var listboxId = 'wdc-address-autocomplete-listbox';
 	var hiddenKeys = [
 		'dadata_status',
@@ -190,8 +192,9 @@
 	}
 
 	function renderMessage( className, message ) {
+		var spinner = 'is-loading' === className ? '<span class="wdc-address-autocomplete-spinner" aria-hidden="true"></span>' : '';
 		dropdown()
-			.html( '<div class="wdc-address-autocomplete-row ' + className + '">' + escapeHtml( message ) + '</div>' )
+			.html( '<div class="wdc-address-autocomplete-row ' + className + '">' + spinner + '<span>' + escapeHtml( message ) + '</span></div>' )
 			.addClass( 'is-open' );
 		addressField().attr( 'aria-expanded', 'true' );
 	}
@@ -249,6 +252,47 @@
 		$( document.body ).trigger( 'update_checkout' );
 	}
 
+	function splitPremiseTail( rawValue ) {
+		var value = String( rawValue || '' );
+		var match = value.match( /^(.*\S)[\s,]+((?:кв|квартира|офис|оф|пом|помещение|п|каб|кабинет|ап|апарт|апартамент|апартаменты)\.?\s+\d+[a-zа-яё]?(?:[-/][\da-zа-яё]+)*)\s*$/i );
+		return {
+			search_value: match ? match[1].replace( /[\s,]+$/, '' ) : value,
+			premise_tail: match ? match[2].replace( /\s+/g, ' ' ) : ''
+		};
+	}
+
+	function normalizeAddressOnFinish( value ) {
+		return String( value || '' ).replace( /[\s,]+$/, '' );
+	}
+
+	function finishAddressEditing( blur ) {
+		if ( isFinishing ) {
+			return;
+		}
+		isFinishing = true;
+		try {
+			var input = addressField();
+			var previous = String( input.val() || '' );
+			var value = normalizeAddressOnFinish( previous );
+			input.val( value );
+			if ( finalizedComplete && ! startsWithFinalizedPrefix( value ) ) {
+				finalizedPrefix = '';
+				finalizedComplete = false;
+				clearAddressHidden();
+			}
+			pendingPremiseTail = '';
+			closeDropdown();
+			if ( value !== previous ) {
+				input.trigger( 'change' );
+			}
+			if ( blur ) {
+				input.trigger( 'blur' );
+			}
+		} finally {
+			isFinishing = false;
+		}
+	}
+
 	function selectItem( item ) {
 		if ( ! item || ! eligible() ) {
 			return;
@@ -259,7 +303,8 @@
 		}
 		closeDropdown();
 		setHiddenData( item, item.is_final ? 'resolved' : 'street_selected' );
-		addressField().val( inputValue + ( item.is_final ? ', ' : '' ) );
+		addressField().val( inputValue + ( item.is_final ? ', ' + pendingPremiseTail : '' ) );
+		pendingPremiseTail = '';
 		addressField().trigger( 'focus' );
 		placeCaretEnd( addressField() );
 		if ( item.is_final ) {
@@ -288,6 +333,8 @@
 
 	function scheduleSearch() {
 		var query = String( addressField().val() || '' );
+		var split = splitPremiseTail( query );
+		pendingPremiseTail = split.premise_tail;
 		window.clearTimeout( debounceTimer );
 		closeDropdown();
 		if ( ! eligible() ) {
@@ -315,7 +362,7 @@
 			finalizedComplete = false;
 		}
 		clearAddressHidden();
-		if ( query.trim().length < minChars() ) {
+		if ( split.search_value.trim().length < minChars() ) {
 			abortRequest();
 			closeDropdown();
 			setState( 'typing' );
@@ -342,7 +389,7 @@
 			action: config.action || 'wdc_platform_dadata_address_suggest',
 			nonce: config.nonce || '',
 			stage: 'address_inline',
-			query: query,
+			query: splitPremiseTail( query ).search_value,
 			prefix: 'billing',
 			context: context()
 		} ).done( function ( response ) {
@@ -404,7 +451,7 @@
 			.on( 'input' + namespace, '#billing_address_1,input[name="billing_address_1"],textarea[name="billing_address_1"]', function () {
 				scheduleSearch();
 			} )
-			.on( 'blur' + namespace, '#billing_address_1', closeDropdown )
+			.on( 'blur' + namespace, '#billing_address_1', function () { finishAddressEditing( false ); } )
 			.on( 'keydown' + namespace, '#billing_address_1,input[name="billing_address_1"],textarea[name="billing_address_1"]', function ( event ) {
 				if ( 'ArrowDown' === event.key && isOpen() ) {
 					event.preventDefault();
@@ -412,29 +459,35 @@
 				} else if ( 'ArrowUp' === event.key && isOpen() ) {
 					event.preventDefault();
 					setActiveIndex( activeIndex - 1 );
-				} else if ( 'Enter' === event.key && isOpen() && activeIndex >= 0 && items[ activeIndex ] ) {
+				} else if ( 'Enter' === event.key ) {
 					event.preventDefault();
-					selectItem( items[ activeIndex ] );
+					event.stopPropagation();
+					if ( isOpen() && activeIndex >= 0 && items[ activeIndex ] ) {
+						selectItem( items[ activeIndex ] );
+					} else {
+						finishAddressEditing( true );
+					}
 				} else if ( 'Escape' === event.key ) {
 					event.preventDefault();
 					closeDropdown();
 				} else if ( 'Tab' === event.key ) {
-					closeDropdown();
+					finishAddressEditing( false );
 				}
 			} )
 			.on( 'mousedown' + namespace, '.wdc-address-autocomplete-option', function ( event ) {
 				event.preventDefault();
+				event.stopPropagation();
 				selectItem( items[ parseInt( $( this ).attr( 'data-index' ) || '-1', 10 ) ] );
 			} )
 			.on( 'mousedown' + namespace, '.wdc-address-autocomplete-helper', function ( event ) {
 				event.preventDefault();
-				closeDropdown();
-				addressField().trigger( 'blur' );
+				event.stopPropagation();
+				finishAddressEditing( true );
 			} )
 			.on( 'change' + namespace, '#billing_country', refreshContext );
 		$( document ).on( 'mousedown' + namespace, function ( event ) {
 			if ( ! $( event.target ).closest( '.wdc-address-autocomplete-field' ).length ) {
-				closeDropdown();
+				finishAddressEditing( true );
 			}
 		} );
 	}
@@ -442,6 +495,8 @@
 	function refreshContext() {
 		var next = JSON.stringify( context() );
 		if ( contextKey && contextKey !== next ) {
+			addressField().val( '' );
+			pendingPremiseTail = '';
 			finalizedPrefix = '';
 			finalizedComplete = false;
 			clearAddressHidden();
