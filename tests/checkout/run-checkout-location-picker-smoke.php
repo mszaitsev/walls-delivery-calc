@@ -139,7 +139,9 @@ $locations = array(
 	checkout_location_picker_location( array( 'gar_object_id' => 1006, 'fias_id' => 'fias-verh', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Верхобродово', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Верхобродово' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 2001, 'fias_id' => 'fias-alt-ivan', 'region_code' => '22', 'region_name' => 'Алтайский', 'region_type' => 'край', 'district_name' => 'Курьинский', 'district_type' => 'р-н', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Алтайский край, Курьинский р-н, село Ивановка', 'postal_code' => '658320' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 2002, 'fias_id' => 'fias-alt-ivan-2', 'region_code' => '22', 'region_name' => 'Алтайский', 'region_type' => 'край', 'district_name' => 'Курьинский', 'district_type' => 'р-н', 'place_name' => 'Ивановка Верхняя', 'place_type' => 'село', 'display_name' => 'Алтайский край, Курьинский р-н, село Ивановка Верхняя' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 28002, 'fias_id' => 'fias-amur-ivan', 'region_code' => '28', 'region_name' => 'Амурская', 'region_type' => 'обл', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Амурская обл., село Ивановка' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 3001, 'fias_id' => 'fias-bash-vet', 'region_code' => '02', 'region_name' => 'Башкортостан', 'region_type' => 'Республика', 'city_name' => 'Уфа', 'city_type' => 'г', 'place_name' => 'Ветошниково', 'place_type' => 'д', 'display_name' => 'Башкортостан Республика, г. Уфа, д. Ветошниково' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 32001, 'fias_id' => 'fias-bryansk-prefix-ivan', 'region_code' => '32', 'region_name' => 'Брянская', 'region_type' => 'обл', 'place_name' => 'Ивановкастарая', 'place_type' => 'д', 'display_name' => 'Брянская обл., деревня Ивановкастарая' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 5001, 'fias_id' => 'fias-domodedovo', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'city_name' => 'Домодедово', 'city_type' => 'г', 'place_name' => 'Домодедово', 'place_type' => 'г', 'display_name' => 'Московская обл., г. Домодедово' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 5002, 'fias_id' => 'fias-avdotino', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'city_name' => 'Домодедово', 'city_type' => 'г', 'place_name' => 'Авдотьино', 'place_type' => 'д', 'display_name' => 'Московская обл., г. Домодедово, деревня Авдотьино' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 5003, 'fias_id' => 'fias-skripino', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'city_name' => 'Домодедово', 'city_type' => 'г', 'place_name' => 'Скрипино-1', 'place_type' => 'д', 'display_name' => 'Московская обл., г. Домодедово, деревня Скрипино-1' ) ),
@@ -148,6 +150,7 @@ $locations = array(
 	checkout_location_picker_location( array( 'gar_object_id' => 5004, 'fias_id' => 'fias-mo-ivan', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Московская обл., село Ивановка' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 6901, 'fias_id' => 'fias-tver-brod', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Брод', 'place_type' => 'д', 'display_name' => 'Тверская обл., деревня Брод' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 6902, 'fias_id' => 'fias-tver-ivan', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Тверская обл., село Ивановка' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 95001, 'fias_id' => 'fias-kherson-ivan-strong', 'region_code' => '95', 'region_name' => 'Херсонская', 'region_type' => 'обл', 'district_name' => 'Ивановка', 'district_type' => 'р-н', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Херсонская обл., Ивановка р-н, село Ивановка' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 6903, 'fias_id' => 'fias-tver-brodki', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Бродки', 'place_type' => 'д', 'display_name' => 'Тверская обл., деревня Бродки' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 6904, 'fias_id' => 'fias-tver-brod-city', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'city_name' => 'Бродоград', 'city_type' => 'г', 'place_name' => 'Бродоград', 'place_type' => 'г', 'display_name' => 'Тверская обл., г. Бродоград' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 6905, 'fias_id' => 'fias-tver-brodograd-place', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Бродоград', 'place_type' => 'село', 'display_name' => 'Тверская обл., село Бродоград' ) ),
@@ -237,15 +240,60 @@ $brod_ids = $flatten_fias( $ajax->payload( 'брод' ) );
 checkout_location_picker_assert( in_array( 'fias-brod', $brod_ids, true ) && in_array( 'fias-brodki', $brod_ids, true ) && in_array( 'fias-brodovka', $brod_ids, true ), 'Prefix search finds Брод, Бродки, and Бродовка.' );
 checkout_location_picker_assert( ! in_array( 'fias-verh', $brod_ids, true ), 'Prefix search does not match inside word Верхобродово.' );
 $brod_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'брод' )['groups'] ?? array() );
-$sorted_brod_regions = $brod_regions;
-sort( $sorted_brod_regions, SORT_STRING );
-checkout_location_picker_assert( $sorted_brod_regions === $brod_regions, 'Region groups for Брод sort alphabetically by displayed label without a best-match group first.' );
+checkout_location_picker_assert( array_slice( $brod_regions, 0, 4 ) === array( 'Астраханская', 'Вологодская', 'Новосибирская', 'Тверская' ), 'Exact Брод region cohort sorts alphabetically before prefix/context groups.' );
 $ivan_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'ивановка' )['groups'] ?? array() );
-checkout_location_picker_assert( array_slice( $ivan_regions, 0, 4 ) === array( 'Алтайский', 'Липецкая', 'Московская', 'Тверская' ), 'Same seniority exact Ивановка region groups sort alphabetically.' );
+checkout_location_picker_assert( array_slice( $ivan_regions, 0, 6 ) === array( 'Алтайский', 'Амурская', 'Липецкая', 'Московская', 'Тверская', 'Херсонская' ), 'Same-bucket exact Ивановка region groups sort alphabetically even when raw row scores differ.' );
+$mixed_db = new wpdb();
+$mixed_db->regions = array(
+	'22' => array( 'region_name' => 'Алтайский', 'region_type' => 'край' ),
+	'95' => array( 'region_name' => 'Херсонская', 'region_type' => 'обл' ),
+	'32' => array( 'region_name' => 'Брянская', 'region_type' => 'обл' ),
+);
+$mixed_repository = new LocationRepository( $mixed_db );
+foreach ( array(
+	checkout_location_picker_location( array( 'gar_object_id' => 910001, 'fias_id' => 'fias-mixed-alt-ivan', 'region_code' => '22', 'region_name' => 'Алтайский', 'region_type' => 'край', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Алтайский край, село Ивановка' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 910002, 'fias_id' => 'fias-mixed-kherson-ivan', 'region_code' => '95', 'region_name' => 'Херсонская', 'region_type' => 'обл', 'district_name' => 'Ивановка', 'district_type' => 'р-н', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Херсонская обл., Ивановка р-н, село Ивановка' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 910003, 'fias_id' => 'fias-mixed-bryansk-prefix', 'region_code' => '32', 'region_name' => 'Брянская', 'region_type' => 'обл', 'place_name' => 'Ивановкастарая', 'place_type' => 'д', 'display_name' => 'Брянская обл., деревня Ивановкастарая' ) ),
+) as $mixed_location ) {
+	$mixed_repository->save( $mixed_location );
+}
+$mixed_ajax = new CheckoutLocationAjax( new CheckoutLocationSearch( new LocationSearchService( $mixed_repository ) ), new SettingsRepository(), new LocationCountryIndexService( $mixed_repository ), new CheckoutLocationProfileMatcher( $mixed_repository ) );
+$mixed_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $mixed_ajax->payload( 'ивановка', '', 'RU' )['groups'] ?? array() );
+checkout_location_picker_assert( array( 'Алтайский', 'Херсонская', 'Брянская' ) === $mixed_regions, 'Mixed relevance Ивановка groups keep exact cohort first, alphabetic inside the exact cohort, and prefix groups after it.' );
+$mixed_prefix_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $mixed_ajax->payload( 'иван', '', 'RU' )['groups'] ?? array() );
+checkout_location_picker_assert( array( 'Алтайский', 'Брянская', 'Херсонская' ) === $mixed_prefix_regions, 'Same-bucket prefix Иван groups sort alphabetically.' );
+$group_picker = new ReflectionMethod( CheckoutLocationSearch::class, 'group_picker_items' );
+$group_picker->setAccessible( true );
+$grouped = $group_picker->invoke(
+	$search,
+	array(
+		array(
+			'location' => checkout_location_picker_location( array( 'gar_object_id' => 920001, 'fias_id' => 'fias-group-kherson-exact', 'region_code' => '95', 'region_name' => 'Херсонская', 'region_type' => 'обл', 'district_name' => 'Ивановка', 'district_type' => 'р-н', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Херсонская обл., Ивановка р-н, село Ивановка' ) ),
+			'score' => array( 'group_rank_bucket' => 1, 'matched_hierarchy_rank' => 2, 'group_strength' => 700, 'total' => 999999 ),
+		),
+		array(
+			'location' => checkout_location_picker_location( array( 'gar_object_id' => 920002, 'fias_id' => 'fias-group-alt-exact', 'region_code' => '22', 'region_name' => 'Алтайский', 'region_type' => 'край', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Алтайский край, село Ивановка' ) ),
+			'score' => array( 'group_rank_bucket' => 1, 'matched_hierarchy_rank' => 2, 'group_strength' => 700, 'total' => 1 ),
+		),
+		array(
+			'location' => checkout_location_picker_location( array( 'gar_object_id' => 920003, 'fias_id' => 'fias-group-bryansk-context', 'region_code' => '32', 'region_name' => 'Брянская', 'region_type' => 'обл', 'district_name' => 'Ивановка', 'district_type' => 'р-н', 'place_name' => 'Контекстная', 'place_type' => 'д', 'display_name' => 'Брянская обл., Ивановка р-н, деревня Контекстная' ) ),
+			'score' => array( 'group_rank_bucket' => 4, 'matched_hierarchy_rank' => 0, 'group_strength' => 400, 'total' => 1000000 ),
+		),
+	),
+	20,
+	10,
+	''
+);
+$grouped_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], is_array( $grouped ) ? ( $grouped['groups'] ?? array() ) : array() );
+checkout_location_picker_assert( array( 'Алтайский', 'Херсонская', 'Брянская' ) === $grouped_regions, 'Region group comparator uses bucket first, alphabetic inside bucket, and raw score only after label/sort tie-breaks.' );
 $prefix_seniority_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'бродог' )['groups'] ?? array() );
 $sorted_prefix_seniority_regions = $prefix_seniority_regions;
 sort( $sorted_prefix_seniority_regions, SORT_STRING );
-checkout_location_picker_assert( $sorted_prefix_seniority_regions === $prefix_seniority_regions, 'Region groups for Бродог sort alphabetically without seniority buckets.' );
+checkout_location_picker_assert( $sorted_prefix_seniority_regions === $prefix_seniority_regions, 'Same-bucket prefix Бродог region groups sort alphabetically.' );
+$ivan_prefix_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'иван' )['groups'] ?? array() );
+$sorted_ivan_prefix_regions = $ivan_prefix_regions;
+sort( $sorted_ivan_prefix_regions, SORT_STRING );
+checkout_location_picker_assert( $sorted_ivan_prefix_regions === $ivan_prefix_regions, 'Same-bucket prefix Иван region groups sort alphabetically.' );
 
 $domodedovo_ids = $flatten_fias( $ajax->payload( 'домодедово' ) );
 checkout_location_picker_assert( in_array( 'fias-domodedovo', $domodedovo_ids, true ) && in_array( 'fias-avdotino', $domodedovo_ids, true ) && in_array( 'fias-skripino', $domodedovo_ids, true ), 'Upper-level city search returns city and nested places.' );
@@ -348,7 +396,7 @@ checkout_location_picker_assert( 'ambiguous' === $search->resolve_checkout_field
 $empty_type_resolved = $search->resolve_checkout_fields( '', 'поселок Пустотипск', 'KZ' );
 checkout_location_picker_assert( 'resolved' === $empty_type_resolved['status'] && $empty_type_resolved['location'] instanceof Location && 'fias-kz-empty-type' === $empty_type_resolved['location']->fias_id, 'Explicit type may fallback to a single exact-name location with empty place_type.' );
 $ivanovka_groups = array_map( static fn( array $group ): string => (string) $group['region_label'], $ajax->payload( 'Ивановка', '', 'RU' )['groups'] );
-checkout_location_picker_assert( array_slice( $ivanovka_groups, 0, 3 ) === array( 'Алтайский край', 'Липецкая обл.', 'Московская обл.' ), 'Region groups are alphabetic by displayed region_label without a best-match group first.' );
+checkout_location_picker_assert( array_slice( $ivanovka_groups, 0, 4 ) === array( 'Алтайский край', 'Амурская обл.', 'Липецкая обл.', 'Московская обл.' ), 'Exact Ивановка region cohort is alphabetic by displayed region_label.' );
 
 $city_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
 $city_css = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.css' );

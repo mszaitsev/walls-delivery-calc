@@ -638,7 +638,8 @@ final class CheckoutLocationSearch {
 
 		uasort(
 			$by_region,
-			fn( array $a, array $b ): int => $this->compare_region_group_labels( (string) $a['label'], (string) $b['label'] )
+			fn( array $a, array $b ): int => (int) $a['bucket'] <=> (int) $b['bucket']
+				?: $this->compare_region_group_labels( (string) $a['label'], (string) $b['label'] )
 				?: strcmp( (string) $a['sort'], (string) $b['sort'] )
 				?: (int) $b['score'] <=> (int) $a['score']
 		);
