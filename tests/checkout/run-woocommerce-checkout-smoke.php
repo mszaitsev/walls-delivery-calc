@@ -704,6 +704,59 @@ $coordinate_db->locations = array(
 );
 $coordinate_repository = new LocationRepository( $coordinate_db );
 $coordinate_location_search = new CheckoutLocationSearch( new LocationSearchService( $coordinate_repository ) );
+$post_manual_session = new CheckoutSessionManager();
+$post_manual_session->clear_normalized_address();
+$post_manual_package = wc_checkout_smoke_package();
+$post_manual_package['destination']['country'] = 'RU';
+$post_manual_package['destination']['city'] = 'ухухухуху';
+$post_manual_package['destination']['state'] = '';
+$post_manual_package['destination']['postcode'] = '';
+$previous_post = $_POST;
+$_POST = array(
+	'post_data' => http_build_query(
+		array(
+			'billing_country' => 'RU',
+			'billing_city' => 'ухухухуху',
+			'billing_state' => '',
+			'billing_postcode' => '',
+			'wdc_platform_location_selected_source' => 'manual',
+		)
+	),
+);
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+try {
+	$post_manual_request = ( new WooCommercePackageMapper( null, $post_manual_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $post_manual_package );
+} finally {
+	$_POST = $previous_post;
+}
+wc_checkout_smoke_assert( 'manual' === (string) ( $post_manual_request->customer_context['selected_source'] ?? '' ) && ! empty( $post_manual_request->customer_context['is_manual_city'] ), 'Package mapper must use current checkout post_data manual source before session context exists.' );
+wc_checkout_smoke_assert( 'frontend_post_manual' === (string) ( $post_manual_request->customer_context['location_context_source'] ?? '' ), 'Current checkout post_data manual source must be labeled frontend_post_manual.' );
+wc_checkout_smoke_assert( 'ухухухуху' === (string) ( $post_manual_request->customer_context['city_name'] ?? '' ) && 'ухухухуху' === $post_manual_request->destination->city, 'Frontend post manual context must preserve current visible city.' );
+wc_checkout_smoke_assert( '' === $post_manual_request->destination->region_name && '' === $post_manual_request->destination->postcode, 'Frontend post manual context must preserve incomplete region/postcode for quote gating.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Frontend post manual context must not call backend checkout location recovery.' );
+$post_manual_stale_marker_package = wc_checkout_smoke_package();
+$post_manual_stale_marker_package['destination']['city'] = '';
+$post_manual_stale_marker_package['destination']['state'] = '';
+$post_manual_stale_marker_package['destination']['postcode'] = '';
+$previous_post = $_POST;
+$_POST = array(
+	'post_data' => http_build_query(
+		array(
+			'billing_country' => 'RU',
+			'billing_city' => '',
+			'billing_state' => '',
+			'billing_postcode' => '',
+			'wdc_platform_location_selected_source' => 'manual',
+		)
+	),
+);
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+try {
+	$post_manual_stale_marker_request = ( new WooCommercePackageMapper( null, new CheckoutSessionManager(), null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $post_manual_stale_marker_package );
+} finally {
+	$_POST = $previous_post;
+}
+wc_checkout_smoke_assert( 'manual' !== (string) ( $post_manual_stale_marker_request->customer_context['selected_source'] ?? '' ) && 'frontend_post_manual' !== (string) ( $post_manual_stale_marker_request->customer_context['location_context_source'] ?? '' ), 'Empty current city must prevent stale manual post marker from becoming trusted location context.' );
 $manual_incomplete_session = new CheckoutSessionManager();
 $manual_incomplete_session->save_city_context(
 	array(
@@ -1188,8 +1241,10 @@ $manual_region_validation->invoke(
 );
 wc_checkout_smoke_assert( isset( $manual_validation_errors->errors['wdc_region_required'] ), 'Manual checkout validation must require editable region without clearing manual city.' );
 wc_checkout_smoke_assert( 'Тестоград' === (string) ( $manual_session->city_context()['city_name'] ?? '' ) && 'manual' === (string) ( $manual_session->city_context()['selected_source'] ?? '' ), 'Manual city/session marker must survive failed checkout validation.' );
-$manual_runtime->clear_checkout_session_after_order_processed();
-wc_checkout_smoke_assert( array() === $manual_session->city_context() && '' === $manual_session->fallback_city(), 'Checkout order completion cleanup must clear transient manual city trust from session.' );
+$manual_session->save_selected_city( array( 'source' => 'manual', 'selected_source' => 'manual', 'is_manual_city' => true, 'city_name' => 'Тестоград' ) );
+$manual_session->save_fallback_city( 'Тестоград' );
+$manual_runtime->clear_checkout_session_after_order_processed( 1001 );
+wc_checkout_smoke_assert( array() === $manual_session->selected_city() && array() === $manual_session->city_context() && '' === $manual_session->fallback_city(), 'Checkout order completion cleanup must clear selected_city, city_context, and fallback manual city trust from session.' );
 
 $checkout_formatter = LocationDisplayNameFormatter::from_rules( array() );
 $formatter_minsk = Location::from_array(

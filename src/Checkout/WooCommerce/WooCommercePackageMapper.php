@@ -475,6 +475,11 @@ final class WooCommercePackageMapper {
 	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,region_name:string,city_name:string,settlement_name:string,place_name:string,place_type:string,place_level:string,selected_source:string,is_manual_city:bool}
 	 */
 	private function checkout_location_context( array $destination, Address $address, string $country_code ): array {
+		$posted_manual = $this->current_posted_manual_location_context( $country_code );
+		if ( array() !== $posted_manual ) {
+			return $this->location_context_result( '', 'frontend_post_manual', 'manual', null, $posted_manual );
+		}
+
 		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
 		$city_id = $this->positive_location_id( $city['id'] ?? '' );
 		if ( $city_id > 0 ) {
@@ -500,6 +505,43 @@ final class WooCommercePackageMapper {
 		}
 
 		return $this->recover_checkout_location_context( $destination, $address, $country_code );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function current_posted_manual_location_context( string $country_code ): array {
+		$parsed = $this->checkout_post_data();
+		if ( array() === $parsed ) {
+			$parsed = $_POST;
+		}
+		if ( array() === $parsed || 'manual' !== $this->post_scalar( $parsed, 'wdc_platform_location_selected_source' ) ) {
+			return array();
+		}
+
+		$prefix = $this->active_checkout_prefix( $parsed );
+		$city = $this->post_scalar( $parsed, $prefix . '_city' );
+		if ( '' === $city ) {
+			return array();
+		}
+
+		$country = strtoupper( $this->post_scalar( $parsed, $prefix . '_country' ) );
+		if ( '' === $country ) {
+			$country = strtoupper( trim( $country_code ) );
+		}
+
+		return array(
+			'country_code'     => $country,
+			'location_id'      => '',
+			'city_name'        => $city,
+			'settlement_name'  => '',
+			'display_name'     => $city,
+			'region_name'      => $this->post_scalar( $parsed, $prefix . '_state' ),
+			'postcode'         => $this->post_scalar( $parsed, $prefix . '_postcode' ),
+			'source'           => 'manual',
+			'selected_source'  => 'manual',
+			'is_manual_city'   => true,
+		);
 	}
 
 	/** @param array<string,mixed> $context */

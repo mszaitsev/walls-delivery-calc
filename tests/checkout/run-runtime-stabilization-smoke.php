@@ -752,6 +752,8 @@ runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_nopriv_' . Ch
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_after_shipping_rate'] ), 'Checkout rate renderer hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_review_order_before_shipping'] ), 'Address renderer hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must register in the full checkout runtime.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_checkout_order_processed', \WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime::class ), 'Checkout address runtime must clear transient destination state when an order is processed.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_thankyou', \WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime::class ), 'Checkout address runtime must repeat transient destination cleanup at the thank-you lifecycle boundary.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_order_status_changed', ShopProcessingOrderQueueCounter::class ), 'Passive shop processing queue cache invalidation must register when platform runtime is enabled.' );
 
