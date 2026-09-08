@@ -1109,6 +1109,38 @@ $manual_context = $manual_session->city_context();
 wc_checkout_smoke_assert( 'BY' === (string) ( $manual_context['country_code'] ?? '' ) && 'Минск' === (string) ( $manual_context['city_name'] ?? '' ), 'Manual BY checkout city context must preserve country and city when local BY location is absent.' );
 wc_checkout_smoke_assert( 'Минская область' === (string) ( $manual_context['region_name'] ?? '' ), 'Manual BY checkout city context must preserve shipping_state region.' );
 wc_checkout_smoke_assert( '' === (string) ( $manual_context['postcode'] ?? '' ), 'Manual BY checkout city context must not autofill postcode from RU namesake.' );
+$manual_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => '',
+		'shipping_city' => 'Тестоград',
+		'shipping_postcode' => '',
+		'shipping_address_1' => '',
+		'wdc_platform_location_selected_source' => 'manual',
+	)
+);
+$manual_empty_region_context = $manual_session->city_context();
+wc_checkout_smoke_assert( 'manual' === (string) ( $manual_empty_region_context['selected_source'] ?? '' ) && ! empty( $manual_empty_region_context['is_manual_city'] ), 'Manual checkout context must keep transient manual marker during incomplete validation state.' );
+wc_checkout_smoke_assert( 'Тестоград' === (string) ( $manual_empty_region_context['city_name'] ?? '' ) && '' === (string) ( $manual_empty_region_context['region_name'] ?? '' ), 'Manual checkout context must preserve city and empty editable region for validation.' );
+$manual_validation = new CheckoutValidation( $manual_session );
+$manual_region_validation = new ReflectionMethod( $manual_validation, 'validate_manual_region' );
+$manual_region_validation->setAccessible( true );
+$manual_validation_errors = new WdcSmokeCheckoutErrors();
+$GLOBALS['wdc_test_options']['wdc_location_country_codes'] = array( 'countries' => array( 'BY' ) );
+$manual_region_validation->invoke(
+	$manual_validation,
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => '',
+		'shipping_city' => 'Тестоград',
+		'shipping_postcode' => '',
+		'shipping_address_1' => '',
+		'wdc_platform_location_selected_source' => 'manual',
+	),
+	$manual_validation_errors
+);
+wc_checkout_smoke_assert( isset( $manual_validation_errors->errors['wdc_region_required'] ), 'Manual checkout validation must require editable region without clearing manual city.' );
+wc_checkout_smoke_assert( 'Тестоград' === (string) ( $manual_session->city_context()['city_name'] ?? '' ) && 'manual' === (string) ( $manual_session->city_context()['selected_source'] ?? '' ), 'Manual city/session marker must survive failed checkout validation.' );
 $manual_runtime->clear_checkout_session_after_order_processed();
 wc_checkout_smoke_assert( array() === $manual_session->city_context() && '' === $manual_session->fallback_city(), 'Checkout order completion cleanup must clear transient manual city trust from session.' );
 

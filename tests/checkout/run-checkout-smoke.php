@@ -134,6 +134,36 @@ function checkout_promo_rule(): Rule {
 	return new Rule( null, 'Demo promo -500', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false );
 }
 
+function checkout_manual_destination_request( bool $complete = false ): QuoteRequest {
+	$total = Money::from_rubles( 1000 );
+	$item  = new PackageItem( 'SKU', 'Item', 1, $total, $total, 1000, 10, 10, 10 );
+
+	return new QuoteRequest(
+		'RU',
+		new Address(
+			country_code: 'RU',
+			region_name: $complete ? 'Тестовая область' : '',
+			city: 'Тестоград',
+			postcode: $complete ? '123456' : '',
+			street: 'Тестовая',
+			house: '1',
+			raw_address: 'Тестовая 1',
+			fallback: true
+		),
+		Package::from_items( array( $item ), 0, $total, $total ),
+		'card',
+		$total,
+		'2026-05-21',
+		array(
+			'selected_source' => 'manual',
+			'is_manual_city'  => true,
+			'region_name'     => $complete ? 'Тестовая область' : '',
+			'city_name'       => 'Тестоград',
+			'place_name'      => 'Тестоград',
+		)
+	);
+}
+
 function checkout_sort_rate( string $carrier, int $original_price_rub, int $min_days, string $title, string $tariff_key, ?int $final_price_rub = null, ?int $final_min_days = null ): DeliveryRate {
 	$final_price_rub ??= $original_price_rub;
 	$final_min_days ??= $min_days;
@@ -220,6 +250,65 @@ final class CheckoutExistingCrossedCarrier implements CarrierAdapterInterface {
 	}
 }
 
+final class CheckoutCountingApiCarrier implements CarrierAdapterInterface {
+	public int $calls = 0;
+
+	public function get_identity(): CarrierIdentity {
+		return new CarrierIdentity( 'counting_api', 'Counting API Carrier', 'api', true );
+	}
+
+	public function get_capabilities(): CarrierCapabilities {
+		return new CarrierCapabilities( supports_quotes: true, supports_courier_delivery: true );
+	}
+
+	public function supports_country( string $countryCode ): bool {
+		return true;
+	}
+
+	public function quote( QuoteRequest $request ): DeliveryQuote {
+		++$this->calls;
+
+		return new DeliveryQuote( 'counting-api', 'counting_api', $request->destination, $request->package, array(), true, '', '', false, 'api' );
+	}
+}
+
+final class CheckoutCountingFixedCarrier implements CarrierAdapterInterface {
+	public int $calls = 0;
+
+	public function get_identity(): CarrierIdentity {
+		return new CarrierIdentity( 'counting_fixed', 'Counting Fixed Carrier', 'fixed', true );
+	}
+
+	public function get_capabilities(): CarrierCapabilities {
+		return new CarrierCapabilities( supports_quotes: true, supports_pickup_delivery: true );
+	}
+
+	public function supports_country( string $countryCode ): bool {
+		return true;
+	}
+
+	public function quote( QuoteRequest $request ): DeliveryQuote {
+		++$this->calls;
+		$rate = new DeliveryRate(
+			'counting-fixed:pickup',
+			'counting_fixed',
+			'Counting Fixed Carrier',
+			'counting_fixed',
+			'Counting Fixed Carrier',
+			'pickup',
+			'Counting fixed pickup',
+			DeliveryType::PICKUP,
+			'Counting fixed pickup',
+			Money::from_rubles( 0 ),
+			null,
+			null,
+			DateRange::range( null, null )
+		);
+
+		return new DeliveryQuote( 'counting-fixed', 'counting_fixed', $request->destination, $request->package, array( $rate ), true, '', '', false, 'manual' );
+	}
+}
+
 $orchestrator = checkout_orchestrator();
 
 $result = $orchestrator->calculate( checkout_request() );
@@ -257,6 +346,25 @@ $registry->register( new CheckoutFailingCarrier() );
 $result = checkout_orchestrator( $registry )->calculate( checkout_request() );
 checkout_smoke_assert( $result->fallback_used, 'Fallback must be used when all carriers fail.' );
 checkout_smoke_assert( isset( $result->carrier_errors['failing'] ), 'Carrier exception must be captured.' );
+
+$api_carrier = new CheckoutCountingApiCarrier();
+$fixed_carrier = new CheckoutCountingFixedCarrier();
+$registry = new CarrierRegistry();
+$registry->register( $api_carrier );
+$registry->register( $fixed_carrier );
+$result = checkout_orchestrator( $registry )->calculate( checkout_manual_destination_request( false ) );
+checkout_smoke_assert( 0 === $api_carrier->calls, 'Incomplete manual destination must not call API carriers before required destination context exists.' );
+checkout_smoke_assert( 1 === $fixed_carrier->calls, 'Incomplete manual destination must still evaluate fixed/local checkout methods.' );
+checkout_smoke_assert( ! $result->fallback_used && 'counting_fixed' === $result->rates[0]->carrier_key, 'Fixed/local method must remain available while incomplete manual destination skips API carriers.' );
+
+$api_carrier = new CheckoutCountingApiCarrier();
+$fixed_carrier = new CheckoutCountingFixedCarrier();
+$registry = new CarrierRegistry();
+$registry->register( $api_carrier );
+$registry->register( $fixed_carrier );
+checkout_orchestrator( $registry )->calculate( checkout_manual_destination_request( true ) );
+checkout_smoke_assert( 1 === $api_carrier->calls, 'Complete manual destination must not be globally blocked from API carrier calculation.' );
+checkout_smoke_assert( 1 === $fixed_carrier->calls, 'Complete manual destination must still evaluate fixed/local methods.' );
 
 $cache        = new QuoteCache();
 $orchestrator = checkout_orchestrator( null, $cache );

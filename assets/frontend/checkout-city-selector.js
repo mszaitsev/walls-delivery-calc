@@ -744,6 +744,59 @@
 		setter( $state, regionName || regionCode );
 	}
 
+	function stateFieldCanonicalValue( $state, location ) {
+		var regionCode = location.region_code || '';
+		var regionName = location.state_value || location.region_name || '';
+		if ( ! $state.length ) {
+			return '';
+		}
+		if ( $state.is( 'select' ) ) {
+			if ( regionCode && $state.find( 'option[value="' + regionCode.replace( /"/g, '\\"' ) + '"]' ).length ) {
+				return String( regionCode );
+			}
+			if ( regionName && $state.find( 'option[value="' + regionName.replace( /"/g, '\\"' ) + '"]' ).length ) {
+				return String( regionName );
+			}
+			return '';
+		}
+
+		return String( regionName || regionCode || '' );
+	}
+
+	function canonicalCityValue( location ) {
+		return String( location.city_value || location.settlement_name || location.city_name || location.display_name || '' ).trim();
+	}
+
+	function canonicalPostcodeValue( location ) {
+		return String( location.postal_code || location.postcode || '' ).trim();
+	}
+
+	function visibleFieldsMatchCanonicalLocation( location ) {
+		var city = canonicalCityValue( location );
+		var state = stateFieldCanonicalValue( stateField(), location );
+		var postcode = canonicalPostcodeValue( location );
+
+		return checkoutFieldText( cityField() ) === city
+			&& checkoutFieldText( stateField() ) === state
+			&& checkoutFieldText( postcodeField() ) === postcode;
+	}
+
+	function currentHiddenCanonicalLocation() {
+		return {
+			id: hiddenValue( 'wdc_platform_location_id' ),
+			fias_id: hiddenValue( 'wdc_platform_location_fias_id' ),
+			display_name: hiddenValue( 'wdc_platform_location_display_name' ),
+			city_value: [ hiddenValue( 'wdc_platform_location_place_type' ), hiddenValue( 'wdc_platform_location_place_name' ) ].filter( Boolean ).join( ' ' ),
+			state_value: [ hiddenValue( 'wdc_platform_location_region_type' ), hiddenValue( 'wdc_platform_location_region_name' ) ].filter( Boolean ).join( ' ' ),
+			region_code: hiddenValue( 'wdc_platform_location_region_code' ),
+			postal_code: hiddenValue( 'wdc_platform_location_postcode' )
+		};
+	}
+
+	function hasCompleteVisibleCanonicalSelection() {
+		return hasSelectedLocation() && visibleFieldsMatchCanonicalLocation( currentHiddenCanonicalLocation() );
+	}
+
 	function selectLocationFromItem( $item ) {
 		var key = String( $item.attr( 'data-location-key' ) || '' );
 		var location = locationStore[ key ];
@@ -968,7 +1021,7 @@
 			clearHidden();
 			return;
 		}
-		if ( explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() || hasManualLocationSelection() ) {
+		if ( explicitSelection || pickerOpen || isSelecting || hasCompleteVisibleCanonicalSelection() || hasManualLocationSelection() ) {
 			return;
 		}
 		if ( ! checkoutFieldText( stateField() ) && ! checkoutFieldText( cityField() ) ) {
@@ -979,7 +1032,7 @@
 	}
 
 	function autoResolve() {
-		if ( ! config.ajax_url || ! localDatabaseAvailable() || explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() || hasManualLocationSelection() ) {
+		if ( ! config.ajax_url || ! localDatabaseAvailable() || explicitSelection || pickerOpen || isSelecting || hasCompleteVisibleCanonicalSelection() || hasManualLocationSelection() ) {
 			return;
 		}
 		var regionText = checkoutFieldText( stateField() );
@@ -1009,7 +1062,12 @@
 			}
 			if ( response && response.success && 'resolved' === body.status && body.selected ) {
 				if ( hiddenValue( 'wdc_platform_location_id' ) === String( body.selected.id || '' ) || ( hiddenValue( 'wdc_platform_location_fias_id' ) && hiddenValue( 'wdc_platform_location_fias_id' ) === String( body.selected.fias_id || '' ) ) ) {
-					restoreSelectedNotice();
+					if ( visibleFieldsMatchCanonicalLocation( body.selected ) ) {
+						restoreSelectedNotice();
+						lockRegionField( stateField() );
+						return;
+					}
+					applySelectedLocation( body.selected, { updateCheckout: true, explicit: false, source: 'auto', updateFields: true } );
 					return;
 				}
 				applySelectedLocation( body.selected, { updateCheckout: true, explicit: false, source: 'auto', updateFields: true } );
@@ -1040,6 +1098,9 @@
 			if ( $( this ).is( 'select' ) ) {
 				$( this ).val( $( this ).data( 'wdcLockedValue' ) || $( this ).val() || '' );
 			}
+			return;
+		}
+		if ( hasManualLocationSelection() ) {
 			return;
 		}
 		if ( ! isSelecting && ! suppressSearch ) {

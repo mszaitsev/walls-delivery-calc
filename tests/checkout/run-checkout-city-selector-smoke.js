@@ -274,7 +274,15 @@ function createHarness(initial) {
     }
     toggleClass() { return this; }
     empty() { return this.html(''); }
-    on() { return this; }
+    on(events, selector, handler) {
+      if (this.items.includes(body) && 'string' === typeof events) {
+        const callback = 'function' === typeof selector ? selector : handler;
+        String(events).split(/\s+/).filter(Boolean).forEach((eventName) => {
+          bodyHandlers.push({ type: eventName.split('.')[0], selector: 'function' === typeof selector ? '' : selector, handler: callback });
+        });
+      }
+      return this;
+    }
     off() { return this; }
   }
 
@@ -374,7 +382,7 @@ function createHarness(initial) {
 
   const instrumented = source.replace(
     "$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, afterCheckoutUpdated );\n}( jQuery ) );",
-    "window.__wdcCitySelectorTest = { applySelectedLocation: applySelectedLocation, applyManualFallbackCity: applyManualFallbackCity, handleCountryAvailabilityChanged: handleCountryAvailabilityChanged, currentCountryCode: currentCountryCode, setPickerState: setPickerState, scheduleAutoResolve: scheduleAutoResolve, autoResolve: autoResolve, afterCheckoutUpdated: afterCheckoutUpdated };\n$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, afterCheckoutUpdated );\n}( jQuery ) );"
+    "window.__wdcCitySelectorTest = { applySelectedLocation: applySelectedLocation, applyManualFallbackCity: applyManualFallbackCity, handleCountryAvailabilityChanged: handleCountryAvailabilityChanged, currentCountryCode: currentCountryCode, setPickerState: setPickerState, scheduleAutoResolve: scheduleAutoResolve, autoResolve: autoResolve, afterCheckoutUpdated: afterCheckoutUpdated, hasManualLocationSelection: hasManualLocationSelection };\n$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, afterCheckoutUpdated );\n}( jQuery ) );"
   );
   vm.runInNewContext(instrumented, context, { filename: sourcePath });
 
@@ -396,6 +404,12 @@ function createHarness(initial) {
       if (field) {
         field.value = value;
       }
+    },
+    triggerStateEvent(eventName = 'change') {
+      const field = (byName.get('billing_state') || [])[0];
+      bodyHandlers
+        .filter((item) => item.type === eventName && 'function' === typeof item.handler)
+        .forEach((item) => item.handler({ target: field, type: eventName }));
     },
     hidden(name) {
       const field = (byName.get(name) || [])[0];
@@ -474,6 +488,42 @@ const sakhaPayload = {
   assert(harness.element('billing_state').classes.has('wdc-location-state-locked'), 'canonical DB selection must lock region field without disabling its POST value.');
   assert.strictEqual(harness.element('billing_state').disabled, false, 'locked region field must not be disabled.');
   assert.strictEqual(harness.updates(), 1, 'explicit location selection must schedule one checkout recalculation.');
+}
+
+{
+  const harness = createHarness({
+    billing_country: 'RU',
+    billing_city: 'якутск',
+    billing_state: 'саха /Якутия/ республика',
+    billing_postcode: '',
+    ajaxResponses: [{
+      success: true,
+      data: {
+        local_database_available: true,
+        status: 'resolved',
+        selected: sakhaPayload
+      }
+    }]
+  });
+  harness.setField('wdc_platform_location_fias_id', 'fias-yakutsk');
+  harness.setField('wdc_platform_location_display_name', 'респ Саха (Якутия), г Якутск');
+  harness.setField('wdc_platform_location_place_type', 'г');
+  harness.setField('wdc_platform_location_place_name', 'Якутск');
+  harness.setField('wdc_platform_location_region_type', 'респ');
+  harness.setField('wdc_platform_location_region_name', 'Саха (Якутия)');
+  harness.setField('wdc_platform_location_postcode', '677000');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'г Якутск', 'same canonical identity with stale visible city must repair city on first resolve.');
+  assert.strictEqual(harness.field('billing_state'), 'респ Саха (Якутия)', 'same canonical identity with stale visible state must repair state on first resolve.');
+  assert.strictEqual(harness.field('billing_postcode'), '677000', 'same canonical identity with stale visible postcode must repair postcode on first resolve.');
+  assert(harness.noticeClasses().includes('is-selected'), 'repaired canonical identity must keep selected status.');
+  assert.strictEqual(harness.updates(), 1, 'repaired canonical identity must trigger exactly one checkout recalculation.');
+  assert.strictEqual(harness.ajaxRequests().length, 1, 'stale visible canonical fields must still perform one resolve request.');
+
+  harness.context.window.__wdcCitySelectorTest.scheduleAutoResolve();
+  harness.runTimers();
+  assert.strictEqual(harness.ajaxRequests().length, 1, 'already canonical visible fields must not schedule another resolve.');
+  assert.strictEqual(harness.updates(), 1, 'already canonical visible fields must not trigger another checkout update.');
 }
 
 {
@@ -579,6 +629,31 @@ const sakhaPayload = {
 }
 
 {
+  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: 'Старая область', billing_postcode: '630000' });
+  harness.context.window.__wdcCitySelectorTest.setPickerState('empty');
+  harness.context.window.__wdcCitySelectorTest.applyManualFallbackCity('Тестоград');
+  harness.runTimers();
+  harness.triggerStateEvent('blur');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'Тестоград', 'manual city must survive editable region focus/blur without changes.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), 'manual', 'manual source must survive editable region blur.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'manual region blur must not trigger profile reconciliation.');
+
+  harness.setField('billing_state', 'Тестовая область');
+  harness.triggerStateEvent('change');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'Тестоград', 'manual city must survive manual region edit.');
+  assert.strictEqual(harness.field('billing_state'), 'Тестовая область', 'manual region edit must keep entered state value.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), 'manual', 'manual source must survive manual region edit.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'manual region edit must not run DB reconciliation.');
+  harness.context.window.__wdcCitySelectorTest.afterCheckoutUpdated();
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'Тестоград', 'manual city must survive checkout validation/update refresh.');
+  assert(harness.noticeClasses().includes('is-manual-warning'), 'manual warning must survive checkout validation/update refresh.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'manual validation/update refresh must not run DB reconciliation.');
+}
+
+{
   const harness = createHarness({ billing_country: 'RU', billing_city: 'г Новосибирск', billing_state: 'Новосибирская область', billing_postcode: '630005' });
   assert.strictEqual(harness.field('billing_city'), 'г Новосибирск', 'initial load must not clear city.');
   assert.strictEqual(harness.updates(), 0, 'initial load must not trigger update_checkout.');
@@ -652,6 +727,7 @@ assert(source.includes('function renderCityStatus') && source.includes('wdc-city
 assert(source.includes('Проверяем...') && source.includes('is-checking'), 'auto resolve must expose checking status.');
 assert(source.includes('Указан неизвестный населенный пункт. Доставка может не рассчитаться') && source.includes('is-manual-warning'), 'manual fallback must expose warning status.');
 assert(source.includes('setFieldValueSilently') && source.includes('triggerCheckoutUpdate'), 'canonical location apply must batch field writes before a single checkout update.');
+assert(source.includes('visibleFieldsMatchCanonicalLocation') && source.includes('hasCompleteVisibleCanonicalSelection'), 'canonical identity shortcut must verify visible city/state/postcode before skipping field repair.');
 assert(source.includes('hasManualLocationSelection') && source.includes('manual_city_context'), 'manual selection must survive updated_checkout and session-backed reload without DB re-resolve.');
 assert(css.includes('.wdc-city-selector-selected.is-checking') && css.includes('.wdc-city-selector-selected.is-selected') && css.includes('.wdc-city-selector-selected.is-manual-warning'), 'city status CSS must define checking/selected/manual states.');
 assert(css.includes('.wdc-location-state-locked') && css.includes('background-color: #f2f2f2') && css.includes('cursor: not-allowed'), 'locked region field must look readonly without using disabled.');
