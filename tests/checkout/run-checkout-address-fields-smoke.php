@@ -188,13 +188,38 @@ address_fields_smoke_assert( array( 'form-row-last' ) === $configured['billing']
 address_fields_smoke_assert( 'Имя и отчество' === $configured['billing']['billing_first_name']['label'], 'First-name label must become name plus patronymic.' );
 address_fields_smoke_assert( 'Фамилия' === $configured['billing']['billing_last_name']['label'], 'Last-name label must remain unchanged.' );
 address_fields_smoke_assert( CheckoutFieldConfigurator::ADDRESS_LABEL === $configured['billing']['billing_address_1']['label'], 'Billing address label must match the exact UX copy.' );
+address_fields_smoke_assert( CheckoutFieldConfigurator::ADDRESS_PLACEHOLDER === $configured['billing']['billing_address_1']['placeholder'], 'Billing address placeholder must match the exact UX copy.' );
 address_fields_smoke_assert( false === $configured['billing']['billing_address_1']['required'], 'Billing address must be optional by default.' );
 address_fields_smoke_assert( 60 === $configured['billing']['billing_postcode']['priority'] && 70 === $configured['billing']['billing_address_1']['priority'], 'Billing postcode must render before address after the actual Woo field pipeline.' );
 address_fields_smoke_assert( ! isset( $configured['billing']['billing_address_2'] ), 'Billing address line 2 must be removed from checkout fields.' );
 address_fields_smoke_assert( true === $configured['billing']['billing_phone']['required'], 'Billing phone must be required.' );
+address_fields_smoke_assert( CheckoutFieldConfigurator::PHONE_PLACEHOLDER === $configured['billing']['billing_phone']['placeholder'], 'Billing phone placeholder must match the exact UX copy.' );
 address_fields_smoke_assert( true === $configured['billing']['billing_email']['required'], 'Email required semantics must remain unchanged.' );
 address_fields_smoke_assert( CheckoutFieldConfigurator::ORDER_COMMENTS_PLACEHOLDER === $configured['order']['order_comments']['placeholder'], 'Order comments placeholder must match the exact multiline copy.' );
 address_fields_smoke_assert( str_contains( $configured['order']['order_comments']['placeholder'], "\nотправить заказы вместе;\n" ), 'Order comments placeholder must preserve exact line breaks without bullets or blank lines.' );
+
+$render_phone = ( new CheckoutFieldConfigurator() )->configure_form_field_args(
+	array(
+		'label' => 'Телефон',
+		'required' => false,
+		'placeholder' => '',
+	),
+	'billing_phone'
+);
+address_fields_smoke_assert( true === $render_phone['required'], 'Late form-field args must keep billing phone visually required.' );
+address_fields_smoke_assert( CheckoutFieldConfigurator::PHONE_PLACEHOLDER === $render_phone['placeholder'], 'Late form-field args must keep billing phone placeholder.' );
+
+$render_address = ( new CheckoutFieldConfigurator() )->configure_form_field_args(
+	array(
+		'label' => 'Адрес улицы',
+		'required' => true,
+		'placeholder' => '',
+	),
+	'billing_address_1'
+);
+address_fields_smoke_assert( CheckoutFieldConfigurator::ADDRESS_LABEL === $render_address['label'], 'Late form-field args must keep billing address label.' );
+address_fields_smoke_assert( CheckoutFieldConfigurator::ADDRESS_PLACEHOLDER === $render_address['placeholder'], 'Late form-field args must keep billing address placeholder.' );
+address_fields_smoke_assert( false === $render_address['required'], 'Late form-field args must keep billing address optional by default.' );
 
 $session = new CheckoutSessionManager();
 $session->save_rates(

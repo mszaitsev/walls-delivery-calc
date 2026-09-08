@@ -7,12 +7,15 @@ defined( 'ABSPATH' ) || exit;
 
 final class CheckoutFieldConfigurator {
 	public const ADDRESS_LABEL = 'Адрес - нужен при доставке посылки курьером домой. В других случаях не обязательно';
+	public const ADDRESS_PLACEHOLDER = 'Улица, дом, корпус, квартира';
+	public const PHONE_PLACEHOLDER = '+7-ххх-ххх-хххх (или формат вашей страны)';
 	public const ORDER_COMMENTS_PLACEHOLDER = "Пишем, если заказ в подарок;\nотправить заказы вместе;\nзаберёт другой человек и т.д.";
 
 	public function register(): void {
 		add_filter( 'woocommerce_default_address_fields', array( $this, 'configure_default_address_fields' ), 20, 1 );
 		add_filter( 'woocommerce_billing_fields', array( $this, 'configure_billing_fields' ), 20, 1 );
 		add_filter( 'woocommerce_checkout_fields', array( $this, 'configure_checkout_fields' ), 100, 1 );
+		add_filter( 'woocommerce_form_field_args', array( $this, 'configure_form_field_args' ), 100, 2 );
 	}
 
 	/**
@@ -28,6 +31,7 @@ final class CheckoutFieldConfigurator {
 
 		if ( isset( $fields['address_1'] ) ) {
 			$fields['address_1']['label'] = __( self::ADDRESS_LABEL, 'walls-delivery-calc' );
+			$fields['address_1']['placeholder'] = __( self::ADDRESS_PLACEHOLDER, 'walls-delivery-calc' );
 			$fields['address_1']['required'] = false;
 		}
 
@@ -56,10 +60,12 @@ final class CheckoutFieldConfigurator {
 		}
 		if ( isset( $fields['billing_address_1'] ) ) {
 			$fields['billing_address_1']['label'] = __( self::ADDRESS_LABEL, 'walls-delivery-calc' );
+			$fields['billing_address_1']['placeholder'] = __( self::ADDRESS_PLACEHOLDER, 'walls-delivery-calc' );
 			$fields['billing_address_1']['required'] = false;
 		}
 		if ( isset( $fields['billing_phone'] ) ) {
 			$fields['billing_phone']['required'] = true;
+			$fields['billing_phone']['placeholder'] = __( self::PHONE_PLACEHOLDER, 'walls-delivery-calc' );
 		}
 
 		return $fields;
@@ -77,6 +83,24 @@ final class CheckoutFieldConfigurator {
 		}
 
 		return $fields;
+	}
+
+	/**
+	 * @param array<string,mixed> $args
+	 * @return array<string,mixed>
+	 */
+	public function configure_form_field_args( array $args, string $key ): array {
+		if ( 'billing_address_1' === $key ) {
+			$args['label'] = __( self::ADDRESS_LABEL, 'walls-delivery-calc' );
+			$args['placeholder'] = __( self::ADDRESS_PLACEHOLDER, 'walls-delivery-calc' );
+			$args['required'] = false;
+		}
+		if ( 'billing_phone' === $key ) {
+			$args['required'] = true;
+			$args['placeholder'] = __( self::PHONE_PLACEHOLDER, 'walls-delivery-calc' );
+		}
+
+		return $args;
 	}
 
 	/**
