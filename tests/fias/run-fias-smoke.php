@@ -200,12 +200,16 @@ $local_city_html = (string) ob_get_clean();
 fias_smoke_assert( str_contains( $local_city_html, 'Населенный пункт выбран из справочника' ), 'Renderer must show dictionary city for local city context.' );
 fias_smoke_assert( ! str_contains( $local_city_html, 'Используется введенный вручную населенный пункт' ), 'Renderer must not show manual city for local city context.' );
 
-$manual = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Berlin', 'shipping_address_1' => 'Manual street' ) );
-fias_smoke_assert( 'manual' === ( $session->city_context()['source'] ?? '' ), 'Unknown city must set manual city source.' );
+$unknown = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Berlin', 'shipping_address_1' => 'Manual street' ) );
+fias_smoke_assert( array() === $session->city_context(), 'Unknown profile city must not create manual city trust without explicit manual source.' );
+fias_smoke_assert( ! $unknown->success, 'Unknown profile city chain must remain unsuccessful normalization.' );
+
+$manual = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Berlin', 'shipping_address_1' => 'Manual street', 'wdc_platform_location_selected_source' => 'manual' ) );
+fias_smoke_assert( 'manual' === ( $session->city_context()['source'] ?? '' ), 'Explicit manual source must set manual city context.' );
 ob_start();
 ( new CheckoutAddressRenderer( $session ) )->render();
 $manual_city_html = (string) ob_get_clean();
-fias_smoke_assert( str_contains( $manual_city_html, 'Используется введенный вручную населенный пункт' ), 'Renderer must show manual city state for manual fallback city.' );
+fias_smoke_assert( str_contains( $manual_city_html, 'Используется введенный вручную населенный пункт' ), 'Renderer must show manual city state for explicit manual fallback city.' );
 fias_smoke_assert( ! $manual->success, 'Manual city chain must remain unsuccessful normalization.' );
 
 $gar = new GarSyncManager( new ActionScheduler( new Logger() ), new GarChangesClient( $http ), new Logger(), $settings, $wpdb );
