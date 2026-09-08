@@ -14,6 +14,8 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutAddressRuntime {
+	private bool $order_processed_cleanup_done = false;
+
 	public function __construct(
 		private CheckoutAddressNormalizer $normalizer,
 		private CheckoutCityResolver $city_resolver,
@@ -35,6 +37,7 @@ final class CheckoutAddressRuntime {
 
 	public function clear_checkout_session_after_order_processed( mixed $order_id = null ): void {
 		$this->session_manager->clear_normalized_address();
+		$this->order_processed_cleanup_done = true;
 	}
 
 	/**
@@ -67,6 +70,9 @@ final class CheckoutAddressRuntime {
 		$selected = $this->selected_location_from_context( $context );
 		if ( array() !== $selected ) {
 			$selected = $this->enrich_location_coordinates( $selected );
+			if ( $this->order_processed_cleanup_done ) {
+				return $this->normalizer->normalize( $this->raw_address( $context ), $context );
+			}
 			$this->session_manager->save_city_context( $this->city_context_from_location( $selected ) );
 			$this->session_manager->save_selected_city( $selected );
 			$this->session_manager->save_fallback_city( '' );
@@ -92,16 +98,23 @@ final class CheckoutAddressRuntime {
 
 		$raw      = $this->raw_address( $context );
 		$result   = $this->normalizer->normalize( $raw, $context );
+		if ( $this->order_processed_cleanup_done ) {
+			return $result;
+		}
+		$is_manual_source = 'manual' === (string) ( $context['selected_source'] ?? '' );
 
 		if ( $location instanceof Location ) {
 			$this->session_manager->save_selected_city( $location_data );
 			$this->session_manager->save_city_context( $this->city_context_from_location( $location_data ) );
-		} else {
+		} elseif ( $is_manual_source ) {
 			$this->session_manager->save_selected_city( array() );
 			$this->session_manager->save_city_context( $this->manual_city_context( $context ) );
+		} else {
+			$this->session_manager->save_selected_city( array() );
+			$this->session_manager->save_city_context( array() );
 		}
 
-		if ( $result->address->fallback && ! $location instanceof Location ) {
+		if ( $is_manual_source && $result->address->fallback && ! $location instanceof Location ) {
 			$this->session_manager->save_fallback_city( (string) $context['city'] );
 		} else {
 			$this->session_manager->save_fallback_city( '' );

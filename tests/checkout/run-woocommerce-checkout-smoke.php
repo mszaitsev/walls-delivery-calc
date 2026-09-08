@@ -1206,9 +1206,7 @@ $manual_runtime->resolve_checkout_address(
 	)
 );
 $manual_context = $manual_session->city_context();
-wc_checkout_smoke_assert( 'BY' === (string) ( $manual_context['country_code'] ?? '' ) && 'Минск' === (string) ( $manual_context['city_name'] ?? '' ), 'Manual BY checkout city context must preserve country and city when local BY location is absent.' );
-wc_checkout_smoke_assert( 'Минская область' === (string) ( $manual_context['region_name'] ?? '' ), 'Manual BY checkout city context must preserve shipping_state region.' );
-wc_checkout_smoke_assert( '' === (string) ( $manual_context['postcode'] ?? '' ), 'Manual BY checkout city context must not autofill postcode from RU namesake.' );
+wc_checkout_smoke_assert( array() === $manual_context, 'Unresolved checkout profile text without explicit manual source must not create transient manual city trust.' );
 $manual_runtime->resolve_checkout_address(
 	array(
 		'shipping_country' => 'BY',
@@ -1245,6 +1243,35 @@ $manual_session->save_selected_city( array( 'source' => 'manual', 'selected_sour
 $manual_session->save_fallback_city( 'Тестоград' );
 $manual_runtime->clear_checkout_session_after_order_processed( 1001 );
 wc_checkout_smoke_assert( array() === $manual_session->selected_city() && array() === $manual_session->city_context() && '' === $manual_session->fallback_city(), 'Checkout order completion cleanup must clear selected_city, city_context, and fallback manual city trust from session.' );
+$manual_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Тестовая область',
+		'shipping_city' => 'Тестоград',
+		'shipping_postcode' => '123456',
+		'shipping_address_1' => 'Тестовая улица',
+		'wdc_platform_location_selected_source' => 'manual',
+	)
+);
+wc_checkout_smoke_assert( array() === $manual_session->selected_city() && array() === $manual_session->city_context() && '' === $manual_session->fallback_city(), 'Stale manual checkout data later in the successful-order request must not repopulate transient manual trust after order_processed cleanup.' );
+$manual_runtime->clear_checkout_session_after_order_processed( 1001 );
+wc_checkout_smoke_assert( array() === $manual_session->selected_city() && array() === $manual_session->city_context() && '' === $manual_session->fallback_city(), 'Thank-you cleanup path must remain idempotent when transient manual trust is already clear.' );
+$fresh_checkout_session = new CheckoutSessionManager();
+$fresh_checkout_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$fresh_checkout_session
+);
+$fresh_checkout_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Тестовая область',
+		'shipping_city' => 'Тестоград',
+		'shipping_postcode' => '123456',
+		'shipping_address_1' => 'Тестовая улица',
+	)
+);
+wc_checkout_smoke_assert( array() === $fresh_checkout_session->selected_city() && array() === $fresh_checkout_session->city_context() && '' === $fresh_checkout_session->fallback_city(), 'Fresh checkout profile text without WDC manual marker must be reconciled as plain profile data instead of restored manual trust.' );
 
 $checkout_formatter = LocationDisplayNameFormatter::from_rules( array() );
 $formatter_minsk = Location::from_array(
