@@ -471,8 +471,8 @@ checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'currentBaseQuery = \'\';' ) && str_contains( $city_js, 'searchInput().trigger( \'focus\' )' ), 'Clear button resets query state and returns focus to search input.' );
 checkout_location_picker_assert( is_string( $city_css ) && str_contains( $city_css, 'wdc-city-picker-spin' ) && str_contains( $city_css, 'is-loading::before' ), 'City picker CSS contains loading spinner animation.' );
 checkout_location_picker_assert( is_string( $city_js ) && ! str_contains( $city_js, 'Индекс:' ), 'City selected notice no longer contains Индекс label.' );
-checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, "locationSource: 'local_selected'" ), 'DaData address opening query uses selected display_name when fias_id exists.' );
-checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, "regionSource: 'checkout_state'" ), 'DaData address opening query falls back to state/city/address.' );
+checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, 'selected_location_id:' ), 'Inline address search passes canonical location identity.' );
+checkout_location_picker_assert( ! str_contains( $address_js, 'openingQuery' ), 'Inline address search does not compose editable geography into address.' );
 
 $validation = new CheckoutValidation( new CheckoutSessionManager() );
 $validate_manual_region = new ReflectionMethod( CheckoutValidation::class, 'validate_manual_region' );

@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.12
+Version: 0.155.13
+
+0.155.13 replaces the checkout address modal with an inline autocomplete attached to `billing_address_1`. It is enabled only for a canonical RU WDC location with a FIAS identity; manual, unresolved and non-RU destinations keep a plain editable address. `AddressSuggestionAjax` verifies the checkout nonce and active DB location, then uses the dedicated `address_inline` DaData request with a fixed city boundary (street through house, maximum 8 results). It never retries without that boundary. Suggestions cannot change city, region, postcode or WDC location metadata. Manual address text is always allowed.
 
 0.155.12 adds a checkout-field presentation layer inside the WDC checkout runtime. It uses WooCommerce address, billing, and checkout field filters to order billing destination fields as first name, last name, country, city, state, postcode, address, phone, and email; relabels first name to `Имя и отчество`; gives billing address line 1 the courier-only guidance label; removes billing address line 2; makes phone required; and replaces the order comments placeholder with the approved multiline text. Billing address line 1 is optional until the selected WDC rate exposes courier delivery metadata, then frontend UX marks `billing_address_1` required and server validation blocks empty courier addresses.
 

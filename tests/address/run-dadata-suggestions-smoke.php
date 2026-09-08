@@ -26,6 +26,7 @@ function update_option( string $key, mixed $value, bool|string $autoload = false
 function __( string $text, string $domain = '' ): string { return $text; }
 function sanitize_text_field( string $value ): string { return trim( strip_tags( $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
+function wp_verify_nonce( string $nonce, string $action ): bool { return 'test-nonce' === $nonce; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags | JSON_UNESCAPED_UNICODE ); }
 function is_wp_error( mixed $value ): bool { return false; }
 function wp_remote_retrieve_response_code( array $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
@@ -218,7 +219,7 @@ dadata_suggestions_assert( true === ( $last_request['counted'] ?? false ), 'Last
 dadata_suggestions_assert( 200 === (int) ( $last_request['status_code'] ?? 0 ), 'Last request audit must store HTTP status.' );
 dadata_suggestions_assert( isset( $last_request['query_hash'] ) && isset( $last_request['query_preview'] ), 'Last request audit must store safe query diagnostics.' );
 
-$_POST = array( 'level' => 'house' );
+$_POST = array( 'nonce' => 'test-nonce', 'level' => 'house' );
 ob_start();
 ( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( $suggestion_settings, $client, new AddressSuggestionNormalizer() ), $token_pool ) )->handle_selection();
 $selection_payload = json_decode( (string) ob_get_clean(), true );
@@ -229,7 +230,7 @@ dadata_suggestions_assert( 'selection' === ( $token_pool->last_request_today( 's
 dadata_suggestions_assert( 'selection' === ( $token_pool->last_request_today( 'second-token' )['status_code'] ?? '' ), 'Selection usage must update diagnostics status.' );
 dadata_suggestions_assert( 'suggestion_click' === ( $token_pool->last_request_today( 'second-token' )['error_code'] ?? '' ), 'Selection usage diagnostics must store suggestion_click usage type.' );
 
-$_POST = array( 'level' => 'house', 'usage_type' => 'final_selection' );
+$_POST = array( 'nonce' => 'test-nonce', 'level' => 'house', 'usage_type' => 'final_selection' );
 ob_start();
 ( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( $suggestion_settings, $client, new AddressSuggestionNormalizer() ), $token_pool ) )->handle_selection();
 $final_selection_payload = json_decode( (string) ob_get_clean(), true );
@@ -241,7 +242,7 @@ dadata_suggestions_assert( 'selection' === ( $token_pool->last_request_today( 's
 dadata_suggestions_assert( 'final_selection' === ( $token_pool->last_request_today( 'second-token' )['error_code'] ?? '' ), 'Final selection usage diagnostics must store final_selection usage type.' );
 
 $token_pool->set_last_used_token_id( '' );
-$_POST = array( 'level' => 'street', 'usage_type' => 'final_selection' );
+$_POST = array( 'nonce' => 'test-nonce', 'level' => 'street', 'usage_type' => 'final_selection' );
 ob_start();
 ( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( $suggestion_settings, $client, new AddressSuggestionNormalizer() ), $token_pool ) )->handle_selection();
 $missing_selection_payload = json_decode( (string) ob_get_clean(), true );
@@ -333,7 +334,7 @@ $selection_limit_client = new DaDataSuggestionClient( $selection_limit_settings_
 $GLOBALS['wdc_dadata_suggestions_http_requests'] = array();
 $selection_limit_client->suggest( 'address', 'selection limit' );
 dadata_suggestions_assert( 1 === $selection_limit_pool->usage_today( 'selection-first' ), 'First suggest must increment first token once before selection.' );
-$_POST = array( 'level' => 'street' );
+$_POST = array( 'nonce' => 'test-nonce', 'level' => 'street' );
 ob_start();
 ( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( $selection_limit_settings_obj, $selection_limit_client, new AddressSuggestionNormalizer() ), $selection_limit_pool ) )->handle_selection();
 ob_get_clean();
@@ -355,7 +356,7 @@ $street_selection_pool->save_tokens_from_admin(
 	)
 );
 $street_selection_pool->set_last_used_token_id( 'street-selection-token' );
-$_POST = array( 'level' => 'street', 'usage_type' => 'suggestion_click' );
+$_POST = array( 'nonce' => 'test-nonce', 'level' => 'street', 'usage_type' => 'suggestion_click' );
 ob_start();
 ( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( new AddressSuggestionSettings( $street_selection_settings, new EncryptionService(), $street_selection_pool ), new DaDataSuggestionClient( new AddressSuggestionSettings( $street_selection_settings, new EncryptionService(), $street_selection_pool ), $street_selection_pool, new Logger() ), new AddressSuggestionNormalizer() ), $street_selection_pool ) )->handle_selection();
 ob_get_clean();
@@ -393,93 +394,58 @@ foreach ( array( '9', '75' ) as $level ) {
 }
 
 $js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-suggestions.js' );
-foreach ( array( 'activeCheckoutPrefix', 'openAddressPicker', 'address picker opened', "mousedown' + namespace + ' focus' + namespace + ' click", 'selectorFor( activePrefix, \'address_1\' )', 'firstUsable( activePrefix, \'address_1\' )', 'firstUsable( prefix, \'city\' )', 'firstUsable( prefix, \'address_2\' )', 'textarea[name="', 'shipping', 'billing', 'address_1', 'postcode', '.wdc-address-picker-search', 'modal search input', 'addressPickerState', 'address_next', 'street_selected', 'resolved', 'Использовать введенный адрес', 'manual fallback selected', 'dadata_status', 'dadata_unrestricted_value', 'dadata_region_fias_id', 'dadata_city_kladr_id', 'dadata_street_fias_id', 'dadata_house_fias_id', 'dadata_fias_level', 'update_checkout', 'updated_checkout', 'wc_fragments_refreshed', 'wdc_platform_dadata_address_suggest', 'wdc_platform_dadata_suggestion_selected', 'selection_action', 'trackSelectionUsage', 'selection usage counted', 'selection usage failed', 'address suggestions script loaded', 'config enabled', 'config disabled', 'DaData подсказки:', 'tokens ready:', 'total tokens:', 'available tokens:', 'encryption ready:', 'active mode:', 'active address field:', 'active city field:', 'modal opened:', 'last stage:', 'last query:', 'shipping mode active', 'billing mode active', 'using address field selector', 'address field found', 'address field not found', 'ajax request start', 'ajax success items count', 'ajax fail', 'street selected', 'house selected', 'lower-level request after house selection', 'debounceDelay = 300', 'itemStore', 'data-key', 'setHiddenData', 'ensureTrailingComma', 'Уточните номер дома', 'Уточните квартиру, помещение или офис', 'no_available_dadata_token', 'dadata_daily_limit_exhausted', 'Подсказки адреса временно недоступны. Введите адрес вручную.' ) as $needle ) {
-	dadata_suggestions_assert( str_contains( $js, $needle ), 'Frontend suggestions JS must contain ' . $needle . '.' );
+// Exercise the public boundary against DB rows, with no production HTTP calls.
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = '';
+		public array $locations = array();
+		public array $regions = array();
+	}
 }
-dadata_suggestions_assert( ! str_contains( $js, 'secret-api-key' ) && ! str_contains( $js, 'Authorization' ), 'Frontend suggestions JS must not contain API key values or Authorization headers.' );
-dadata_suggestions_assert( ! str_contains( $js, 'var ADDRESS_SELECTOR' ), 'Frontend suggestions JS must not define a combined ADDRESS_SELECTOR.' );
-dadata_suggestions_assert( ! str_contains( $js, '#shipping_address_1,input[name="shipping_address_1"],textarea[name="shipping_address_1"],#billing_address_1' ), 'Frontend suggestions JS must not mix shipping and billing address selectors.' );
-dadata_suggestions_assert( ! str_contains( $js, ".on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, addressSelector" ), 'Frontend suggestions JS must not search from WooCommerce address_1 input.' );
-dadata_suggestions_assert( str_contains( $js, ".on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, '.wdc-address-picker-search'" ), 'Frontend suggestions JS must search from modal input.' );
-dadata_suggestions_assert( str_contains( $js, "trackSelectionUsage( selectedItem, 'suggestion_click' );" ) && str_contains( $js, 'selectItem( selectedItem );' ), 'Suggestion click usage call must be fire-and-forget before applying selected item.' );
-dadata_suggestions_assert( str_contains( $js, "trackSelectionUsage( item, 'final_selection' );" ), 'Final selection usage must be called from the final address apply path.' );
-dadata_suggestions_assert( str_contains( $js, "usage_type: usageType || 'suggestion_click'" ) && str_contains( $js, 'selection_token:' ) && str_contains( $js, 'prefix: activePrefix' ), 'Selection usage AJAX must send usage_type, active prefix and opaque selection token.' );
-dadata_suggestions_assert( ! str_contains( $js, 'house_after_street' ), 'Frontend suggestions JS must not automatically use house_after_street mode.' );
-dadata_suggestions_assert( ! str_contains( $js, 'selectedStreet' ), 'Frontend suggestions JS must not keep sticky selectedStreet state.' );
-dadata_suggestions_assert( ! str_contains( $js, 'Изменить улицу' ) && ! str_contains( $js, 'wdc-address-picker-change-street' ), 'Frontend suggestions JS must not show change-street mode UI.' );
-dadata_suggestions_assert( str_contains( $js, "var stage = state.awaitingFlatSelection ? 'address_next' : 'address';" ), 'Frontend search stage must use address_next only while typing flats after house selection.' );
-dadata_suggestions_assert( str_contains( $js, 'searchInput().val( ensureTrailingComma( item.unrestrictedValue || item.value || item.label || data.street_with_type || \'\' ) );' ), 'Selecting street must keep full visible query plus trailing comma.' );
-dadata_suggestions_assert( str_contains( $js, "shippingChecked && ( visibleUsable( selectorFor( 'shipping', 'address_1' )" ), 'activeCheckoutPrefix must use shipping only when shipping fields are visible and ship-to-different is checked.' );
-dadata_suggestions_assert( str_contains( $js, "firstUsable( activePrefix, 'address_1' )" ), 'renderDebugBlock must use the active checkout prefix.' );
-dadata_suggestions_assert( str_contains( $js, '$( document.body ).off( namespace );' ), 'bind must clear delegated handlers before rebinding active selectors.' );
-dadata_suggestions_assert( ! str_contains( $js, "change' + namespace" ) && ! str_contains( $js, "blur' + namespace" ), 'Frontend suggestions JS must not use blur/change to trigger search.' );
-dadata_suggestions_assert( str_contains( $js, 'firstUsable( prefix, \'city\' ).val( data.city || data.settlement' ), 'Selected house must update city from selected address.' );
-dadata_suggestions_assert( str_contains( $js, "'manual'" ), 'Frontend must support manual fallback status.' );
-dadata_suggestions_assert( str_contains( $js, 'openingQuery' ), 'Frontend must build opening query from checkout fields.' );
-dadata_suggestions_assert( str_contains( $js, 'requestLowerLevelAfterHouse' ) && str_contains( $js, "request( 'address_next', query, prefix" ), 'House suggestion must request lower-level suggestions before finalizing.' );
-dadata_suggestions_assert( str_contains( $js, 'selectedHouseItem' ) && str_contains( $js, 'selectedHouseBaseQuery' ) && str_contains( $js, 'selectedHouseDisplayBase' ) && str_contains( $js, 'selectedHouseContext' ) && str_contains( $js, 'awaitingFlatSelection' ) && str_contains( $js, 'nextLevelMode' ), 'Frontend must keep selected house state while looking up flats.' );
-dadata_suggestions_assert( str_contains( $js, "state.awaitingFlatSelection ? 'address_next' : 'address'" ) && str_contains( $js, 'state.selectedHouseContext' ), 'Frontend flat lookup mode must keep searching through address_next with selected house context.' );
-dadata_suggestions_assert( str_contains( $js, 'nextLevelQuery = ensureTrailingComma( query );' ) && ! str_contains( $js, "flatQuery = ensureTrailingComma( query ) + 'кв ';" ), 'Frontend must seed the input with only the selected house base and separator, without automatic apartment prefix.' );
-dadata_suggestions_assert( str_contains( $js, 'queryMatchesSelectedHouseBase' ) && str_contains( $js, "! queryMatchesSelectedHouseBase( query, state )" ) && str_contains( $js, "stage = 'address';" ), 'Frontend must clear flat lookup mode and return to normal address search when the selected house base changes.' );
-dadata_suggestions_assert( str_contains( $js, 'Квартиры не найдены. Выберите из списка или продолжите ввод.' ) && str_contains( $js, 'clearHouseLookupState' ), 'Frontend must keep flat lookup mode from silently finalizing and must clear it explicitly.' );
-dadata_suggestions_assert( str_contains( $js, 'Уточните квартиру, помещение или офис' ) && str_contains( $js, 'wdc-address-picker-house-finalize' ) && str_contains( $js, 'showFlatHintWithHouseFinalize' ), 'Frontend must render a keyboard-accessible house-level finalize action in flat lookup mode.' );
-dadata_suggestions_assert( str_contains( $js, 'function finalizeHouseWithoutFlat()' ) && str_contains( $js, 'state.selectedHouseItem' ) && str_contains( $js, 'houseLevelItem( item )' ) && str_contains( $js, 'applyResolved( prefix, houseItem );' ), 'House finalize action must resolve the selected DaData house item, not manual fallback.' );
-dadata_suggestions_assert( str_contains( $js, "'flat'," ) && str_contains( $js, "'room_number'," ) && str_contains( $js, "'premise_type_full'" ) && str_contains( $js, "data.flat = '';" ) && str_contains( $js, "clone.level = 'house';" ), 'House-level finalize helper must clear flat/room/premise fields and keep level=house.' );
-dadata_suggestions_assert( str_contains( $js, 'lowerLevelItems' ) && str_contains( $js, "applyResolved( prefix, item );" ), 'House suggestion must finalize only after lower-level suggestions are checked.' );
-dadata_suggestions_assert( str_contains( $js, 'renderResults( lower, query );' ), 'House suggestion with lower-level items must render flats/rooms instead of finalizing immediately.' );
-dadata_suggestions_assert( str_contains( $js, "'flat' === item.level || 'room' === item.level || 'premise' === item.level" ), 'Flat/room/premise suggestions must be final selectable levels.' );
-dadata_suggestions_assert( str_contains( $js, 'cleanQueryPart' ), 'Frontend must sanitize opening query parts.' );
-dadata_suggestions_assert( str_contains( $js, 'checkoutFieldValue' ), 'Opening query must read checkout field values.' );
-dadata_suggestions_assert( str_contains( $js, "field.find( 'option:selected' )" ), 'Opening query must read selected state option text for select fields.' );
-dadata_suggestions_assert( str_contains( $js, "searchInput().val( openingQuery( activePrefix ) );" ), 'Address picker must seed search from region, city, and address.' );
-dadata_suggestions_assert( str_contains( $js, "var region = checkoutFieldValue( prefix, 'state' );" ), 'Opening query region must come from checkout state field.' );
-dadata_suggestions_assert( str_contains( $js, "var city = checkoutFieldValue( prefix, 'city' );" ), 'Opening query city must come from checkout city field.' );
-dadata_suggestions_assert( str_contains( $js, "var address = checkoutFieldValue( prefix, 'address_1' );" ), 'Opening query address must come from checkout address_1 field.' );
-dadata_suggestions_assert( str_contains( $js, "parts.join( ', ' ) + ', '" ), 'Opening query must keep trailing comma when address is empty.' );
-dadata_suggestions_assert( str_contains( $js, 'opening query built' ) && str_contains( $js, "regionSource: 'checkout_state'" ) && str_contains( $js, "citySource: 'checkout_city'" ) && str_contains( $js, "addressSource: 'checkout_address_1'" ), 'Opening query debug log must show checkout field sources.' );
-dadata_suggestions_assert( ! str_contains( $js, "street_fias_id:" ), 'Frontend search context must not reuse old street_fias_id.' );
-dadata_suggestions_assert( str_contains( $js, 'formatStreetHouse' ) && str_contains( $js, 'formatAddressWithoutRegionCity' ) && str_contains( $js, 'formatFullAddressWithoutCountry' ), 'Frontend must format final address lines.' );
-dadata_suggestions_assert( str_contains( $js, 'localLocationMatchesDadata' ), 'Frontend must compare selected local location with DaData result.' );
-dadata_suggestions_assert( str_contains( $js, 'wdc_platform_location_display_name' ) && str_contains( $js, 'wdc_platform_location_region_name' ) && str_contains( $js, 'wdc_platform_location_postcode' ), 'Frontend must keep WDC-compatible location hidden fields in sync.' );
-$manual_start = strpos( $js, 'function manualFallback' );
-$manual_end = strpos( $js, 'function bind' );
-$manual_body = false !== $manual_start && false !== $manual_end ? substr( $js, $manual_start, $manual_end - $manual_start ) : '';
-dadata_suggestions_assert( '' !== $manual_body && ! str_contains( $manual_body, 'trackSelectionUsage' ), 'Manual fallback must not count as DaData suggestion selection.' );
-
-$opening_start = strpos( $js, 'function openingQuery' );
-$opening_end = strpos( $js, 'function houseWithType' );
-$opening_body = false !== $opening_start && false !== $opening_end ? substr( $js, $opening_start, $opening_end - $opening_start ) : '';
-dadata_suggestions_assert( '' !== $opening_body, 'Opening query helper must be present.' );
-dadata_suggestions_assert( str_contains( $opening_body, 'wdc_platform_location_fias_id' ) && str_contains( $opening_body, 'wdc_platform_location_display_name' ), 'Opening query must prefer selected local location when fias_id exists.' );
-dadata_suggestions_assert( ! str_contains( $opening_body, 'showSelectedNotice' ), 'Opening query must not use selected notice text.' );
-dadata_suggestions_assert( ! str_contains( $opening_body, 'lastResolved' ) && ! str_contains( $opening_body, 'selectedStreet' ), 'Opening query must not use previous resolved suggestion or selected street.' );
-
-$test_clean_query_part = static function ( string $value ): string {
-	$cleaned = trim( preg_replace( '/\s+/', ' ', trim( $value, " \t\n\r\0\x0B," ) ) ?? '' );
-	if ( preg_match( '/^(.+?)\s+-\s+(.+)$/u', $cleaned, $matches ) ) {
-		return trim( $matches[1] );
+$db = new wpdb();
+$db->locations = array( array( 'id' => 1, 'country_code' => 'RU', 'fias_id' => 'city-fias', 'active' => 1, 'city_name' => 'Новосибирск' ) );
+$inline_client = new class implements \WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface {
+	public array $calls = array();
+	public int $extra = 0;
+	public function suggest( string $stage, string $query, array $context = array() ): array {
+		$this->calls[] = compact( 'stage', 'query', 'context' );
+		$rows = array();
+		foreach ( array_merge( array( 'city-fias', 'wrong-city', 'city-fias' ), array_fill( 0, $this->extra, 'city-fias' ) ) as $index => $city ) {
+			$rows[] = array( 'value' => 'г Новосибирск, ул Ленина, д 10', 'data' => array( 'city_fias_id' => $city, 'street_with_type' => 'ул Ленина', 'house' => 2 === $index ? '10' : '', 'fias_level' => 2 === $index ? '8' : '7' ) );
+		}
+		return array( 'success' => true, 'suggestions' => $rows );
 	}
-	return $cleaned;
 };
-$test_opening_query = static function ( string $region, string $city, string $address ) use ( $test_clean_query_part ): string {
-	$region = $test_clean_query_part( $region );
-	$city = $test_clean_query_part( $city );
-	$address = $test_clean_query_part( $address );
-	$parts = array_values( array_filter( array( $region, $city ), static fn ( string $part ): bool => '' !== $part ) );
-	if ( '' !== $address ) {
-		$parts[] = $address;
-		return implode( ', ', $parts );
-	}
-	return array() !== $parts ? implode( ', ', $parts ) . ', ' : '';
+$inline_service = new \WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( $suggestion_settings, $inline_client, $normalizer );
+$inline_ajax = new AddressSuggestionAjax( $inline_service, null, new CheckoutSessionManager(), new \WallsShop\WDC\Locations\Storage\LocationRepository( $db ) );
+$run_inline = static function ( array $context, string $nonce = 'test-nonce' ) use ( $inline_ajax ): array {
+	$_POST = array( 'nonce' => $nonce, 'query' => 'Ленина', 'context' => $context );
+	ob_start(); $inline_ajax->handle(); return json_decode( (string) ob_get_clean(), true );
 };
-dadata_suggestions_assert( 'Новосибирская область, Новосибирск, ул Демьяна Бедного' === $test_opening_query( 'Новосибирская область', 'Новосибирск', 'ул Демьяна Бедного' ), 'Opening query example with address must use visible checkout values.' );
-dadata_suggestions_assert( 'Новосибирская область, Новосибирск, ' === $test_opening_query( 'Новосибирская область', 'Новосибирск', '' ), 'Opening query example with empty address must keep trailing comma.' );
-dadata_suggestions_assert( 'Новосибирская область, Новосибирск, ул Демьяна Бедного' === $test_opening_query( 'Новосибирская область', 'Новосибирск - Новосибирская область', 'ул Демьяна Бедного' ), 'Opening query cleanup must strip city display suffix if it appears.' );
-
+$canonical = array( 'country_code' => 'RU', 'selected_location_id' => '1', 'selected_location_fias_id' => 'city-fias' );
+$result = $run_inline( $canonical );
+dadata_suggestions_assert( 1 === count( $inline_client->calls ) && 'address_inline' === $inline_client->calls[0]['stage'], 'Inline lookup makes one city-scoped request without loose retries.' );
+dadata_suggestions_assert( 2 === count( $result['items'] ) && 'ул Ленина' === $result['items'][0]['input_value'] && false === $result['items'][0]['is_final'], 'Street DTO excludes city and foreign-city results.' );
+dadata_suggestions_assert( 'ул Ленина, д 10' === $result['items'][1]['input_value'] && true === $result['items'][1]['is_final'], 'House DTO is final and excludes city.' );
+foreach ( array( array( 'selected_source' => 'manual' ), array( 'country_code' => 'KZ' ), array( 'selected_location_id' => '99' ), array( 'selected_location_fias_id' => 'wrong-city' ), array( 'selected_location_id' => '', 'selected_location_fias_id' => '' ) ) as $override ) {
+	$run_inline( array_merge( $canonical, $override ) );
+}
+$run_inline( $canonical, 'invalid' );
+dadata_suggestions_assert( 1 === count( $inline_client->calls ), 'Manual, non-RU, missing/invalid canonical identity and nonce make no DaData call.' );
+$db->locations[0]['active'] = 0;
+$run_inline( $canonical );
+dadata_suggestions_assert( 1 === count( $inline_client->calls ), 'Inactive DB location makes no DaData call.' );
+$db->locations[0]['active'] = 1;
+$inline_client->extra = 12;
+$limited = $run_inline( $canonical );
+dadata_suggestions_assert( 8 === count( $limited['items'] ), 'Public response caps excessive provider results at eight.' );
+$inline_body = $client->body( 'address_inline', 'Ленина', array( 'location_fias_id' => 'city-fias' ) );
+$land_only = $normalizer->normalize( array( 'data' => array( 'street_with_type' => 'ул Ленина', 'fias_level' => '75', 'stead' => '10' ) ) );
+dadata_suggestions_assert( false === $land_only['is_final'], 'Land metadata without a house must not finalize a street-only input.' );
+dadata_suggestions_assert( 8 === $inline_body['count'] && true === $inline_body['restrict_value'] && 'city-fias' === $inline_body['locations'][0]['fias_id'] && 'street' === $inline_body['from_bound']['value'] && 'house' === $inline_body['to_bound']['value'], 'Production DaData request is bounded and constrained street-to-house.' );
 $css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-suggestions.css' );
-foreach ( array( '.wdc-address-picker-overlay', '.wdc-address-picker-panel', '.wdc-address-picker-search', '.wdc-address-picker-results', '.wdc-address-picker-item', '.wdc-address-picker-empty', '.wdc-address-picker-hint', '.wdc-address-picker-selected', '.wdc-address-picker-house-finalize', 'max-width: 1300px', 'column-count: 2', '@media (max-width: 900px)', 'column-count: 1' ) as $needle ) {
-	dadata_suggestions_assert( str_contains( $css, $needle ), 'Frontend suggestions CSS must contain ' . $needle . '.' );
-}
+dadata_suggestions_assert( ! str_contains( $js . $css, 'wdc-address-picker' ), 'Old checkout address modal is removed.' );
+dadata_suggestions_assert( str_contains( $js, 'address_inline' ) && str_contains( $css, '.wdc-address-autocomplete' ), 'Checkout uses city-scoped inline autocomplete.' );
 
 $registrar = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
 dadata_suggestions_assert( str_contains( $registrar, 'wdc-platform-address-suggestions' ), 'ShippingMethodRegistrar must enqueue address suggestions assets.' );
@@ -489,8 +455,6 @@ dadata_suggestions_assert( str_contains( $registrar, 'address_suggestions_config
 dadata_suggestions_assert( str_contains( $registrar, "'nonce'" ), 'Address suggestions config must include nonce.' );
 dadata_suggestions_assert( str_contains( $registrar, "'min_chars'" ), 'Address suggestions config must include min_chars.' );
 dadata_suggestions_assert( str_contains( $registrar, "'strings'" ), 'Address suggestions config must include strings.' );
-dadata_suggestions_assert( str_contains( $registrar, "'stages'" ), 'Address suggestions config must include stages.' );
-dadata_suggestions_assert( str_contains( $registrar, "'actions'" ), 'Address suggestions config must include actions.' );
 dadata_suggestions_assert( str_contains( $registrar, "'selection_action'" ), 'Address suggestions config must include selection_action.' );
 dadata_suggestions_assert( str_contains( $registrar, "'suggestions_requested'" ), 'Address suggestions config must include suggestions_requested.' );
 dadata_suggestions_assert( str_contains( $registrar, "'tokens_ready'" ), 'Address suggestions config must include tokens_ready.' );

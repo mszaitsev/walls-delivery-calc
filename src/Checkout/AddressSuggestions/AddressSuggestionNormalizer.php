@@ -44,11 +44,15 @@ final class AddressSuggestionNormalizer {
 			'id'                => sha1( (string) ( $suggestion['unrestricted_value'] ?? $label ) . '|' . $index ),
 			'label'             => $label,
 			'subLabel'          => $this->sub_label( $data ),
+			'display_label'     => $label,
+			'secondary_label'   => $this->sub_label( $data ),
+			'input_value'       => $lower_address,
 			'value'             => (string) ( $suggestion['value'] ?? $label ),
 			'unrestrictedValue' => (string) ( $suggestion['unrestricted_value'] ?? $label ),
 			'level'             => $level,
 			'fiasLevel'         => $fias_level,
 			'isDeliverable'     => $this->is_deliverable( $data, $fias_level ),
+			'is_final'          => $this->is_final_level( $level ) && ( 'house' !== $level || '' !== trim( (string) ( $data['house'] ?? '' ) ) ),
 			'data'              => $this->data( $data ),
 		);
 	}
@@ -113,6 +117,10 @@ final class AddressSuggestionNormalizer {
 		$has_lower_level = '' !== (string) ( $data['flat'] ?? '' ) || '' !== (string) ( $data['room'] ?? '' ) || '' !== (string) ( $data['room_number'] ?? '' ) || '' !== (string) ( $data['premise'] ?? '' );
 
 		return ( $has_house && $has_street ) || $has_lower_level || in_array( $fias_level, array( '8', '9', '75' ), true );
+	}
+
+	private function is_final_level( string $level ): bool {
+		return in_array( $level, array( 'house', 'flat', 'room', 'premise' ), true );
 	}
 
 	/**

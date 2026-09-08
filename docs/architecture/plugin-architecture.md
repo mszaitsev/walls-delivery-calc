@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.155.12
+Version: 0.155.13
+
+0.155.13 replaces the checkout address modal with an inline autocomplete attached to `billing_address_1`. It is enabled only for a canonical RU WDC location with a FIAS identity; manual, unresolved and non-RU destinations keep a plain editable address. `AddressSuggestionAjax` verifies the checkout nonce and active DB location, then uses the dedicated `address_inline` DaData request with a fixed city boundary (street through house, maximum 8 results). It never retries without that boundary. Suggestions cannot change city, region, postcode or WDC location metadata. Manual address text is always allowed.
 
 0.155.12 adds `CheckoutFieldConfigurator` as the Woo checkout-field owner registered from the existing runtime gate in `Plugin.php`. It keeps billing field order/labels/required defaults server-side through Woo address, billing, and checkout field filters, while `checkout-address-fields.js` handles only immediate `billing_address_1` courier required-marker UX from rendered WDC rate metadata. Courier classification reuses `CourierRateSupport` and `DeliveryType::COURIER`; no carrier-key list is introduced. Existing `CheckoutValidation` remains the server-side guard for empty billing address when a courier rate is selected on the current project checkout.
 

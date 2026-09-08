@@ -160,6 +160,15 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 			return $body;
 		}
 
+		if ( 'address_inline' === $stage ) {
+			$body['count'] = 8;
+			$body['locations'] = array( array( 'country_iso_code' => 'RU', 'fias_id' => (string) ( $context['location_fias_id'] ?? '' ) ) );
+			$body['restrict_value'] = true;
+			$body['from_bound'] = array( 'value' => 'street' );
+			$body['to_bound'] = array( 'value' => 'house' );
+			return $body;
+		}
+
 		if ( 'address' === $stage ) {
 			$location = array( 'country_iso_code' => (string) ( $context['country_code'] ?? 'RU' ) );
 			foreach ( array( 'location_fias_id', 'location_kladr_id', 'location_city_fias_id', 'location_city_kladr_id' ) as $key ) {
