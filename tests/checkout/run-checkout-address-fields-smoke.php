@@ -176,6 +176,10 @@ function address_fields_composed_checkout_fields(): array {
 }
 
 $configured = address_fields_composed_checkout_fields();
+$configurator = new CheckoutFieldConfigurator();
+$persisted_phone_visibility = 'optional';
+address_fields_smoke_assert( 'required' === $configurator->force_checkout_phone_field_visibility(), 'WDC runtime must force Woo checkout phone visibility to required without changing the persisted optional setting.' );
+address_fields_smoke_assert( 'optional' === $persisted_phone_visibility, 'Phone visibility smoke must keep the simulated persisted Woo setting unchanged.' );
 $billing_order = array_keys( $configured['billing'] );
 usort(
 	$billing_order,
@@ -206,8 +210,7 @@ $render_phone = ( new CheckoutFieldConfigurator() )->configure_form_field_args(
 	),
 	'billing_phone'
 );
-address_fields_smoke_assert( true === $render_phone['required'], 'Late form-field args must keep billing phone visually required.' );
-address_fields_smoke_assert( CheckoutFieldConfigurator::PHONE_PLACEHOLDER === $render_phone['placeholder'], 'Late form-field args must keep billing phone placeholder.' );
+address_fields_smoke_assert( false === $render_phone['required'] && '' === $render_phone['placeholder'], 'Late form-field args must not carry the old phone-specific workaround; Woo phone visibility and billing fields own phone requiredness.' );
 
 $render_address = ( new CheckoutFieldConfigurator() )->configure_form_field_args(
 	array(

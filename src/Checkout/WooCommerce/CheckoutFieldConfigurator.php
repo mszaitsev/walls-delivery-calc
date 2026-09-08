@@ -12,10 +12,15 @@ final class CheckoutFieldConfigurator {
 	public const ORDER_COMMENTS_PLACEHOLDER = "Пишем, если заказ в подарок;\nотправить заказы вместе;\nзаберёт другой человек и т.д.";
 
 	public function register(): void {
+		add_filter( 'pre_option_woocommerce_checkout_phone_field', array( $this, 'force_checkout_phone_field_visibility' ), 20, 3 );
 		add_filter( 'woocommerce_default_address_fields', array( $this, 'configure_default_address_fields' ), 20, 1 );
 		add_filter( 'woocommerce_billing_fields', array( $this, 'configure_billing_fields' ), 20, 1 );
 		add_filter( 'woocommerce_checkout_fields', array( $this, 'configure_checkout_fields' ), 100, 1 );
 		add_filter( 'woocommerce_form_field_args', array( $this, 'configure_form_field_args' ), 100, 2 );
+	}
+
+	public function force_checkout_phone_field_visibility(): string {
+		return 'required';
 	}
 
 	/**
@@ -95,11 +100,6 @@ final class CheckoutFieldConfigurator {
 			$args['placeholder'] = __( self::ADDRESS_PLACEHOLDER, 'walls-delivery-calc' );
 			$args['required'] = false;
 		}
-		if ( 'billing_phone' === $key ) {
-			$args['required'] = true;
-			$args['placeholder'] = __( self::PHONE_PLACEHOLDER, 'walls-delivery-calc' );
-		}
-
 		return $args;
 	}
 

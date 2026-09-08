@@ -766,6 +766,7 @@ runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_review_ord
 foreach ( array( 'woocommerce_default_address_fields', 'woocommerce_billing_fields', 'woocommerce_checkout_fields', 'woocommerce_form_field_args' ) as $checkout_field_filter ) {
 	runtime_smoke_assert( runtime_smoke_has_filter_callback( $checkout_field_filter, \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must register ' . $checkout_field_filter . ' in the full checkout runtime.' );
 }
+runtime_smoke_assert( runtime_smoke_has_filter_callback( 'pre_option_woocommerce_checkout_phone_field', \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must force Woo phone visibility only in the full checkout runtime.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_checkout_order_processed', \WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime::class ), 'Checkout address runtime must clear transient destination state when an order is processed.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_thankyou', \WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime::class ), 'Checkout address runtime must repeat transient destination cleanup at the thank-you lifecycle boundary.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must register when platform runtime is enabled.' );
@@ -789,6 +790,7 @@ runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'
 foreach ( array( 'woocommerce_default_address_fields', 'woocommerce_billing_fields', 'woocommerce_checkout_fields', 'woocommerce_form_field_args' ) as $checkout_field_filter ) {
 	runtime_smoke_assert( ! runtime_smoke_has_filter_callback( $checkout_field_filter, \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must not register ' . $checkout_field_filter . ' when platform runtime is disabled.' );
 }
+runtime_smoke_assert( ! runtime_smoke_has_filter_callback( 'pre_option_woocommerce_checkout_phone_field', \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must not force Woo phone visibility when platform runtime is disabled.' );
 runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController::class ), 'Checkout pickup REST routes must not register when platform runtime is disabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\PickupPointsRestController::class ), 'Carrier pickup/admin preparation REST routes must remain registered when platform runtime is disabled.' );
