@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.11
+Version: 0.155.12
+
+0.155.12 adds a checkout-field presentation layer inside the WDC checkout runtime. It uses `woocommerce_checkout_fields` to order billing destination fields as first name, last name, country, city, state, postcode, address, phone, and email; relabels first name to `Имя и отчество`; gives address line 1 the courier-only guidance label; removes billing/shipping address line 2; makes phone required; and replaces the order comments placeholder with the approved multiline "Здесь пишем:" text. Address line 1 is optional until the selected WDC rate exposes courier delivery metadata, then frontend UX marks the active billing/shipping address field required and server validation blocks empty courier addresses.
 
 0.155.11 updates checkout city/region selection for locally supported destination countries sourced from `LocationCountryIndexService::countries()` and exposed as `supported_location_countries`. The checkout resolver now uses a PHP profile matcher that normalizes settlement and region text separately, strips only controlled administrative type aliases, avoids fuzzy matching, and resolves legacy Woo customer data only when exactly one canonical `Location` matches. Supported-country unresolved or ambiguous profiles are cleared from the checkout fields and hidden WDC metadata; unsupported countries keep normal Woo behavior. Canonical database selections lock the region field while preserving POST submission, while manual fallback is offered only after a successful empty search, stores `wdc_platform_location_selected_source=manual`, clears canonical IDs/postcode, unlocks region entry, and requires manual city plus region during checkout validation. Manual trust survives normal checkout refreshes and reloads only through the current WooCommerce session and is cleared after successful order processing.
 

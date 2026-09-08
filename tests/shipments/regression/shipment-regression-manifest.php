@@ -111,6 +111,7 @@ return array(
 	'core.shop-processing-days' => array( 'path' => 'tests/checkout/run-shop-processing-days-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.checkout' => array( 'path' => 'tests/checkout/run-checkout-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.checkout-delivery-messages' => array( 'path' => 'tests/checkout/run-checkout-delivery-messages-smoke.php', 'groups' => array( 'status-core' ) ),
+	'core.checkout-address-fields' => array( 'path' => 'tests/checkout/run-checkout-address-fields-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.checkout-selection' => array( 'path' => 'tests/checkout/run-checkout-selection-smoke.php', 'groups' => array( 'checkout-selection', 'status-core' ) ),
 	'core.woocommerce-checkout' => array( 'path' => 'tests/checkout/run-woocommerce-checkout-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.checkout-location-picker' => array( 'path' => 'tests/checkout/run-checkout-location-picker-smoke.php', 'groups' => array( 'status-core' ) ),

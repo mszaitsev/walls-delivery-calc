@@ -48,7 +48,10 @@ final class CheckoutRateRenderer {
 			$classes[] = 'wdc-platform-rate-meta--fallback';
 		}
 
-		echo '<div class="' . esc_attr( implode( ' ', $classes ) ) . '">';
+		$delivery_kind = CourierRateSupport::delivery_kind_from_meta( $meta );
+		$requires_courier_address = CourierRateSupport::is_courier_meta( $meta ) ? '1' : '0';
+
+		echo '<div class="' . esc_attr( implode( ' ', $classes ) ) . '" data-wdc-delivery-type="' . esc_attr( $delivery_kind ) . '" data-wdc-requires-courier-address="' . esc_attr( $requires_courier_address ) . '">';
 
 		$this->render_tariff_selector( $meta );
 		$this->render_pickup_selector( $meta, $method );

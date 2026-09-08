@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.155.11
+Version: 0.155.12
+
+0.155.12 adds `CheckoutFieldConfigurator` as the Woo checkout-field owner registered from the existing runtime gate in `Plugin.php`. It keeps field order/labels/required defaults server-side through Woo field priorities, while `checkout-address-fields.js` handles only immediate courier required-marker UX from rendered WDC rate metadata. Courier classification reuses `CourierRateSupport` and `DeliveryType::COURIER`; no carrier-key list is introduced. Existing `CheckoutValidation` remains the server-side guard for empty active billing/shipping address when a courier rate is selected.
 
 0.155.11 keeps checkout city/region reconciliation inside the existing checkout/location boundaries. `CheckoutLocationProfileMatcher` is a small constructor-injected PHP matcher over `LocationRepository`; `CheckoutLocationAjax::handle_resolve()` uses it for initial supported-country profile reconciliation while the frontend remains responsible only for picker state, manual fallback UX, and region lock presentation. The matcher never calls Woo globals and never fuzzy-matches: it requires exact country plus normalized settlement and, when supplied, normalized region, with exactly one canonical `Location`. `CheckoutLocationSearch` remains the picker search owner: region groups keep coarse relevance buckets first and sort alphabetically by rendered region label inside each bucket. `CheckoutAddressRuntime` treats explicit manual checkout POST or a matching session-backed manual city fingerprint as manual city context rather than re-resolving it as a canonical database city, and clears that transient trust after successful order processing.
 
