@@ -91,6 +91,10 @@ final class SettingsAdminPage {
 							</td>
 						</tr>
 						<tr>
+							<th scope="row"><label for="wdc_checkout_sort_selector_enabled"><?php echo esc_html__( 'Показывать ли сортировку на чекауте', 'walls-delivery-calc' ); ?></label></th>
+							<td><label><input id="wdc_checkout_sort_selector_enabled" type="checkbox" name="checkout_sort_selector_enabled" value="1" <?php checked( ! empty( $values['checkout_sort_selector_enabled'] ) ); ?>> <?php echo esc_html__( 'Покупатель может переключать сортировку между ценой и сроком. Если отключено, используется режим, выбранный выше.', 'walls-delivery-calc' ); ?></label></td>
+						</tr>
+						<tr>
 							<th scope="row"><?php echo esc_html__( 'Показывать отладочный блок checkout администраторам', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="show_checkout_debug_panel" value="1" <?php checked( ! empty( $values['show_checkout_debug_panel'] ) ); ?>> <?php echo esc_html__( 'Отладка скрыта по умолчанию.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
@@ -253,6 +257,7 @@ final class SettingsAdminPage {
 		$settings = array(
 			PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => $this->checked_scalar( $data[ PlatformRuntimeSettings::RUNTIME_ENABLED_KEY ] ?? null ),
 			'checkout_sort_mode'           => $sort_mode,
+			'checkout_sort_selector_enabled' => ! empty( $data['checkout_sort_selector_enabled'] ),
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
 			CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY => ! empty( $data[ CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY ] ),
 			CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY => ! empty( $data[ CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY ] ),

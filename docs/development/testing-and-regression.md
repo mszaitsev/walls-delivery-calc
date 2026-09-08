@@ -4,6 +4,8 @@ Version 0.147.8 keeps the PEK shipment smokes in the regression manifest and kee
 
 Version: 0.155.14
 
+The platform setting `checkout_sort_selector_enabled` defaults to true, including upgrades with a missing key. When enabled, customers can use the checkout sorting selector; when disabled, no selector markup is rendered and `checkout_sort_mode` from admin is authoritative, ignoring posted/customer modes. Checkout synchronizes the session to the forced mode so re-enabling starts from the last admin-synchronized value. Actual effective-mode transitions, whether customer-driven or forced by admin, reset tariffs and WDC method choices once; stable-mode refreshes preserve manual tariff/method selections. Runtime/selection smokes cover checkbox persistence, visibility, stale POST/session, forced sorting and re-enabling.
+
 Run `php tests/checkout/run-checkout-rate-sorting-smoke.php` for the price/term matrices, zero-last ties, missing bounds, grouping, stable fallback and final-vs-original regression.
 
 0.155.14 unifies both RateSorter stages on final checkout price and delivery days. "По цене": non-zero price ASC, zero LAST, then min days and max days ASC. "По сроку": min days ASC, max days ASC, then the same non-zero-first price order. Null bounds independently sort after known bounds; title, tariff key, rate ID and input index break exact ties. Rates are sorted within each method first; methods are then compared by their active rate. Grouping is unchanged and JavaScript does not sort rates.

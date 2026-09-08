@@ -1232,6 +1232,20 @@ runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_admin', $G
 
 $settings_page = new SettingsAdminPage( $settings, $runtime_settings );
 $legacy_location_limit_key = 'location' . '_search' . '_limit';
+runtime_smoke_assert( true === $settings->defaults()['checkout_sort_selector_enabled'], 'Missing selector visibility must default to enabled.' );
+$checked_sort = $settings_page->sanitize_settings( array( 'checkout_sort_selector_enabled' => '1' ) );
+$unchecked_sort = $settings_page->sanitize_settings( array() );
+runtime_smoke_assert( true === $checked_sort['checkout_sort_selector_enabled'] && false === $unchecked_sort['checkout_sort_selector_enabled'], 'Checkbox must explicitly sanitize checked and unchecked states.' );
+$saved_sort_settings = $settings->all();
+$settings->replace( array_merge( $saved_sort_settings, $checked_sort ) );
+runtime_smoke_assert( $settings->get_bool( 'checkout_sort_selector_enabled' ), 'Checked selector must persist through merge save flow.' );
+$settings->replace( array_merge( $settings->all(), $unchecked_sort ) );
+runtime_smoke_assert( ! $settings->get_bool( 'checkout_sort_selector_enabled' ), 'Unchecked selector must overwrite saved true through merge.' );
+$settings->set( 'show_checkout_debug_panel', true );
+runtime_smoke_assert( ! $settings->get_bool( 'checkout_sort_selector_enabled' ), 'Updating another setting must preserve disabled selector.' );
+$settings->replace( $saved_sort_settings );
+$settings_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
+runtime_smoke_assert( strpos( $settings_source, 'name="checkout_sort_mode"' ) < strpos( $settings_source, 'name="checkout_sort_selector_enabled"' ) && strpos( $settings_source, 'name="checkout_sort_selector_enabled"' ) < strpos( $settings_source, 'name="show_checkout_debug_panel"' ), 'Selector checkbox must follow sort mode and precede debug control.' );
 runtime_smoke_assert( 0 === $settings->get_int( $legacy_location_limit_key, 0 ), 'SettingsRepository must not default the legacy location limit key.' );
 runtime_smoke_assert( 100 === $settings->get_int( 'checkout_location_search_limit', 0 ), 'SettingsRepository must default checkout_location_search_limit to 100.' );
 $sanitized = $settings_page->sanitize_settings(
@@ -1534,6 +1548,12 @@ ob_start();
 $sort_selector->render();
 $sort_two_output = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $sort_two_output, 'wdc-checkout-sort-row' ) && str_contains( $sort_two_output, 'wdc_platform_checkout_sort_mode' ), 'Sort selector must render only when two or more WDC rates are available.' );
+$settings->set( 'checkout_sort_selector_enabled', false );
+ob_start();
+$sort_selector->render();
+$hidden_sort_output = (string) ob_get_clean();
+runtime_smoke_assert( '' === $hidden_sort_output, 'Disabled selector must emit no markup even with multiple WDC rates.' );
+$settings->set( 'checkout_sort_selector_enabled', true );
 $checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
 runtime_smoke_assert( str_contains( $checkout_sort_js, 'function relocateDeliveryControls()' ) && str_contains( $checkout_sort_js, 'function relocateDeliveryMessages()' ) && str_contains( $checkout_sort_js, 'function relocateSortControl( $messages )' ) && str_contains( $checkout_sort_js, 'prependTo( $shippingCell )' ) && str_contains( $checkout_sort_js, 'insertAfter( $messages )' ) && ! str_contains( $checkout_sort_js, '.clone(' ) && str_contains( $checkout_sort_js, 'updated_checkout' ), 'Checkout sort JS must move delivery messages into the shipping row, place sort after them, and keep the no-message prepend fallback.' );
 $courier_address_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/courier-address-summary.js' );

@@ -56,6 +56,7 @@ final class SettingsRepository {
 			PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
 			'auto_generate_next_year'       => true,
 			'checkout_sort_mode'            => 'cheapest',
+			'checkout_sort_selector_enabled' => true,
 			'show_checkout_debug_panel'     => false,
 			CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY => false,
 			CheckoutDeliveryMessageSettings::INFO_HTML_KEY => CheckoutDeliveryMessageSettings::DEFAULT_INFO_HTML,

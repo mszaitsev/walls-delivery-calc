@@ -790,4 +790,37 @@ $fresh_request_session = new CheckoutSessionManager();
 checkout_selection_assert( ! $fresh_request_session->has_pending_sort_selection_reset(), 'Sort reset signal must be request-local.' );
 checkout_selection_assert( str_contains( $shipping_registrar_source, "add_filter( 'woocommerce_shipping_packages'" ), 'Sort reset must run after Woo has reapplied POST and calculated all packages.' );
 
+$settings->set( 'checkout_sort_selector_enabled', false );
+$settings->set( 'checkout_sort_mode', RateSorter::CHEAPEST );
+$session->save_sort_mode( RateSorter::FASTEST );
+$selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=fastest' );
+checkout_selection_assert( RateSorter::CHEAPEST === $selector->current_sort_mode() && RateSorter::CHEAPEST === $session->selected_sort_mode(), 'Disabled selector must override stale session and POST with admin mode.' );
+checkout_selection_assert( $session->has_pending_sort_selection_reset(), 'Changed effective admin mode must reset selection once.' );
+$registrar->apply_sort_shipping_choices( $packages );
+$session->save_selected_tariff( 'g1', array( 'object_code' => 'C' ) );
+$selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=fastest' );
+checkout_selection_assert( ! $session->has_pending_sort_selection_reset() && 'C' === $session->selected_tariff( 'g1' )['object_code'], 'Stable disabled selector must ignore POST without resetting manual tariffs.' );
+$settings->set( 'checkout_sort_selector_enabled', true );
+checkout_selection_assert( RateSorter::CHEAPEST === $selector->current_sort_mode(), 'Re-enable must use admin-synchronized mode, not historical fastest.' );
+$session->save_sort_mode( RateSorter::FASTEST );
+checkout_selection_assert( RateSorter::FASTEST === $selector->current_sort_mode(), 'Enabled selector must honor session mode over admin default.' );
+$session->save_sort_mode( RateSorter::CHEAPEST );
+$settings->set( 'checkout_sort_selector_enabled', false );
+$settings->set( 'checkout_sort_mode', RateSorter::FASTEST );
+// No POST callback: calculation must also honor forced admin mode.
+$sorted = $rates_for_wc->invoke( $method, $rates );
+checkout_selection_assert( 'g2' === $sorted[0]->rate_id && RateSorter::FASTEST === $session->selected_sort_mode(), 'Hidden selector must sort methods FASTEST and synchronize session at calculation.' );
+foreach ( $sorted as $rate ) {
+	checkout_selection_assert( 'B' === $rate->tariff_key, 'Admin-driven transition must activate first FASTEST tariff in every method.' );
+}
+$fresh = checkout_selection_filter_rates( array( 'g2' => 400, 'g1' => 500 ) );
+WC()->session->set( 'chosen_shipping_methods', array( 0 => 'g1' ) );
+$registrar->apply_sort_shipping_choices( array( 0 => array( 'rates' => $fresh ) ) );
+checkout_selection_assert( 'g2' === WC()->session->get( 'chosen_shipping_methods' )[0], 'Admin transition must select first FASTEST method.' );
+$session->save_selected_tariff( 'g1', array( 'object_code' => 'C' ) );
+WC()->session->set( 'chosen_shipping_methods', array( 0 => 'g1' ) );
+$selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=cheapest' );
+$registrar->apply_sort_shipping_choices( array( 0 => array( 'rates' => $fresh ) ) );
+checkout_selection_assert( ! $session->has_pending_sort_selection_reset() && 'C' === $session->selected_tariff( 'g1' )['object_code'] && 'g1' === WC()->session->get( 'chosen_shipping_methods' )[0], 'Stable forced mode must preserve subsequent manual tariff/method choices.' );
+
 echo "Checkout selection smoke test passed.\n";
