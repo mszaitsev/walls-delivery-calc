@@ -194,14 +194,11 @@ final class CheckoutOrchestrator {
 		if ( 'manual' !== (string) ( $request->customer_context['selected_source'] ?? '' ) && empty( $request->customer_context['is_manual_city'] ) ) {
 			return false;
 		}
-		if ( '' === trim( $request->destination->city ) && '' === trim( $request->destination->settlement ) ) {
-			return false;
-		}
-		if ( '' !== trim( $request->destination->region_name ) || '' !== trim( $request->destination->postcode ) ) {
-			return false;
-		}
+		$city_present = '' !== trim( $request->destination->city ) || '' !== trim( $request->destination->settlement );
+		$region_present = '' !== trim( $request->destination->region_name );
+		$postcode_present = '' !== trim( $request->destination->postcode );
 
-		return true;
+		return ! ( $city_present && $region_present && $postcode_present );
 	}
 
 	/**

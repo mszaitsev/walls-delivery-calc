@@ -134,7 +134,7 @@ function checkout_promo_rule(): Rule {
 	return new Rule( null, 'Demo promo -500', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false );
 }
 
-function checkout_manual_destination_request( bool $complete = false ): QuoteRequest {
+function checkout_manual_destination_request( string $region = '', string $postcode = '' ): QuoteRequest {
 	$total = Money::from_rubles( 1000 );
 	$item  = new PackageItem( 'SKU', 'Item', 1, $total, $total, 1000, 10, 10, 10 );
 
@@ -142,9 +142,9 @@ function checkout_manual_destination_request( bool $complete = false ): QuoteReq
 		'RU',
 		new Address(
 			country_code: 'RU',
-			region_name: $complete ? 'Тестовая область' : '',
+			region_name: $region,
 			city: 'Тестоград',
-			postcode: $complete ? '123456' : '',
+			postcode: $postcode,
 			street: 'Тестовая',
 			house: '1',
 			raw_address: 'Тестовая 1',
@@ -157,7 +157,7 @@ function checkout_manual_destination_request( bool $complete = false ): QuoteReq
 		array(
 			'selected_source' => 'manual',
 			'is_manual_city'  => true,
-			'region_name'     => $complete ? 'Тестовая область' : '',
+			'region_name'     => $region,
 			'city_name'       => 'Тестоград',
 			'place_name'      => 'Тестоград',
 		)
@@ -352,7 +352,7 @@ $fixed_carrier = new CheckoutCountingFixedCarrier();
 $registry = new CarrierRegistry();
 $registry->register( $api_carrier );
 $registry->register( $fixed_carrier );
-$result = checkout_orchestrator( $registry )->calculate( checkout_manual_destination_request( false ) );
+$result = checkout_orchestrator( $registry )->calculate( checkout_manual_destination_request() );
 checkout_smoke_assert( 0 === $api_carrier->calls, 'Incomplete manual destination must not call API carriers before required destination context exists.' );
 checkout_smoke_assert( 1 === $fixed_carrier->calls, 'Incomplete manual destination must still evaluate fixed/local checkout methods.' );
 checkout_smoke_assert( ! $result->fallback_used && 'counting_fixed' === $result->rates[0]->carrier_key, 'Fixed/local method must remain available while incomplete manual destination skips API carriers.' );
@@ -362,9 +362,33 @@ $fixed_carrier = new CheckoutCountingFixedCarrier();
 $registry = new CarrierRegistry();
 $registry->register( $api_carrier );
 $registry->register( $fixed_carrier );
-checkout_orchestrator( $registry )->calculate( checkout_manual_destination_request( true ) );
+checkout_orchestrator( $registry )->calculate( checkout_manual_destination_request( 'Тестовая область', '' ) );
+checkout_smoke_assert( 0 === $api_carrier->calls, 'Manual destination with city and region but no postcode must still skip API carriers.' );
+checkout_smoke_assert( 1 === $fixed_carrier->calls, 'Manual destination with city and region but no postcode must still evaluate fixed/local methods.' );
+
+$api_carrier = new CheckoutCountingApiCarrier();
+$fixed_carrier = new CheckoutCountingFixedCarrier();
+$registry = new CarrierRegistry();
+$registry->register( $api_carrier );
+$registry->register( $fixed_carrier );
+checkout_orchestrator( $registry )->calculate( checkout_manual_destination_request( '', '123456' ) );
+checkout_smoke_assert( 0 === $api_carrier->calls, 'Manual destination with city and postcode but no region must still skip API carriers.' );
+checkout_smoke_assert( 1 === $fixed_carrier->calls, 'Manual destination with city and postcode but no region must still evaluate fixed/local methods.' );
+
+$api_carrier = new CheckoutCountingApiCarrier();
+$fixed_carrier = new CheckoutCountingFixedCarrier();
+$registry = new CarrierRegistry();
+$registry->register( $api_carrier );
+$registry->register( $fixed_carrier );
+checkout_orchestrator( $registry )->calculate( checkout_manual_destination_request( 'Тестовая область', '123456' ) );
 checkout_smoke_assert( 1 === $api_carrier->calls, 'Complete manual destination must not be globally blocked from API carrier calculation.' );
 checkout_smoke_assert( 1 === $fixed_carrier->calls, 'Complete manual destination must still evaluate fixed/local methods.' );
+
+$api_carrier = new CheckoutCountingApiCarrier();
+$registry = new CarrierRegistry();
+$registry->register( $api_carrier );
+checkout_orchestrator( $registry )->calculate( checkout_request() );
+checkout_smoke_assert( 1 === $api_carrier->calls, 'Canonical/non-manual destination must not be blocked by manual incomplete-destination gate.' );
 
 $cache        = new QuoteCache();
 $orchestrator = checkout_orchestrator( null, $cache );

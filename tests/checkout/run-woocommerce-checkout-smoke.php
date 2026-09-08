@@ -704,6 +704,53 @@ $coordinate_db->locations = array(
 );
 $coordinate_repository = new LocationRepository( $coordinate_db );
 $coordinate_location_search = new CheckoutLocationSearch( new LocationSearchService( $coordinate_repository ) );
+$manual_incomplete_session = new CheckoutSessionManager();
+$manual_incomplete_session->save_city_context(
+	array(
+		'source'          => 'manual',
+		'selected_source' => 'manual',
+		'is_manual_city'  => true,
+		'country_code'    => 'RU',
+		'city_name'       => 'Тестоград',
+		'display_name'    => 'Тестоград',
+		'region_name'     => '',
+		'postcode'        => '',
+		'location_id'     => '',
+	)
+);
+$manual_incomplete_package = wc_checkout_smoke_package();
+$manual_incomplete_package['destination']['city'] = 'Тестоград';
+$manual_incomplete_package['destination']['state'] = '';
+$manual_incomplete_package['destination']['postcode'] = '';
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$manual_incomplete_request = ( new WooCommercePackageMapper( null, $manual_incomplete_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $manual_incomplete_package );
+wc_checkout_smoke_assert( 'manual' === (string) ( $manual_incomplete_request->customer_context['selected_source'] ?? '' ) && ! empty( $manual_incomplete_request->customer_context['is_manual_city'] ), 'Package mapper must preserve incomplete manual session source in QuoteRequest customer_context.' );
+wc_checkout_smoke_assert( 'session_manual' === (string) ( $manual_incomplete_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must use explicit session_manual context for incomplete manual city.' );
+wc_checkout_smoke_assert( 'Тестоград' === $manual_incomplete_request->destination->city && '' === $manual_incomplete_request->destination->region_name && '' === $manual_incomplete_request->destination->postcode, 'Package mapper must keep incomplete manual destination fields for quote gating.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not run backend checkout location recovery for manual session context.' );
+$manual_complete_session = new CheckoutSessionManager();
+$manual_complete_session->save_city_context(
+	array(
+		'source'          => 'manual',
+		'selected_source' => 'manual',
+		'is_manual_city'  => true,
+		'country_code'    => 'RU',
+		'city_name'       => 'Тестоград',
+		'display_name'    => 'Тестоград',
+		'region_name'     => 'Тестовая область',
+		'postcode'        => '123456',
+		'location_id'     => '',
+	)
+);
+$manual_complete_package = wc_checkout_smoke_package();
+$manual_complete_package['destination']['city'] = 'Тестоград';
+$manual_complete_package['destination']['state'] = 'Тестовая область';
+$manual_complete_package['destination']['postcode'] = '123456';
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$manual_complete_request = ( new WooCommercePackageMapper( null, $manual_complete_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $manual_complete_package );
+wc_checkout_smoke_assert( 'manual' === (string) ( $manual_complete_request->customer_context['selected_source'] ?? '' ) && ! empty( $manual_complete_request->customer_context['is_manual_city'] ), 'Package mapper must preserve manual source after user completes manual region/postcode.' );
+wc_checkout_smoke_assert( 'Тестовая область' === $manual_complete_request->destination->region_name && '123456' === $manual_complete_request->destination->postcode, 'Package mapper must keep completed manual region/postcode in QuoteRequest destination.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Completed manual session context must also skip backend checkout location recovery.' );
 $coordinate_session = new CheckoutSessionManager();
 $coordinate_session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'latitude' => 54.9833, 'longitude' => 82.8964 ) );
 $coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );

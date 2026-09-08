@@ -108,6 +108,7 @@ final class WooCommercePackageMapper {
 
 		return new Address(
 			country_code: '' !== $country ? $country : 'RU',
+			region_name: (string) ( $destination['state'] ?? '' ),
 			city: trim( (string) ( $destination['city'] ?? '' ) ),
 			postcode: (string) ( $destination['postcode'] ?? '' ),
 			street: (string) ( $destination['address'] ?? $destination['address_1'] ?? '' ),
@@ -479,6 +480,9 @@ final class WooCommercePackageMapper {
 		if ( $city_id > 0 ) {
 			return $this->location_context_result( (string) $city_id, 'frontend', 'resolved', null, $city );
 		}
+		if ( $this->is_manual_location_context( $city ) ) {
+			return $this->location_context_result( '', 'frontend_manual', 'manual', null, $city );
+		}
 		if ( $this->has_textual_location_identity( $city ) ) {
 			return $this->location_context_result( '', 'frontend_textual', 'resolved', null, $city );
 		}
@@ -487,6 +491,9 @@ final class WooCommercePackageMapper {
 		$context_id = $this->positive_location_id( $context['location_id'] ?? $context['id'] ?? '' );
 		if ( $context_id > 0 ) {
 			return $this->location_context_result( (string) $context_id, 'session', 'resolved', null, $context );
+		}
+		if ( $this->is_manual_location_context( $context ) ) {
+			return $this->location_context_result( '', 'session_manual', 'manual', null, $context );
 		}
 		if ( $this->has_textual_location_identity( $context ) ) {
 			return $this->location_context_result( '', 'session_textual', 'resolved', null, $context );
@@ -501,6 +508,17 @@ final class WooCommercePackageMapper {
 		$location = trim( (string) ( $context['place_name'] ?? $context['settlement_name'] ?? $context['city_name'] ?? '' ) );
 
 		return '' !== $region && '' !== $location;
+	}
+
+	/** @param array<string,mixed> $context */
+	private function is_manual_location_context( array $context ): bool {
+		$source = (string) ( $context['selected_source'] ?? $context['source'] ?? '' );
+		if ( 'manual' !== $source && empty( $context['is_manual_city'] ) ) {
+			return false;
+		}
+		$location = trim( (string) ( $context['place_name'] ?? $context['settlement_name'] ?? $context['city_name'] ?? $context['display_name'] ?? '' ) );
+
+		return '' !== $location;
 	}
 
 	/**
