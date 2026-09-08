@@ -125,36 +125,57 @@ function address_fields_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
-function address_fields_fixture(): array {
+function address_fields_default_fixture(): array {
 	return array(
-		'billing' => array(
-			'billing_first_name' => array( 'label' => 'Имя', 'priority' => 10, 'class' => array( 'form-row-first' ) ),
-			'billing_last_name' => array( 'label' => 'Фамилия', 'priority' => 20, 'class' => array( 'form-row-last' ) ),
-			'billing_company' => array( 'label' => 'Company', 'priority' => 30 ),
-			'billing_country' => array( 'label' => 'Страна/регион', 'priority' => 40 ),
-			'billing_address_1' => array( 'label' => 'Street address', 'priority' => 50, 'required' => true ),
-			'billing_address_2' => array( 'label' => 'Apartment', 'priority' => 60 ),
-			'billing_city' => array( 'label' => 'Населённый пункт', 'priority' => 70 ),
-			'billing_state' => array( 'label' => 'Область / район', 'priority' => 80 ),
-			'billing_postcode' => array( 'label' => 'Почтовый индекс', 'priority' => 90 ),
-			'billing_phone' => array( 'label' => 'Телефон', 'priority' => 100, 'required' => false ),
-			'billing_email' => array( 'label' => 'Email', 'priority' => 110, 'required' => true ),
-		),
-		'shipping' => array(
-			'shipping_country' => array( 'label' => 'Страна/регион', 'priority' => 40 ),
-			'shipping_address_1' => array( 'label' => 'Street address', 'priority' => 50, 'required' => true ),
-			'shipping_address_2' => array( 'label' => 'Apartment', 'priority' => 60 ),
-			'shipping_city' => array( 'label' => 'Населённый пункт', 'priority' => 70 ),
-			'shipping_state' => array( 'label' => 'Область / район', 'priority' => 80 ),
-			'shipping_postcode' => array( 'label' => 'Почтовый индекс', 'priority' => 90 ),
-		),
-		'order' => array(
-			'order_comments' => array( 'placeholder' => 'Old placeholder' ),
-		),
+		'country' => array( 'label' => 'Страна/регион', 'priority' => 40 ),
+		'address_1' => array( 'label' => 'Адрес улицы', 'priority' => 50, 'required' => true ),
+		'address_2' => array( 'label' => 'Apartment', 'priority' => 60 ),
+		'city' => array( 'label' => 'Населённый пункт', 'priority' => 70 ),
+		'state' => array( 'label' => 'Область / район', 'priority' => 80 ),
+		'postcode' => array( 'label' => 'Почтовый индекс', 'priority' => 90 ),
 	);
 }
 
-$configured = ( new CheckoutFieldConfigurator() )->configure( address_fields_fixture() );
+/**
+ * @param array<string,array<string,mixed>> $default_fields
+ * @return array<string,array<string,mixed>>
+ */
+function address_fields_prefix_billing_fields( array $default_fields ): array {
+	$billing = array(
+		'billing_first_name' => array( 'label' => 'Имя', 'priority' => 10, 'class' => array( 'form-row-first' ) ),
+		'billing_last_name' => array( 'label' => 'Фамилия', 'priority' => 20, 'class' => array( 'form-row-last' ) ),
+		'billing_company' => array( 'label' => 'Company', 'priority' => 30 ),
+		'billing_phone' => array( 'label' => 'Телефон', 'priority' => 100, 'required' => false ),
+		'billing_email' => array( 'label' => 'Email', 'priority' => 110, 'required' => true ),
+	);
+
+	foreach ( $default_fields as $key => $field ) {
+		$billing[ 'billing_' . $key ] = $field;
+	}
+
+	return $billing;
+}
+
+function address_fields_composed_checkout_fields(): array {
+	$configurator = new CheckoutFieldConfigurator();
+	$default_fields = $configurator->configure_default_address_fields( address_fields_default_fixture() );
+	$billing_fields = $configurator->configure_billing_fields( address_fields_prefix_billing_fields( $default_fields ) );
+
+	return $configurator->configure_checkout_fields(
+		array(
+			'billing' => $billing_fields,
+			'shipping' => array(
+				'shipping_address_1' => array( 'label' => 'Shipping address', 'priority' => 50, 'required' => true ),
+				'shipping_address_2' => array( 'label' => 'Shipping apartment', 'priority' => 60 ),
+			),
+			'order' => array(
+				'order_comments' => array( 'placeholder' => 'Old placeholder' ),
+			),
+		)
+	);
+}
+
+$configured = address_fields_composed_checkout_fields();
 $billing_order = array_keys( $configured['billing'] );
 usort(
 	$billing_order,
@@ -168,12 +189,12 @@ address_fields_smoke_assert( 'Имя и отчество' === $configured['billi
 address_fields_smoke_assert( 'Фамилия' === $configured['billing']['billing_last_name']['label'], 'Last-name label must remain unchanged.' );
 address_fields_smoke_assert( CheckoutFieldConfigurator::ADDRESS_LABEL === $configured['billing']['billing_address_1']['label'], 'Billing address label must match the exact UX copy.' );
 address_fields_smoke_assert( false === $configured['billing']['billing_address_1']['required'], 'Billing address must be optional by default.' );
-address_fields_smoke_assert( false === $configured['shipping']['shipping_address_1']['required'], 'Shipping address must be optional by default.' );
-address_fields_smoke_assert( ! isset( $configured['billing']['billing_address_2'], $configured['shipping']['shipping_address_2'] ), 'Address line 2 must be removed from checkout fields.' );
+address_fields_smoke_assert( 60 === $configured['billing']['billing_postcode']['priority'] && 70 === $configured['billing']['billing_address_1']['priority'], 'Billing postcode must render before address after the actual Woo field pipeline.' );
+address_fields_smoke_assert( ! isset( $configured['billing']['billing_address_2'] ), 'Billing address line 2 must be removed from checkout fields.' );
 address_fields_smoke_assert( true === $configured['billing']['billing_phone']['required'], 'Billing phone must be required.' );
 address_fields_smoke_assert( true === $configured['billing']['billing_email']['required'], 'Email required semantics must remain unchanged.' );
 address_fields_smoke_assert( CheckoutFieldConfigurator::ORDER_COMMENTS_PLACEHOLDER === $configured['order']['order_comments']['placeholder'], 'Order comments placeholder must match the exact multiline copy.' );
-address_fields_smoke_assert( str_contains( $configured['order']['order_comments']['placeholder'], "\n\n- если нужно" ), 'Order comments placeholder must preserve line breaks.' );
+address_fields_smoke_assert( str_contains( $configured['order']['order_comments']['placeholder'], "\nотправить заказы вместе;\n" ), 'Order comments placeholder must preserve exact line breaks without bullets or blank lines.' );
 
 $session = new CheckoutSessionManager();
 $session->save_rates(
@@ -236,29 +257,13 @@ $errors = new WdcAddressFieldsSmokeErrors();
 	$validator->validate(
 	array(
 		'shipping_method' => array( 'wdc_platform_delivery:demo:courier' ),
-		'ship_to_different_address' => '1',
 		'shipping_city' => 'Москва',
 		'billing_address_1' => '',
-		'shipping_city' => 'Москва',
-		'shipping_address_1' => '',
-	),
-	$errors
-);
-address_fields_smoke_assert( isset( $errors->errors['wdc_courier_address_required'] ), 'Courier with active shipping destination must require shipping_address_1.' );
-
-$errors = new WdcAddressFieldsSmokeErrors();
-	$validator->validate(
-	array(
-		'shipping_method' => array( 'wdc_platform_delivery:demo:courier' ),
-		'ship_to_different_address' => '1',
-		'shipping_city' => 'Москва',
-		'billing_address_1' => '',
-		'shipping_city' => 'Москва',
 		'shipping_address_1' => 'Тверская, 1',
 	),
 	$errors
 );
-address_fields_smoke_assert( array() === $errors->errors, 'Courier with active shipping destination must not require billing_address_1.' );
+address_fields_smoke_assert( isset( $errors->errors['wdc_courier_address_required'] ), 'Current billing-only checkout contract must require billing_address_1 for courier even when stale shipping address data is present.' );
 
 $rate = new DeliveryRate(
 	'demo:courier',

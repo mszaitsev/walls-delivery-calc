@@ -9,6 +9,9 @@ const source = fs.readFileSync(path.join(root, 'assets', 'frontend', 'checkout-a
 assert(!source.includes('cdek'));
 assert(!source.includes('yandex'));
 assert(!source.includes('russian_post'));
+assert(!source.includes('shipping_address_1'));
+assert(!source.includes('ship_to_different_address'));
+assert(!source.includes('ship-to-different-address'));
 assert(source.includes('data-wdc-delivery-type'));
 assert(source.includes('data-wdc-requires-courier-address'));
 
@@ -46,10 +49,6 @@ function createHarness() {
   const billingLabel = new Element('label', { parent: billingWrap, attrs: { for: 'billing_address_1' } });
   const billingOptional = new Element('span', { parent: billingLabel, className: 'optional' });
   const billing = new Element('input', { id: 'billing_address_1', name: 'billing_address_1', parent: billingWrap });
-  const shippingWrap = new Element('p', { id: 'shipping_address_1_field', parent: body });
-  const shippingLabel = new Element('label', { parent: shippingWrap, attrs: { for: 'shipping_address_1' } });
-  const shipping = new Element('input', { id: 'shipping_address_1', name: 'shipping_address_1', parent: shippingWrap });
-  const shipToDifferent = new Element('input', { id: 'ship-to-different-address-checkbox', name: 'ship_to_different_address', type: 'checkbox', parent: body });
   const pickupLi = new Element('li', { parent: body });
   const pickupInput = new Element('input', { name: 'shipping_method[0]', type: 'radio', checked: true, parent: pickupLi });
   new Element('div', { parent: pickupLi, className: 'wdc-platform-rate-meta', attrs: { 'data-wdc-delivery-type': 'pickup', 'data-wdc-requires-courier-address': '0' } });
@@ -86,9 +85,6 @@ function createHarness() {
     }
     if (selector === 'select[name^="shipping_method"]') {
       return element.tag === 'select' && element.name.startsWith('shipping_method');
-    }
-    if (selector === '#ship-to-different-address-checkbox' || selector === 'input[name="ship_to_different_address"]') {
-      return element.id === 'ship-to-different-address-checkbox' || element.name === 'ship_to_different_address';
     }
     const labelMatch = selector.match(/^label\[for="([^"]+)"\]$/);
     if (labelMatch) {
@@ -198,7 +194,7 @@ function createHarness() {
   vm.createContext(context);
   vm.runInContext(source, context);
 
-  return { context, billing, billingWrap, billingLabel, billingOptional, shipping, shippingWrap, shipToDifferent, pickupInput, courierInput };
+  return { context, billing, billingWrap, billingLabel, billingOptional, pickupInput, courierInput };
 }
 
 const harness = createHarness();
@@ -217,16 +213,10 @@ assert(harness.billingWrap.classes.has('validate-required'), 'courier must use W
 assert(harness.billingLabel.children.some((child) => child.classes.has('required')), 'courier must show a Woo-style required marker.');
 assert.strictEqual(harness.billingOptional.hidden, true, 'courier must hide the optional marker.');
 
-harness.shipToDifferent.checked = true;
-update();
-assert.strictEqual(harness.billing.props.required, false, 'shipping destination must clear billing required marker.');
-assert.strictEqual(harness.shipping.props.required, true, 'shipping destination must require shipping address for courier.');
-assert(harness.shippingWrap.classes.has('validate-required'), 'shipping destination must mark shipping wrapper required.');
-
 harness.courierInput.checked = false;
 harness.pickupInput.checked = true;
 update();
-assert.strictEqual(harness.shipping.props.required, false, 'switching back to pickup must make shipping address optional.');
-assert(!harness.shippingWrap.classes.has('validate-required'), 'switching back to pickup must clear wrapper required class.');
+assert.strictEqual(harness.billing.props.required, false, 'switching back to pickup must make billing address optional.');
+assert(!harness.billingWrap.classes.has('validate-required'), 'switching back to pickup must clear wrapper required class.');
 
 console.log('Checkout address fields JS smoke passed.');

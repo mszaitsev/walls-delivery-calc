@@ -2,16 +2,6 @@
 	'use strict';
 
 	var namespace = '.wdcAddressFields';
-	var addressSelector = '#billing_address_1, #shipping_address_1';
-
-	function activeAddressField() {
-		var $shipping = $( '#shipping_address_1' );
-		var $billing = $( '#billing_address_1' );
-		var $shipToDifferent = $( '#ship-to-different-address-checkbox, input[name="ship_to_different_address"]' ).first();
-		var shippingActive = $shipping.length && ( $shipToDifferent.is( ':checked' ) || ( !$billing.length && $shipping.length ) );
-
-		return shippingActive ? $shipping.first() : $billing.first();
-	}
 
 	function selectedShippingMethod() {
 		var $checked = $( 'input[name^="shipping_method"]:checked' ).first();
@@ -89,17 +79,12 @@
 
 	function updateAddressRequiredState() {
 		var required = selectedMethodRequiresCourierAddress();
-		var $active = activeAddressField();
-
-		$( addressSelector ).each( function () {
-			setFieldRequired( $( this ), false );
-		} );
-		setFieldRequired( $active, required );
+		setFieldRequired( $( '#billing_address_1' ).first(), required );
 	}
 
 	function bind() {
-		$( document.body ).off( 'change' + namespace, 'input[name^="shipping_method"], select[name^="shipping_method"], #ship-to-different-address-checkbox, input[name="ship_to_different_address"]' );
-		$( document.body ).on( 'change' + namespace, 'input[name^="shipping_method"], select[name^="shipping_method"], #ship-to-different-address-checkbox, input[name="ship_to_different_address"]', updateAddressRequiredState );
+		$( document.body ).off( 'change' + namespace, 'input[name^="shipping_method"], select[name^="shipping_method"]' );
+		$( document.body ).on( 'change' + namespace, 'input[name^="shipping_method"], select[name^="shipping_method"]', updateAddressRequiredState );
 		$( document.body ).off( 'updated_checkout' + namespace );
 		$( document.body ).on( 'updated_checkout' + namespace, updateAddressRequiredState );
 		updateAddressRequiredState();
