@@ -567,6 +567,17 @@ function runtime_smoke_has_action_callback( string $hook, string $class ): bool 
 	return false;
 }
 
+function runtime_smoke_has_filter_callback( string $hook, string $class ): bool {
+	foreach ( $GLOBALS['wdc_test_filters'][ $hook ] ?? array() as $entry ) {
+		$callback = $entry[0] ?? null;
+		if ( is_array( $callback ) && is_object( $callback[0] ?? null ) && $callback[0] instanceof $class ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 function runtime_smoke_environment(): PluginEnvironment {
 	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.13' );
 }
@@ -752,6 +763,10 @@ runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_nopriv_' . Ch
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_after_shipping_rate'] ), 'Checkout rate renderer hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_review_order_before_shipping'] ), 'Address renderer hook must register when platform runtime is enabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must register in the full checkout runtime.' );
+foreach ( array( 'woocommerce_default_address_fields', 'woocommerce_billing_fields', 'woocommerce_checkout_fields', 'woocommerce_form_field_args' ) as $checkout_field_filter ) {
+	runtime_smoke_assert( runtime_smoke_has_filter_callback( $checkout_field_filter, \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must register ' . $checkout_field_filter . ' in the full checkout runtime.' );
+}
+runtime_smoke_assert( runtime_smoke_has_filter_callback( 'pre_option_woocommerce_checkout_phone_field', \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must force Woo phone visibility only in the full checkout runtime.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_checkout_order_processed', \WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime::class ), 'Checkout address runtime must clear transient destination state when an order is processed.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_thankyou', \WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime::class ), 'Checkout address runtime must repeat transient destination cleanup at the thank-you lifecycle boundary.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must register when platform runtime is enabled.' );
@@ -772,6 +787,10 @@ runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_filters']['woocommerce_shippin
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutLocationAjax::ACTION] ), 'Checkout location AJAX must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_select_domestic_tariff'] ), 'Checkout tariff selector AJAX must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend checkout assets must not register when platform runtime is disabled.' );
+foreach ( array( 'woocommerce_default_address_fields', 'woocommerce_billing_fields', 'woocommerce_checkout_fields', 'woocommerce_form_field_args' ) as $checkout_field_filter ) {
+	runtime_smoke_assert( ! runtime_smoke_has_filter_callback( $checkout_field_filter, \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must not register ' . $checkout_field_filter . ' when platform runtime is disabled.' );
+}
+runtime_smoke_assert( ! runtime_smoke_has_filter_callback( 'pre_option_woocommerce_checkout_phone_field', \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must not force Woo phone visibility when platform runtime is disabled.' );
 runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must not register when platform runtime is disabled.' );
 runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController::class ), 'Checkout pickup REST routes must not register when platform runtime is disabled.' );
 runtime_smoke_assert( runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\PickupPointsRestController::class ), 'Carrier pickup/admin preparation REST routes must remain registered when platform runtime is disabled.' );
@@ -952,6 +971,7 @@ $registrar->enqueue_assets();
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must not enqueue.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must not enqueue when DaData suggestions are disabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must enqueue when DaData suggestions are disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-checkout-address-fields'] ), 'Checkout address fields script must enqueue for courier required UX.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-courier-address-summary'] ), 'Courier address summary script must enqueue for checkout.' );
 
 $GLOBALS['wdc_test_scripts'] = array();

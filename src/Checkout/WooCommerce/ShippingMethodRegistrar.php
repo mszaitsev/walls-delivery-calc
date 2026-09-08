@@ -202,6 +202,13 @@ final class ShippingMethodRegistrar {
 				true
 			);
 			wp_enqueue_script(
+				'wdc-platform-checkout-address-fields',
+				$this->environment->plugin_url() . 'assets/frontend/checkout-address-fields.js',
+				$city_selector_dependencies,
+				$this->environment->version(),
+				true
+			);
+			wp_enqueue_script(
 				'wdc-platform-courier-address-summary',
 				$this->environment->plugin_url() . 'assets/frontend/courier-address-summary.js',
 				array( 'jquery' ),

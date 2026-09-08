@@ -49,6 +49,7 @@ C:.
 |   |   |   .gitkeep
 |   |   |   checkout-address-suggestions.css
 |   |   |   checkout-address-suggestions.js
+|   |   |   checkout-address-fields.js
 |   |   |   checkout-city-selector.css
 |   |   |   checkout-city-selector.js
 |   |   |   checkout-rates.css
@@ -619,6 +620,7 @@ C:.
 |   |           CheckoutDebugPanel.php
 |   |           CheckoutDeliveryMessages.php
 |   |           CheckoutDeliveryTypeSelector.php
+|   |           CheckoutFieldConfigurator.php
 |   |           CheckoutLocationFingerprint.php
 |   |           CheckoutRateRenderer.php
 |   |           CheckoutSessionManager.php
@@ -1094,6 +1096,8 @@ C:.
     |       run-cdek-tariffs-sync-smoke.php
     |
     +---checkout
+    |       run-checkout-address-fields-smoke.js
+    |       run-checkout-address-fields-smoke.php
     |       run-checkout-city-selector-smoke.js
     |       run-checkout-delivery-messages-smoke.php
     |       run-checkout-location-picker-smoke.php

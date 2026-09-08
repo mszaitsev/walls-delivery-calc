@@ -87,7 +87,11 @@ function createHarness(initial) {
   }
 
   addField('billing_country', 'billing_country', initial.billing_country || 'RU', { tag: 'select' });
-  addField('billing_city', 'billing_city', initial.billing_city || '');
+  const billingCityWrap = addElement('p', { id: 'billing_city_field', className: initial.cityInvalid ? 'woocommerce-invalid woocommerce-invalid-required-field' : '', parent: form, visible: true });
+  const billingCity = addField('billing_city', 'billing_city', initial.billing_city || '', { parent: billingCityWrap, className: initial.cityInvalid ? 'woocommerce-invalid woocommerce-invalid-required-field' : '' });
+  if (initial.cityInvalid) {
+    billingCity['aria-invalid'] = 'true';
+  }
   addField('billing_state', 'billing_state', initial.billing_state || '');
   addField('billing_postcode', 'billing_postcode', initial.billing_postcode || '');
   if (initial.includeShipping) {
@@ -181,13 +185,19 @@ function createHarness(initial) {
       return this;
     }
 
-    closest(selector) {
-      if ('form.checkout' !== selector) {
+      closest(selector) {
+        if ('form.checkout' !== selector) {
+          return new Wrapper([]);
+        }
+        let element = this.items[0] || null;
+        while (element) {
+          if (element === form) {
+            return new Wrapper([form]);
+          }
+          element = element.parent || null;
+        }
         return new Wrapper([]);
       }
-      const element = this.items[0];
-      return new Wrapper(element && element.parent ? [element.parent] : []);
-    }
 
     find(selector) {
       const found = [];
@@ -415,9 +425,12 @@ function createHarness(initial) {
       const field = (byName.get(name) || [])[0];
       return field ? field.value : '';
     },
-    element(name) {
-      return (byName.get(name) || [])[0] || null;
-    },
+      element(name) {
+        return (byName.get(name) || [])[0] || null;
+      },
+      elementById(id) {
+        return byId.get(id) || null;
+      },
     updates() {
       return updateCheckoutEvents.length;
     },
@@ -532,6 +545,7 @@ const sakhaPayload = {
     billing_city: 'Якутск',
     billing_state: 'Саха /Якутия/ республика',
     billing_postcode: '',
+    cityInvalid: true,
     ajaxResponses: [{
       success: true,
       data: {
@@ -550,6 +564,10 @@ const sakhaPayload = {
   assert.strictEqual(harness.hidden('wdc_platform_location_fias_id'), 'fias-yakutsk', 'successful auto resolve must set canonical hidden metadata.');
   assert(harness.noticeText().includes('Выбран: респ Саха (Якутия), г Якутск, 677000'), 'successful auto resolve must show selected status text.');
   assert(harness.noticeClasses().includes('is-selected'), 'selected status must use is-selected class.');
+  assert(!harness.element('billing_city').classes.has('woocommerce-invalid'), 'successful canonical resolve must clear previous Woo invalid city class.');
+  assert(!harness.elementById('billing_city_field').classes.has('woocommerce-invalid-required-field'), 'successful canonical resolve must clear previous Woo invalid city wrapper class.');
+  assert.strictEqual(harness.element('billing_city')['aria-invalid'], undefined, 'successful canonical resolve must remove city aria-invalid.');
+  assert(harness.elementById('billing_city_field').classes.has('woocommerce-validated'), 'successful canonical resolve must mark city wrapper validated.');
   assert.strictEqual(harness.updates(), 1, 'successful auto resolve must trigger exactly one checkout recalculation after all fields are set.');
   assert.strictEqual(harness.ajaxRequests().length, 1, 'successful auto resolve must use one resolve request.');
   harness.context.window.__wdcCitySelectorTest.afterCheckoutUpdated();
@@ -563,6 +581,7 @@ const sakhaPayload = {
     billing_city: 'Непонятный город',
     billing_state: 'Старая область',
     billing_postcode: '630000',
+    cityInvalid: true,
     ajaxResponses: [{
       success: true,
       data: {
@@ -575,18 +594,20 @@ const sakhaPayload = {
   assert.strictEqual(harness.field('billing_city'), '', 'unresolved initial profile must clear city.');
   assert(harness.noticeText().includes('Просим проверить название и внести верный населенный пункт'), 'unresolved initial profile must keep existing invalid notice text.');
   assert(harness.noticeClasses().includes('is-invalid'), 'unresolved initial profile must use invalid status class.');
+  assert(harness.elementById('billing_city_field').classes.has('woocommerce-invalid'), 'unresolved initial profile must keep Woo invalid city wrapper styling.');
 }
 
 {
-  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: '', billing_postcode: '630000' });
+  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: '', billing_postcode: '630000', cityInvalid: true });
   harness.context.window.__wdcCitySelectorTest.applyManualFallbackCity('Ручной город');
   harness.runTimers();
   assert.strictEqual(harness.field('billing_city'), '', 'manual fallback must be unavailable before a successful empty search state.');
   assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), '', 'manual source must not be set outside empty state.');
+  assert(harness.elementById('billing_city_field').classes.has('woocommerce-invalid'), 'modal open or typing without committed selection must keep Woo invalid city styling.');
 }
 
 {
-  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: 'Старая область', billing_postcode: '630000' });
+  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: 'Старая область', billing_postcode: '630000', cityInvalid: true });
   harness.context.window.__wdcCitySelectorTest.setPickerState('empty');
   harness.context.window.__wdcCitySelectorTest.applyManualFallbackCity('Ручной город');
   harness.runTimers();
@@ -599,6 +620,8 @@ const sakhaPayload = {
   assert(!harness.element('billing_state').classes.has('wdc-location-state-locked'), 'manual fallback must unlock region editing.');
   assert(harness.noticeText().includes('Указан неизвестный населенный пункт. Доставка может не рассчитаться'), 'manual fallback must show red unknown-settlement warning.');
   assert(harness.noticeClasses().includes('is-manual-warning'), 'manual fallback status must use is-manual-warning class.');
+  assert(!harness.elementById('billing_city_field').classes.has('woocommerce-invalid'), 'manual fallback commit must clear previous Woo invalid city wrapper class.');
+  assert.strictEqual(harness.element('billing_city')['aria-invalid'], undefined, 'manual fallback commit must remove city aria-invalid.');
   harness.context.window.__wdcCitySelectorTest.afterCheckoutUpdated();
   harness.runTimers();
   assert.strictEqual(harness.field('billing_city'), 'Ручной город', 'manual fallback city must survive updated_checkout reinitialization.');
@@ -727,6 +750,7 @@ assert(source.includes('function renderCityStatus') && source.includes('wdc-city
 assert(source.includes('Проверяем...') && source.includes('is-checking'), 'auto resolve must expose checking status.');
 assert(source.includes('Указан неизвестный населенный пункт. Доставка может не рассчитаться') && source.includes('is-manual-warning'), 'manual fallback must expose warning status.');
 assert(source.includes('setFieldValueSilently') && source.includes('triggerCheckoutUpdate'), 'canonical location apply must batch field writes before a single checkout update.');
+assert(source.includes('clearCityValidationErrorState') && source.includes('woocommerce-invalid-required-field') && source.includes('aria-invalid'), 'successful city commit must clear previous Woo invalid field styling.');
 assert(source.includes('visibleFieldsMatchCanonicalLocation') && source.includes('hasCompleteVisibleCanonicalSelection'), 'canonical identity shortcut must verify visible city/state/postcode before skipping field repair.');
 assert(source.includes('hasManualLocationSelection') && source.includes('manual_city_context'), 'manual selection must survive updated_checkout and session-backed reload without DB re-resolve.');
 assert(css.includes('.wdc-city-selector-selected.is-checking') && css.includes('.wdc-city-selector-selected.is-selected') && css.includes('.wdc-city-selector-selected.is-manual-warning'), 'city status CSS must define checking/selected/manual states.');

@@ -180,6 +180,24 @@
 		}
 	}
 
+	function clearCityValidationErrorState() {
+		var $field = cityField();
+		if ( !$field.length ) {
+			return;
+		}
+		var id = String( $field.attr( 'id' ) || '' );
+		var $wrapper = id ? $( '#' + id + '_field' ) : $field.closest( '.form-row' );
+		$field
+			.removeClass( 'woocommerce-invalid woocommerce-invalid-required-field' )
+			.removeAttr( 'aria-invalid' );
+		if ( $wrapper.length ) {
+			$wrapper
+				.removeClass( 'woocommerce-invalid woocommerce-invalid-required-field' )
+				.addClass( 'woocommerce-validated' )
+				.removeAttr( 'aria-invalid' );
+		}
+	}
+
 	function triggerCheckoutUpdate() {
 		$( document.body ).trigger( 'update_checkout' );
 	}
@@ -274,6 +292,7 @@
 				renderCityStatus( 'invalid', text );
 				return;
 			}
+			clearCityValidationErrorState();
 			if ( 'manual' === hiddenValue( 'wdc_platform_location_selected_source' ) ) {
 				renderCityStatus( 'manual-warning', 'Указан неизвестный населенный пункт. Доставка может не рассчитаться' );
 				return;

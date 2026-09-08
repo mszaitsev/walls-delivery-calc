@@ -250,6 +250,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutCartTotalsResolver;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryMessages;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutLocationFingerprint;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
@@ -923,6 +924,7 @@ final class Plugin {
 		$this->container->register( CheckoutDeliveryMessageSettings::class, fn(): CheckoutDeliveryMessageSettings => new CheckoutDeliveryMessageSettings( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( CheckoutCartTotalsResolver::class, fn(): CheckoutCartTotalsResolver => new CheckoutCartTotalsResolver() );
 		$this->container->register( CheckoutDeliveryMessages::class, fn(): CheckoutDeliveryMessages => new CheckoutDeliveryMessages( $this->container->get( CheckoutDeliveryMessageSettings::class ), $this->container->get( CheckoutCartTotalsResolver::class ) ) );
+		$this->container->register( CheckoutFieldConfigurator::class, fn(): CheckoutFieldConfigurator => new CheckoutFieldConfigurator() );
 		$this->container->register(
 			CheckoutDeliveryTypeSelector::class,
 			fn(): CheckoutDeliveryTypeSelector => new CheckoutDeliveryTypeSelector(
@@ -1244,6 +1246,7 @@ final class Plugin {
 		add_action( 'rest_api_init', array( $this->container->get( CheckoutPickupPointRestController::class ), 'register' ) );
 		$this->container->get( CheckoutRateRenderer::class )->register();
 		$this->container->get( CheckoutDeliveryMessages::class )->register();
+		$this->container->get( CheckoutFieldConfigurator::class )->register();
 		$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
 		$this->container->get( CheckoutSortSelector::class )->register();
 		$this->container->get( CheckoutAddressRuntime::class )->register();
