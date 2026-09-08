@@ -9,6 +9,8 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutLocationProfileMatcher {
+	private const CANDIDATE_LIMIT = 50;
+
 	/** @var array<int,string> */
 	private const SETTLEMENT_TYPE_TOKENS = array(
 		'г',
@@ -60,8 +62,13 @@ final class CheckoutLocationProfileMatcher {
 			return array( 'status' => 'not_found', 'location' => null );
 		}
 
+		$candidates = $this->locations->find_active_profile_match_candidates( $country_code, $city, self::CANDIDATE_LIMIT );
+		if ( count( $candidates ) > self::CANDIDATE_LIMIT ) {
+			return array( 'status' => 'ambiguous', 'location' => null );
+		}
+
 		$matches = array();
-		foreach ( $this->country_locations( $country_code ) as $location ) {
+		foreach ( $candidates as $location ) {
 			if ( ! $location->active || $country_code !== $this->country_code( $location->country_code ) ) {
 				continue;
 			}
@@ -88,25 +95,6 @@ final class CheckoutLocationProfileMatcher {
 
 	public static function normalize_region_name( string $value ): string {
 		return self::normalize_name( $value, self::REGION_TYPE_TOKENS );
-	}
-
-	/**
-	 * @return array<int,Location>
-	 */
-	private function country_locations( string $country_code ): array {
-		$locations = array();
-		$after_id = 0;
-		do {
-			$batch = $this->locations->find_batch_after_id( $after_id, 1000, $country_code, false );
-			foreach ( $batch as $location ) {
-				if ( null !== $location->id && $location->id > $after_id ) {
-					$after_id = $location->id;
-				}
-				$locations[] = $location;
-			}
-		} while ( count( $batch ) >= 1000 );
-
-		return $locations;
 	}
 
 	/**

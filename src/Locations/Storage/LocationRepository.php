@@ -379,6 +379,74 @@ final class LocationRepository {
 	}
 
 	/**
+	 * @return array<int,Location>
+	 */
+	public function find_active_profile_match_candidates( string $country_code, string $city_name, int $limit = 50 ): array {
+		$country_code = $this->normalize_country_code( $country_code );
+		$name = $this->normalize_profile_candidate_name( $city_name );
+		$limit = max( 1, min( 200, $limit ) );
+		if ( '' === $country_code || '' === $name ) {
+			return array();
+		}
+
+		if ( property_exists( $this->wpdb, 'location_profile_candidate_lookup_calls' ) ) {
+			++$this->wpdb->location_profile_candidate_lookup_calls;
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$matches = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) || $country_code !== $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) ) ) {
+					continue;
+				}
+				foreach ( array( 'place_name', 'settlement_name', 'city_name' ) as $column ) {
+					if ( $name === $this->normalize_profile_candidate_name( (string) ( $row[ $column ] ?? '' ) ) ) {
+						$matches[ (int) ( $row['id'] ?? count( $matches ) + 1 ) ] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+						break;
+					}
+				}
+				if ( count( $matches ) > $limit ) {
+					break;
+				}
+			}
+
+			return array_values( $matches );
+		}
+
+		$this->wpdb->last_error = '';
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1
+				  AND l.country_code = %s
+				  AND (
+					REPLACE(LOWER(l.place_name), 'ё', 'е') = %s
+					OR REPLACE(LOWER(l.settlement_name), 'ё', 'е') = %s
+					OR REPLACE(LOWER(l.city_name), 'ё', 'е') = %s
+				  )
+				ORDER BY l.id ASC
+				LIMIT %d",
+				$country_code,
+				$name,
+				$name,
+				$name,
+				$limit + 1
+			),
+			ARRAY_A
+		);
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$this->throw_sql_error( 'Active location profile candidate lookup failed' );
+		}
+		if ( ! is_array( $rows ) ) {
+			throw new RuntimeException( 'Active location profile candidate lookup failed: invalid SQL result' );
+		}
+
+		return $this->rows_to_locations( $rows );
+	}
+
+	/**
 	 * @param array<int,array{source_city:string,normalized_region:string,source_place_type:string,country_code:string}> $requests
 	 * @return array<string,PlaceRegionMatchResult>
 	 */
@@ -2431,6 +2499,10 @@ final class LocationRepository {
 	 * @return array<int,Location>
 	 */
 	public function find_batch_after_id( int $after_id, int $limit, string $country_code = 'RU', bool $require_display_name = true ): array {
+		if ( property_exists( $this->wpdb, 'location_find_batch_after_id_calls' ) ) {
+			++$this->wpdb->location_find_batch_after_id_calls;
+		}
+
 		$after_id = max( 0, $after_id );
 		$limit = max( 1, min( 1000, $limit ) );
 		$country_code = strtoupper( trim( $country_code ) );
@@ -2993,6 +3065,14 @@ final class LocationRepository {
 
 	private function normalize_query( string $query ): string {
 		return Location::normalize_search_text( $query );
+	}
+
+	private function normalize_profile_candidate_name( string $value ): string {
+		$value = strtr( trim( $value ), array( 'Ё' => 'Е', 'ё' => 'е' ) );
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+
+		return trim( $value );
 	}
 
 	private function normalize_foreign_identity_value( string $value ): string {

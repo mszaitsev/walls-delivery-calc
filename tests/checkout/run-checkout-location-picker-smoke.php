@@ -33,6 +33,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = '';
 		public int $insert_id = 0;
+		public int $location_profile_candidate_lookup_calls = 0;
+		public int $location_find_batch_after_id_calls = 0;
 		/** @var array<int,array<string,mixed>> */
 		public array $locations = array();
 		/** @var array<string,array<string,mixed>> */
@@ -356,6 +358,8 @@ checkout_location_picker_assert( ! str_ends_with( $notice_without_postcode, ', '
 $resolved = $search->resolve_checkout_fields( 'Новосибирская обл.', 'г. Новосибирск' );
 checkout_location_picker_assert( 'resolved' === $resolved['status'] && $resolved['location'] instanceof Location, 'Auto-resolve returns selected payload for unambiguous state/city.' );
 checkout_location_picker_assert( 'resolved' !== $search->resolve_checkout_fields( 'Алтайский край', '' )['status'], 'Auto-resolve does not select a location for unclear input.' );
+$wpdb->location_profile_candidate_lookup_calls = 0;
+$wpdb->location_find_batch_after_id_calls = 0;
 $profile_nsk = $profile_matcher->match( 'RU', 'Новосибирск', 'Новосибирская область' );
 checkout_location_picker_assert( 'resolved' === $profile_nsk['status'] && $profile_nsk['location'] instanceof Location && 'fias-nsk' === $profile_nsk['location']->fias_id, 'Profile matcher confidently reconciles legacy Новосибирск + Новосибирская область.' );
 $repository->save( checkout_location_picker_location( array( 'gar_object_id' => 920001, 'fias_id' => 'fias-yakutsk', 'region_code' => '14', 'region_name' => 'Саха (Якутия)', 'region_type' => 'респ', 'city_name' => 'Якутск', 'city_type' => 'г', 'place_name' => 'Якутск', 'place_type' => 'г', 'display_name' => 'респ Саха (Якутия), г Якутск' ) ) );
@@ -364,6 +368,34 @@ checkout_location_picker_assert( 'resolved' === $profile_sakha['status'] && $pro
 checkout_location_picker_assert( 'ambiguous' === $profile_matcher->match( 'RU', 'Ивановка', '' )['status'], 'Profile matcher rejects same-city ambiguity when region is absent.' );
 checkout_location_picker_assert( 'not_found' === $profile_matcher->match( 'RU', 'Новосибирск', 'Алтайский край' )['status'], 'Profile matcher rejects region mismatch.' );
 checkout_location_picker_assert( 'not_found' === $profile_matcher->match( 'RU', 'Новосибрск', 'Новосибирская область' )['status'], 'Profile matcher does not use fuzzy matching for typos.' );
+checkout_location_picker_assert( 5 === $wpdb->location_profile_candidate_lookup_calls, 'Profile matcher uses one bounded candidate lookup per supported-country reconciliation.' );
+checkout_location_picker_assert( 0 === $wpdb->location_find_batch_after_id_calls, 'Profile matcher does not use paginated full-country location scans.' );
+
+$limit_db = new wpdb();
+$limit_repository = new LocationRepository( $limit_db );
+for ( $i = 1; $i <= 51; ++$i ) {
+	$region_code = 'LT-' . str_pad( (string) $i, 2, '0', STR_PAD_LEFT );
+	$region_name = 'Лимитная ' . str_pad( (string) $i, 2, '0', STR_PAD_LEFT );
+	$limit_db->regions[ $region_code ] = array( 'region_name' => $region_name, 'region_type' => 'обл' );
+	$limit_repository->save(
+		checkout_location_picker_location(
+			array(
+				'gar_object_id' => 930000 + $i,
+				'fias_id' => 'fias-limit-profile-' . $i,
+				'region_code' => $region_code,
+				'region_name' => $region_name,
+				'region_type' => 'обл',
+				'place_name' => 'Лимитск',
+				'place_type' => 'село',
+				'display_name' => $region_name . ' обл., село Лимитск',
+			)
+		)
+	);
+}
+$limit_matcher = new CheckoutLocationProfileMatcher( $limit_repository );
+checkout_location_picker_assert( 'ambiguous' === $limit_matcher->match( 'RU', 'Лимитск', '' )['status'], 'Profile matcher treats truncated candidate sets as ambiguous instead of resolving the first candidate.' );
+checkout_location_picker_assert( 1 === $limit_db->location_profile_candidate_lookup_calls, 'Profile matcher asks repository for one bounded candidate set in truncation scenario.' );
+checkout_location_picker_assert( 0 === $limit_db->location_find_batch_after_id_calls, 'Candidate-limit profile matching does not fall back to country-wide batch scans.' );
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'BY', 'gar_object_id' => 990001, 'fias_id' => 'fias-by-minsk', 'region_code' => 'BY-MI', 'region_name' => 'Минская', 'place_name' => 'Минск', 'display_name' => 'Минск' ) ) );
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'AM', 'gar_object_id' => 990010, 'fias_id' => 'fias-am-yerevan', 'region_code' => 'AM-ER', 'region_name' => 'Ереван', 'place_name' => 'Ереван', 'display_name' => 'Ереван' ) ) );
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'KG', 'gar_object_id' => 990011, 'fias_id' => 'fias-kg-bishkek', 'region_code' => 'KG-GB', 'region_name' => 'Бишкек', 'place_name' => 'Бишкек', 'display_name' => 'Бишкек' ) ) );
