@@ -125,10 +125,28 @@ final class CheckoutValidation {
 
 		$validator = $this->address_validation ?? new CheckoutAddressValidation( $this->session_manager );
 		if ( $validator->has_city( $data ) ) {
+			$this->validate_manual_region( $data, $errors );
 			return;
 		}
 
 		$this->add_city_error( $errors );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function validate_manual_region( array $data, mixed $errors = null ): void {
+		if ( 'manual' !== $this->posted_string( $data, 'wdc_platform_location_selected_source' ) ) {
+			return;
+		}
+		if ( ! $this->local_location_country_supported( $data ) ) {
+			return;
+		}
+		if ( '' !== $this->checkout_state( $data ) ) {
+			return;
+		}
+
+		$this->add_region_error( $errors );
 	}
 
 	/**
@@ -211,6 +229,18 @@ final class CheckoutValidation {
 		}
 	}
 
+	private function add_region_error( mixed $errors = null ): void {
+		$message = __( 'Укажите область / район.', 'walls-delivery-calc' );
+		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
+			$errors->add( 'wdc_region_required', $message );
+			return;
+		}
+
+		if ( function_exists( 'wc_add_notice' ) ) {
+			wc_add_notice( $message, 'error' );
+		}
+	}
+
 	/**
 	 * @param array<string,mixed> $data
 	 */
@@ -231,6 +261,52 @@ final class CheckoutValidation {
 		$field = $use_shipping ? 'shipping_address_1' : 'billing_address_1';
 
 		return $this->posted_string( $data, $field );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function checkout_state( array $data ): string {
+		$use_shipping = '' !== $this->posted_string( $data, 'ship_to_different_address' )
+			|| ( ! array_key_exists( 'billing_state', $data ) && array_key_exists( 'shipping_state', $data ) );
+		$field = $use_shipping ? 'shipping_state' : 'billing_state';
+
+		return trim( $this->posted_string( $data, $field ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function checkout_country_code( array $data ): string {
+		$use_shipping = '' !== $this->posted_string( $data, 'ship_to_different_address' )
+			|| ( ! array_key_exists( 'billing_country', $data ) && array_key_exists( 'shipping_country', $data ) );
+		$field = $use_shipping ? 'shipping_country' : 'billing_country';
+		$country_code = strtoupper( trim( $this->posted_string( $data, $field ) ) );
+
+		return preg_match( '/^[A-Z]{2}$/', $country_code ) ? $country_code : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function local_location_country_supported( array $data ): bool {
+		$country_code = $this->checkout_country_code( $data );
+		if ( '' === $country_code ) {
+			return false;
+		}
+		$index = function_exists( 'get_option' ) ? get_option( 'wdc_location_country_codes', array() ) : array();
+		$countries = is_array( $index['countries'] ?? null ) ? $index['countries'] : ( is_array( $index ) ? $index : array() );
+		$countries = array_values(
+			array_filter(
+				array_map(
+					static fn( mixed $code ): string => strtoupper( trim( (string) $code ) ),
+					$countries
+				),
+				static fn( string $code ): bool => preg_match( '/^[A-Z]{2}$/', $code ) && '' !== $code
+			)
+		);
+
+		return in_array( $country_code, $countries, true );
 	}
 
 	private function add_courier_address_error( mixed $errors = null ): void {

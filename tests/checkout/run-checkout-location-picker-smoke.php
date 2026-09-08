@@ -2,9 +2,11 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationProfileMatcher;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearchParser;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -56,6 +58,12 @@ final class WdcCheckoutLocationPickerOrder {
 	/** @var array<string,mixed> */
 	public array $meta = array();
 	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
+}
+
+final class WdcCheckoutLocationPickerErrors {
+	/** @var array<string,string> */
+	public array $errors = array();
+	public function add( string $code, string $message ): void { $this->errors[ $code ] = $message; }
 }
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
@@ -178,7 +186,8 @@ $settings->set( 'checkout_location_region_limit', 10 );
 $country_index = new LocationCountryIndexService( $repository );
 checkout_location_picker_assert( array( 'RU' ) === $country_index->rebuild(), 'LocationCountryIndex rebuild returns RU for RU-only fixtures.' );
 $search = new CheckoutLocationSearch( new LocationSearchService( $repository ) );
-$ajax = new CheckoutLocationAjax( $search, $settings, $country_index );
+$profile_matcher = new CheckoutLocationProfileMatcher( $repository );
+$ajax = new CheckoutLocationAjax( $search, $settings, $country_index, $profile_matcher );
 $formatter = LocationDisplayNameFormatter::from_rules( get_option( 'wdc_location_type_display_rules', array() ) );
 $parser = new CheckoutLocationSearchParser( get_option( 'wdc_location_type_display_rules', array() ) );
 
@@ -228,14 +237,15 @@ $brod_ids = $flatten_fias( $ajax->payload( 'брод' ) );
 checkout_location_picker_assert( in_array( 'fias-brod', $brod_ids, true ) && in_array( 'fias-brodki', $brod_ids, true ) && in_array( 'fias-brodovka', $brod_ids, true ), 'Prefix search finds Брод, Бродки, and Бродовка.' );
 checkout_location_picker_assert( ! in_array( 'fias-verh', $brod_ids, true ), 'Prefix search does not match inside word Верхобродово.' );
 $brod_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'брод' )['groups'] ?? array() );
-checkout_location_picker_assert( 'Астраханская' === ( $brod_regions[0] ?? '' ), 'Exact city match ranks above exact place match.' );
-checkout_location_picker_assert( array_slice( $brod_regions, 1, 3 ) === array( 'Вологодская', 'Новосибирская', 'Тверская' ), 'Same seniority exact place region groups sort alphabetically.' );
-checkout_location_picker_assert( in_array( 'Новгородская', $brod_regions, true ) && array_search( 'Новгородская', $brod_regions, true ) > 3, 'Non-exact groups appear after exact groups.' );
+$sorted_brod_regions = $brod_regions;
+sort( $sorted_brod_regions, SORT_STRING );
+checkout_location_picker_assert( $sorted_brod_regions === $brod_regions, 'Region groups for Брод sort alphabetically by displayed label without a best-match group first.' );
 $ivan_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'ивановка' )['groups'] ?? array() );
 checkout_location_picker_assert( array_slice( $ivan_regions, 0, 4 ) === array( 'Алтайский', 'Липецкая', 'Московская', 'Тверская' ), 'Same seniority exact Ивановка region groups sort alphabetically.' );
 $prefix_seniority_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'бродог' )['groups'] ?? array() );
-checkout_location_picker_assert( array_slice( $prefix_seniority_regions, 0, 2 ) === array( 'Амурская', 'Тверская' ), 'Same seniority prefix city groups sort alphabetically above prefix place.' );
-checkout_location_picker_assert( array_slice( $prefix_seniority_regions, 2, 2 ) === array( 'Белгородская', 'Воронежская' ), 'Same seniority prefix place groups sort alphabetically.' );
+$sorted_prefix_seniority_regions = $prefix_seniority_regions;
+sort( $sorted_prefix_seniority_regions, SORT_STRING );
+checkout_location_picker_assert( $sorted_prefix_seniority_regions === $prefix_seniority_regions, 'Region groups for Бродог sort alphabetically without seniority buckets.' );
 
 $domodedovo_ids = $flatten_fias( $ajax->payload( 'домодедово' ) );
 checkout_location_picker_assert( in_array( 'fias-domodedovo', $domodedovo_ids, true ) && in_array( 'fias-avdotino', $domodedovo_ids, true ) && in_array( 'fias-skripino', $domodedovo_ids, true ), 'Upper-level city search returns city and nested places.' );
@@ -298,7 +308,17 @@ checkout_location_picker_assert( ! str_ends_with( $notice_without_postcode, ', '
 $resolved = $search->resolve_checkout_fields( 'Новосибирская обл.', 'г. Новосибирск' );
 checkout_location_picker_assert( 'resolved' === $resolved['status'] && $resolved['location'] instanceof Location, 'Auto-resolve returns selected payload for unambiguous state/city.' );
 checkout_location_picker_assert( 'resolved' !== $search->resolve_checkout_fields( 'Алтайский край', '' )['status'], 'Auto-resolve does not select a location for unclear input.' );
+$profile_nsk = $profile_matcher->match( 'RU', 'Новосибирск', 'Новосибирская область' );
+checkout_location_picker_assert( 'resolved' === $profile_nsk['status'] && $profile_nsk['location'] instanceof Location && 'fias-nsk' === $profile_nsk['location']->fias_id, 'Profile matcher confidently reconciles legacy Новосибирск + Новосибирская область.' );
+$repository->save( checkout_location_picker_location( array( 'gar_object_id' => 920001, 'fias_id' => 'fias-yakutsk', 'region_code' => '14', 'region_name' => 'Саха (Якутия)', 'region_type' => 'респ', 'city_name' => 'Якутск', 'city_type' => 'г', 'place_name' => 'Якутск', 'place_type' => 'г', 'display_name' => 'респ Саха (Якутия), г Якутск' ) ) );
+$profile_sakha = $profile_matcher->match( 'RU', 'Якутск', 'Саха /Якутия/ республика' );
+checkout_location_picker_assert( 'resolved' === $profile_sakha['status'] && $profile_sakha['location'] instanceof Location && 'fias-yakutsk' === $profile_sakha['location']->fias_id, 'Profile matcher reconciles Саха /Якутия/ республика to респ Саха (Якутия).' );
+checkout_location_picker_assert( 'ambiguous' === $profile_matcher->match( 'RU', 'Ивановка', '' )['status'], 'Profile matcher rejects same-city ambiguity when region is absent.' );
+checkout_location_picker_assert( 'not_found' === $profile_matcher->match( 'RU', 'Новосибирск', 'Алтайский край' )['status'], 'Profile matcher rejects region mismatch.' );
+checkout_location_picker_assert( 'not_found' === $profile_matcher->match( 'RU', 'Новосибрск', 'Новосибирская область' )['status'], 'Profile matcher does not use fuzzy matching for typos.' );
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'BY', 'gar_object_id' => 990001, 'fias_id' => 'fias-by-minsk', 'region_code' => 'BY-MI', 'region_name' => 'Минская', 'place_name' => 'Минск', 'display_name' => 'Минск' ) ) );
+$repository->save( checkout_location_picker_location( array( 'country_code' => 'AM', 'gar_object_id' => 990010, 'fias_id' => 'fias-am-yerevan', 'region_code' => 'AM-ER', 'region_name' => 'Ереван', 'place_name' => 'Ереван', 'display_name' => 'Ереван' ) ) );
+$repository->save( checkout_location_picker_location( array( 'country_code' => 'KG', 'gar_object_id' => 990011, 'fias_id' => 'fias-kg-bishkek', 'region_code' => 'KG-GB', 'region_name' => 'Бишкек', 'place_name' => 'Бишкек', 'display_name' => 'Бишкек' ) ) );
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990002, 'fias_id' => 'fias-kz-almaty', 'region_code' => 'KZ-ALA', 'region_name' => 'Алматы', 'place_name' => 'Алматы', 'display_name' => 'Алматы' ) ) );
 $wpdb->locations[184506] = array( 'id' => 184506, 'country_code' => 'KZ', 'gar_object_id' => 990003, 'gar_id' => '990003', 'fias_id' => 'fias-kz-atbasar-p', 'region_code' => 'KZ-AKM', 'region_name' => 'Акмолинская', 'region_type' => 'обл', 'city_name' => '', 'city_type' => '', 'settlement_name' => 'Атбасар', 'settlement_type' => 'п', 'place_name' => 'Атбасар', 'place_type' => 'п', 'display_name' => 'Акмолинская обл., п Атбасар', 'searchable_text' => Location::normalize_search_text( 'Акмолинская обл п Атбасар' ), 'active' => 1 );
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990004, 'fias_id' => 'fias-kz-atbasar-g', 'region_code' => 'KZ-AKM', 'region_name' => 'Акмолинская', 'city_name' => 'Атбасар', 'city_type' => 'г', 'place_name' => 'Атбасар', 'place_type' => 'г', 'display_name' => 'Акмолинская обл., г Атбасар' ) ) );
@@ -308,6 +328,11 @@ $repository->save( checkout_location_picker_location( array( 'country_code' => '
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990008, 'fias_id' => 'fias-kz-ivan-p', 'region_code' => 'KZ-IVN', 'region_name' => 'Тестовая', 'place_name' => 'Ивановка', 'settlement_name' => 'Ивановка', 'place_type' => 'п', 'display_name' => 'Тестовая обл., п Ивановка' ) ) );
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990009, 'fias_id' => 'fias-kz-empty-type', 'region_code' => 'KZ-EMP', 'region_name' => 'Пустая', 'place_name' => 'Пустотипск', 'settlement_name' => 'Пустотипск', 'place_type' => '', 'settlement_type' => '', 'display_name' => 'Пустая обл., Пустотипск' ) ) );
 $country_index->rebuild();
+checkout_location_picker_assert( array( 'AM', 'BY', 'KG', 'KZ', 'RU' ) === $country_index->countries(), 'Supported location countries come from the runtime country index.' );
+foreach ( array( 'AM' => array( 'Ереван', 'Ереван', 'fias-am-yerevan' ), 'BY' => array( 'г Минск', 'Минская область', 'fias-by-minsk' ), 'KG' => array( 'Бишкек', 'Бишкек', 'fias-kg-bishkek' ), 'KZ' => array( 'Алматы', 'Алматы', 'fias-kz-almaty' ) ) as $country_code => $case ) {
+	$matched = $profile_matcher->match( $country_code, $case[0], $case[1] );
+	checkout_location_picker_assert( 'resolved' === $matched['status'] && $matched['location'] instanceof Location && $case[2] === $matched['location']->fias_id, 'Profile matcher is country-agnostic for ' . $country_code . '.' );
+}
 checkout_location_picker_assert( 'fias-by-minsk' === ( $ajax->payload( 'Минск', '', 'BY' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'country=BY searches only BY local rows.' );
 checkout_location_picker_assert( array() === ( $ajax->payload( 'Новосибирск', '', 'KZ' )['groups'] ?? array( 'unexpected' ) ), 'country=KZ does not return RU Новосибирск.' );
 checkout_location_picker_assert( 'not_found' === $search->resolve_checkout_fields( 'Новосибирская', 'Новосибирск', 'KZ' )['status'], 'Resolve with country=KZ does not resolve RU locations.' );
@@ -322,6 +347,8 @@ foreach ( array( 'село Ивановка' => 'fias-kz-ivan-s', 'деревн�
 checkout_location_picker_assert( 'ambiguous' === $search->resolve_checkout_fields( '', 'Ивановка', 'KZ' )['status'], 'Untyped same-name Ивановка with multiple non-empty types must remain ambiguous.' );
 $empty_type_resolved = $search->resolve_checkout_fields( '', 'поселок Пустотипск', 'KZ' );
 checkout_location_picker_assert( 'resolved' === $empty_type_resolved['status'] && $empty_type_resolved['location'] instanceof Location && 'fias-kz-empty-type' === $empty_type_resolved['location']->fias_id, 'Explicit type may fallback to a single exact-name location with empty place_type.' );
+$ivanovka_groups = array_map( static fn( array $group ): string => (string) $group['region_label'], $ajax->payload( 'Ивановка', '', 'RU' )['groups'] );
+checkout_location_picker_assert( array_slice( $ivanovka_groups, 0, 3 ) === array( 'Алтайский край', 'Липецкая обл.', 'Московская обл.' ), 'Region groups are alphabetic by displayed region_label without a best-match group first.' );
 
 $city_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
 $city_css = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.css' );
@@ -331,7 +358,7 @@ checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'supported_location_countries' ) && str_contains( $city_js, 'currentCountryCode' ) && str_contains( $city_js, 'localDatabaseAvailable' ), 'Frontend city picker gates modal and auto-resolve by supported country.' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'country_code: currentCountryCode()' ), 'Frontend city picker sends country_code to search and resolve endpoints.' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'applySelectedLocation( location, { updateCheckout: true, explicit: true' ), 'User modal selection must explicitly trigger checkout update.' );
-checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'applySelectedLocation( body.selected, { updateCheckout: false, explicit: false, source: \'auto\', updateFields: false } )' ), 'Auto-resolve does not trigger update_checkout loop.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'applySelectedLocation( body.selected, { updateCheckout: false, explicit: false, source: \'auto\', updateFields: true } )' ), 'Auto-resolve canonicalizes visible city/state fields without triggering an update_checkout loop.' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'hiddenValue( \'wdc_platform_location_id\' ) === String( body.selected.id || \'\' )' ) && str_contains( $city_js, 'hiddenValue( \'wdc_platform_location_fias_id\' ) && hiddenValue( \'wdc_platform_location_fias_id\' ) === String( body.selected.fias_id || \'\' )' ), 'Repeated updated_checkout with same hidden location_id or fias_id does not call applySelectedLocation again.' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'if ( ! hasSelectedLocation() )' ) && str_contains( $city_js, 'scheduleAutoResolve();' ), 'updated_checkout restores notice without auto-resolve when hidden selected location exists.' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'searchRequestSeq' ) && str_contains( $city_js, 'activeSearchSeq' ) && str_contains( $city_js, 'stale ajax response ignored' ), 'City picker JS has stale request guard.' );
@@ -339,14 +366,45 @@ checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js
 checkout_location_picker_assert( is_string( $city_js ) && ! str_contains( $city_js, "keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector', citySelector" ), 'City picker search is not bound to keyup/change of external city field.' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'currentBaseQuery' ) && str_contains( $city_js, "search( current, { force: true, forceRegionCode: forceRegionCode } )" ), 'Show-all region uses base query plus force_region_code.' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'forceRegionCode = \'\';' ) && str_contains( $city_js, 'currentBaseQuery = String( $( this ).val() || \'\' );' ), 'Manual modal input clears forceRegionCode.' );
-checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'wdc-city-picker-use-manual' ) && str_contains( $city_js, 'wdc-city-picker-clear' ), 'City picker renders permanent manual and clear buttons.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'pickerState' ) && str_contains( $city_js, "'empty' === pickerState" ), 'City picker shows manual fallback only after a successful empty search state.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'wdc-city-picker-search-row' ) && str_contains( $city_js, 'aria-label="Стереть введенное название"' ), 'City picker renders the clear control inside the search input row.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'setHidden( \'wdc_platform_location_selected_source\', \'manual\' )' ) && str_contains( $city_js, 'Указан вручную:' ), 'Manual fallback is explicitly marked and displayed as manual.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'lockRegionField' ) && str_contains( $city_js, 'unlockRegionField' ) && str_contains( $city_js, 'wdc-location-state-locked' ), 'City picker locks canonical region fields and unlocks manual fallback.' );
 checkout_location_picker_assert( is_string( $city_js ) && ! str_contains( $city_js, 'wdc-city-picker-fallback' ), 'Old empty-results fallback button class is removed.' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'applyManualFallbackCity( searchInput().val() )' ), 'Manual button calls applyManualFallbackCity.' );
-checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'currentBaseQuery = \'\';' ) && str_contains( $city_js, 'renderMessage( config.strings && config.strings.start' ), 'Clear button resets query state and renders hint.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'currentBaseQuery = \'\';' ) && str_contains( $city_js, 'searchInput().trigger( \'focus\' )' ), 'Clear button resets query state and returns focus to search input.' );
 checkout_location_picker_assert( is_string( $city_css ) && str_contains( $city_css, 'wdc-city-picker-spin' ) && str_contains( $city_css, 'is-loading::before' ), 'City picker CSS contains loading spinner animation.' );
 checkout_location_picker_assert( is_string( $city_js ) && ! str_contains( $city_js, 'Индекс:' ), 'City selected notice no longer contains Индекс label.' );
 checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, "locationSource: 'local_selected'" ), 'DaData address opening query uses selected display_name when fias_id exists.' );
 checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, "regionSource: 'checkout_state'" ), 'DaData address opening query falls back to state/city/address.' );
+
+$validation = new CheckoutValidation( new CheckoutSessionManager() );
+$validate_manual_region = new ReflectionMethod( CheckoutValidation::class, 'validate_manual_region' );
+$validate_manual_region->setAccessible( true );
+$manual_region_errors = new WdcCheckoutLocationPickerErrors();
+$validate_manual_region->invoke(
+	$validation,
+	array(
+		'billing_country' => 'RU',
+		'billing_city' => 'Ручной город',
+		'billing_state' => '',
+		'wdc_platform_location_selected_source' => 'manual',
+	),
+	$manual_region_errors
+);
+checkout_location_picker_assert( isset( $manual_region_errors->errors['wdc_region_required'] ), 'Manual supported-country city fallback requires region validation.' );
+$manual_region_ok = new WdcCheckoutLocationPickerErrors();
+$validate_manual_region->invoke(
+	$validation,
+	array(
+		'billing_country' => 'RU',
+		'billing_city' => 'Ручной город',
+		'billing_state' => 'Тестовая область',
+		'wdc_platform_location_selected_source' => 'manual',
+	),
+	$manual_region_ok
+);
+checkout_location_picker_assert( array() === $manual_region_ok->errors, 'Manual supported-country city fallback passes when region is present.' );
 
 $order = new WdcCheckoutLocationPickerOrder();
 $persister = new OrderShippingMetaPersister( new CheckoutSessionManager(), new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );

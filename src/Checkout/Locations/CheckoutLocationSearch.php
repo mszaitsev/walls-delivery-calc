@@ -638,8 +638,7 @@ final class CheckoutLocationSearch {
 
 		uasort(
 			$by_region,
-			static fn( array $a, array $b ): int => (int) $a['bucket'] <=> (int) $b['bucket']
-				?: (int) $b['matched_hierarchy_rank'] <=> (int) $a['matched_hierarchy_rank']
+			fn( array $a, array $b ): int => $this->compare_region_group_labels( (string) $a['label'], (string) $b['label'] )
 				?: strcmp( (string) $a['sort'], (string) $b['sort'] )
 				?: (int) $b['score'] <=> (int) $a['score']
 		);
@@ -679,6 +678,21 @@ final class CheckoutLocationSearch {
 			'shown_total'    => $shown_total,
 			'has_more_total' => $has_more_total,
 		);
+	}
+
+	private function compare_region_group_labels( string $a, string $b ): int {
+		$left = $this->normalize_region_group_label( $a );
+		$right = $this->normalize_region_group_label( $b );
+
+		return strcmp( $left, $right ) ?: strcmp( $a, $b );
+	}
+
+	private function normalize_region_group_label( string $value ): string {
+		$value = trim( str_replace( array( 'Ё', 'ё' ), array( 'Е', 'е' ), $value ) );
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
+		$value = preg_replace( '/[^\p{L}\p{N}]+/u', ' ', $value );
+
+		return is_string( $value ) ? trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value ) : '';
 	}
 
 	private function formatter(): LocationDisplayNameFormatter {

@@ -19,7 +19,8 @@ final class CheckoutLocationAjax {
 	public function __construct(
 		private CheckoutLocationSearch $search,
 		private SettingsRepository $settings,
-		private ?LocationCountryIndexService $country_index = null
+		private ?LocationCountryIndexService $country_index = null,
+		private ?CheckoutLocationProfileMatcher $profile_matcher = null
 	) {
 	}
 
@@ -71,7 +72,9 @@ final class CheckoutLocationAjax {
 			);
 			return;
 		}
-		$resolved = $this->search->resolve_checkout_fields( $region_text, $city_text, $country_code );
+		$resolved = $this->profile_matcher instanceof CheckoutLocationProfileMatcher
+			? $this->profile_matcher->match( $country_code, $city_text, $region_text )
+			: $this->search->resolve_checkout_fields( $region_text, $city_text, $country_code );
 		$location = $resolved['location'] ?? null;
 		$this->send_success(
 			array(

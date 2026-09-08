@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Checkout\Address;
 
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Checkout\Locations\LocationCoordinateEnricher;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutLocationFingerprint;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
@@ -40,7 +41,14 @@ final class CheckoutAddressRuntime {
 		if ( '' !== $this->session_manager->address_fingerprint() && $fingerprint !== $this->session_manager->address_fingerprint() ) {
 			$this->session_manager->clear_normalized_address();
 			$current_rate_id = $this->selected_shipping_method_from_checkout_data( $checkoutData );
-			if ( $this->posted_destination_conflicts_with_pickup( $context, $this->session_manager->pickup_selection() ) ) {
+			$pickup_selection = $this->session_manager->pickup_selection();
+			if ( $this->posted_destination_conflicts_with_pickup( $context, $pickup_selection ) ) {
+				$this->session_manager->clear_pickup_selection( 'destination_changed' );
+			} elseif ( array() !== $pickup_selection && ! $this->pickup_selection_matches_context( $pickup_selection, $context ) ) {
+				$this->session_manager->clear_pickup_selection( 'destination_changed' );
+			} elseif ( '' === $current_rate_id && array() !== $this->session_manager->pickup_selections() ) {
+				$this->session_manager->clear_pickup_selection( 'destination_changed' );
+			} elseif ( array() !== $pickup_selection && ! $this->pickup_selection_has_destination_fingerprint( $pickup_selection ) ) {
 				$this->session_manager->clear_pickup_selection( 'destination_changed' );
 			} elseif ( $this->should_preserve_pickup_selection_for_rate_switch( $checkoutData, $context, $current_rate_id ) ) {
 				$this->session_manager->update_pickup_selection_rate_id( $this->selected_shipping_method_from_checkout_data( $checkoutData ) );
@@ -63,7 +71,9 @@ final class CheckoutAddressRuntime {
 			return $result;
 		}
 
-		$location = $this->city_resolver->resolve_city( (string) $context['city'], (string) $context['country_code'] );
+		$location = 'manual' === (string) ( $context['selected_source'] ?? '' )
+			? null
+			: $this->city_resolver->resolve_city( (string) $context['city'], (string) $context['country_code'] );
 		if ( $location instanceof Location ) {
 			$location_data = $location->to_array();
 			$location_data = $this->enrich_location_coordinates( $location_data );
@@ -139,6 +149,41 @@ final class CheckoutAddressRuntime {
 		}
 
 		return $this->session_manager->is_same_pickup_family( $old_rate_id, $new_rate_id );
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 * @param array<string,string> $context
+	 */
+	private function pickup_selection_matches_context( array $selection, array $context ): bool {
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$selected = trim( (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' ) );
+		if ( '' === $selected ) {
+			return true;
+		}
+
+		$current = ( new CheckoutLocationFingerprint() )->fingerprint(
+			array(
+				'country_code'   => $context['country_code'] ?? '',
+				'location_id'    => $context['selected_location_id'] ?? '',
+				'fias_id'        => $context['selected_fias_id'] ?? '',
+				'gar_object_id'  => $context['selected_gar_object_id'] ?? '',
+				'city_name'      => $context['selected_place_name'] ?: ( $context['selected_city_name'] ?: ( $context['city'] ?? '' ) ),
+				'region_name'    => $context['selected_region_name'] ?: ( $context['region_name'] ?? '' ),
+				'postcode'       => $context['postcode'] ?? '',
+			)
+		);
+
+		return '' === $current || $current === $selected;
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 */
+	private function pickup_selection_has_destination_fingerprint( array $selection ): bool {
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+
+		return '' !== trim( (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' ) );
 	}
 
 	/**
@@ -262,6 +307,10 @@ final class CheckoutAddressRuntime {
 	 * @return array<string,mixed>
 	 */
 	private function selected_location_from_context( array $context ): array {
+		if ( 'manual' === (string) ( $context['selected_source'] ?? '' ) ) {
+			return array();
+		}
+
 		if ( '' === $context['selected_location_id'] && '' === $context['selected_fias_id'] && '' === $context['selected_gar_id'] && '' === $context['selected_display_name'] ) {
 			return array();
 		}
@@ -359,6 +408,7 @@ final class CheckoutAddressRuntime {
 			'fias_id'         => '',
 			'gar_id'          => '',
 			'source'          => 'manual',
+			'selected_source' => 'manual',
 			'is_manual_city'  => true,
 		);
 	}

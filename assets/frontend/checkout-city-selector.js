@@ -26,6 +26,7 @@
 	var locationSeq = 0;
 	var lastCountryCode = '';
 	var isClearingCountryFields = false;
+	var pickerState = 'idle';
 	var hiddenNames = [
 		'wdc_platform_location_id',
 		'wdc_platform_location_country_code',
@@ -144,6 +145,7 @@
 				closePicker();
 			}
 			clearHidden();
+			unlockRegionField();
 		}
 		return supported;
 	}
@@ -161,6 +163,7 @@
 		locationStore = {};
 		locationSeq = 0;
 		explicitSelection = false;
+		pickerState = 'idle';
 	}
 
 	function clearFieldValueSilently( $field ) {
@@ -183,6 +186,7 @@
 		clearFieldValueSilently( cityField() );
 		clearFieldValueSilently( stateField() );
 		clearFieldValueSilently( postcodeField() );
+		unlockRegionField();
 		document.body.dispatchEvent( new CustomEvent( 'wdc:location-cleared', {
 			detail: {
 				reason: 'country_changed',
@@ -243,6 +247,9 @@
 		clearSelectedNotice();
 		if ( $field.length && label ) {
 			var text = invalid ? label : 'Выбран: ' + label;
+			if ( ! invalid && 'manual' === hiddenValue( 'wdc_platform_location_selected_source' ) ) {
+				text = 'Указан вручную: ' + label;
+			}
 			if ( ! invalid && postcode ) {
 				text += ', ' + postcode;
 			}
@@ -261,6 +268,7 @@
 			selectedDisplay = displayName;
 			renderSelectedNotice( $field, displayName, hiddenValue( 'wdc_platform_location_postcode' ), false );
 		}
+		syncRegionLockState();
 	}
 
 	function checkoutFieldText( $field ) {
@@ -300,10 +308,12 @@
 						'<div class="wdc-city-picker-title">Выберите населенный пункт</div>' +
 						'<button type="button" class="wdc-city-picker-close" aria-label="Закрыть">×</button>' +
 					'</div>' +
-					'<input type="search" class="wdc-city-picker-search" autocomplete="off" placeholder="Начните вводить населенный пункт">' +
+					'<div class="wdc-city-picker-search-row">' +
+						'<input type="search" class="wdc-city-picker-search" autocomplete="off" placeholder="Начните вводить населенный пункт">' +
+						'<button type="button" class="wdc-city-picker-clear" aria-label="Стереть введенное название" hidden disabled>Стереть</button>' +
+					'</div>' +
 					'<div class="wdc-city-picker-actions">' +
-						'<button type="button" class="wdc-city-picker-use-manual" disabled>Использовать введенное название</button>' +
-						'<button type="button" class="wdc-city-picker-clear" disabled>Очистить название</button>' +
+						'<button type="button" class="wdc-city-picker-use-manual" hidden disabled>Использовать введенное название</button>' +
 					'</div>' +
 					'<div class="wdc-city-picker-results" role="listbox"></div>' +
 				'</div>' +
@@ -324,21 +334,27 @@
 
 	function updatePickerActions() {
 		var value = $.trim( String( searchInput().val() || '' ) );
-		picker().find( '.wdc-city-picker-use-manual, .wdc-city-picker-clear' ).prop( 'disabled', '' === value );
+		var manualVisible = 'empty' === pickerState && '' !== value && currentSearchQuery === value;
+		picker().find( '.wdc-city-picker-use-manual' ).prop( 'disabled', ! manualVisible ).prop( 'hidden', ! manualVisible );
+		picker().find( '.wdc-city-picker-clear' ).prop( 'disabled', '' === value ).prop( 'hidden', '' === value );
 	}
 
-	function renderMessage( message, className ) {
+	function setPickerState( state ) {
+		pickerState = state || 'idle';
 		updatePickerActions();
+	}
+
+	function renderMessage( message, className, state ) {
+		setPickerState( state || ( 'is-loading' === className ? 'loading' : ( 'is-error' === className ? 'error' : 'idle' ) ) );
 		resultsBox().html( '<div class="wdc-city-picker-message ' + className + '">' + escapeHtml( message || '' ) + '</div>' );
 	}
 
 	function renderFallbackMessage( message ) {
-		updatePickerActions();
+		setPickerState( 'empty' );
 		resultsBox().html( '<div class="wdc-city-picker-message is-empty">' + escapeHtml( message || '' ) + '</div>' );
 	}
 
 	function renderResults( groups, limitReached, limit ) {
-		updatePickerActions();
 		locationStore = {};
 		locationSeq = 0;
 
@@ -347,6 +363,7 @@
 			renderFallbackMessage( config.strings && config.strings.not_found ? config.strings.not_found : '' );
 			return;
 		}
+		setPickerState( 'results' );
 
 		var html = limitMessage + '<div class="wdc-city-picker-groups">';
 		groups.forEach( function ( group ) {
@@ -384,7 +401,7 @@
 		query = String( query || '' );
 		if ( ! localDatabaseAvailable() ) {
 			clearHidden();
-			renderMessage( '', 'is-hint' );
+			renderMessage( '', 'is-hint', 'idle' );
 			return;
 		}
 		var requestForceRegionCode = undefined !== options.forceRegionCode ? String( options.forceRegionCode || '' ) : forceRegionCode;
@@ -393,7 +410,7 @@
 			return;
 		}
 		if ( query.length < ( config.min_chars || 3 ) && ! requestForceRegionCode && ! isShortSearchAlias( query ) ) {
-			renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
+			renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint', 'idle' );
 			return;
 		}
 		if ( ! options.force && query === lastSearchQuery && requestForceRegionCode === lastSearchForceRegionCode ) {
@@ -408,7 +425,7 @@
 		lastSearchQuery = query;
 		lastSearchForceRegionCode = requestForceRegionCode;
 		debug( 'ajax request start', query );
-		renderMessage( config.strings && config.strings.searching ? config.strings.searching : '', 'is-loading' );
+		renderMessage( config.strings && config.strings.searching ? config.strings.searching : '', 'is-loading', 'loading' );
 
 		$.ajax( {
 			url: config.ajax_url,
@@ -431,7 +448,7 @@
 			var groups = response && response.data && response.data.groups ? response.data.groups : [];
 			if ( response && response.data && false === response.data.local_database_available ) {
 				clearHidden();
-				renderResults( [], false, response.data.limit || config.checkout_location_search_limit || 100 );
+				renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint', 'idle' );
 				return;
 			}
 			debug( 'ajax success groups count', groups.length );
@@ -442,19 +459,24 @@
 				renderResults( groups, !! response.data.limit_reached, response.data.limit || config.checkout_location_search_limit || 100 );
 				return;
 			}
-			renderMessage( config.strings && config.strings.error ? config.strings.error : '', 'is-error' );
+			renderMessage( config.strings && config.strings.error ? config.strings.error : '', 'is-error', 'error' );
 		} ).fail( function ( xhr ) {
 			if ( seq !== activeSearchSeq || query !== currentSearchQuery || requestForceRegionCode !== currentSearchForceRegionCode ) {
 				debug( 'stale ajax failure ignored', { seq: seq, active: activeSearchSeq, query: query, current: currentSearchQuery, forceRegionCode: requestForceRegionCode, currentForceRegionCode: currentSearchForceRegionCode } );
 				return;
 			}
 			debug( 'ajax fail', xhr );
-			renderMessage( config.strings && config.strings.error ? config.strings.error : '', 'is-error' );
+			renderMessage( config.strings && config.strings.error ? config.strings.error : '', 'is-error', 'error' );
 		} );
 	}
 
 	function scheduleSearch( query ) {
 		window.clearTimeout( timer );
+		query = String( query || '' );
+		activeSearchSeq = ++searchRequestSeq;
+		currentSearchQuery = query;
+		currentSearchForceRegionCode = forceRegionCode;
+		setPickerState( '' === $.trim( query ) ? 'idle' : 'typing' );
 		if ( ! localDatabaseAvailable() ) {
 			clearHidden();
 			return;
@@ -466,7 +488,7 @@
 
 		timer = window.setTimeout( function () {
 			if ( query.length < ( config.min_chars || 3 ) && ! isShortSearchAlias( query ) ) {
-				renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
+				renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint', 'idle' );
 				return;
 			}
 
@@ -497,7 +519,7 @@
 		pickerOpen = true;
 		picker().attr( 'aria-hidden', 'false' ).addClass( 'is-open' );
 		searchInput().val( originalCityValue );
-		updatePickerActions();
+		setPickerState( 'idle' );
 		debug( 'city picker opened' );
 
 		window.setTimeout( function () {
@@ -507,7 +529,7 @@
 		if ( originalCityValue.length >= ( config.min_chars || 3 ) || isShortSearchAlias( originalCityValue ) ) {
 			search( originalCityValue, { force: true } );
 		} else {
-			renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
+			renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint', 'idle' );
 		}
 	}
 
@@ -516,6 +538,7 @@
 		activeSearchSeq = ++searchRequestSeq;
 		currentSearchQuery = '';
 		currentSearchForceRegionCode = '';
+		pickerState = 'idle';
 		activeCityField = isUsableField( activeCityField ) ? activeCityField : null;
 		$( '.wdc-city-picker-overlay, .wdc-city-picker-panel, .wdc-city-selector' ).remove();
 		debug( 'city picker closed' );
@@ -531,6 +554,9 @@
 
 	function applyManualFallbackCity( query ) {
 		if ( isSelecting ) {
+			return;
+		}
+		if ( 'empty' !== pickerState ) {
 			return;
 		}
 
@@ -550,13 +576,26 @@
 		explicitSelection = false;
 		clearHidden();
 		setFieldValue( $field, query );
+		clearFieldValueSilently( stateField() );
+		clearFieldValueSilently( postcodeField() );
+		setHidden( 'wdc_platform_location_country_code', currentCountryCode() );
+		setHidden( 'wdc_platform_location_display_name', query );
+		setHidden( 'wdc_platform_location_selected_source', 'manual' );
+		unlockRegionField();
 		selectedDisplay = query;
 		debug( 'fallback city applied' );
 		closePicker();
 		debug( 'picker closed after fallback' );
 		if ( localDatabaseAvailable() ) {
-			renderSelectedNotice( $field, 'Просим проверить название и внести верный населенный пункт', '', true );
+			renderSelectedNotice( $field, query, '', false );
 		}
+		document.body.dispatchEvent( new CustomEvent( 'wdc:location-selected', {
+			detail: {
+				source: 'manual',
+				city_value: query,
+				country_code: currentCountryCode()
+			}
+		} ) );
 		isSelecting = false;
 		window.setTimeout( function () {
 			debug( 'update_checkout triggered after fallback' );
@@ -566,6 +605,57 @@
 			suppressSearch = false;
 			debug( 'suppressSearch disabled by timeout' );
 		}, 1000 );
+	}
+
+	function lockRegionField( $state ) {
+		$state = $state && $state.length ? $state : stateField();
+		if ( ! $state.length ) {
+			return;
+		}
+		$state.addClass( 'wdc-location-state-locked' ).attr( 'aria-readonly', 'true' );
+		if ( $state.is( 'select' ) ) {
+			$state.attr( 'aria-disabled', 'true' ).attr( 'tabindex', '-1' ).data( 'wdcLockedValue', String( $state.val() || '' ) );
+			return;
+		}
+		$state.prop( 'readonly', true );
+	}
+
+	function unlockRegionField() {
+		var $state = stateField();
+		if ( ! $state.length ) {
+			return;
+		}
+		$state.removeClass( 'wdc-location-state-locked' ).removeAttr( 'aria-readonly' ).removeAttr( 'aria-disabled' ).removeAttr( 'tabindex' ).removeData( 'wdcLockedValue' );
+		$state.prop( 'readonly', false );
+	}
+
+	function syncRegionLockState() {
+		if ( ! localDatabaseAvailable() ) {
+			unlockRegionField();
+			return;
+		}
+		if ( 'manual' === hiddenValue( 'wdc_platform_location_selected_source' ) ) {
+			unlockRegionField();
+			return;
+		}
+		if ( hasSelectedLocation() ) {
+			lockRegionField( stateField() );
+			return;
+		}
+		lockRegionField( stateField() );
+	}
+
+	function clearUnresolvedSupportedLocationFields() {
+		if ( ! localDatabaseAvailable() ) {
+			clearHidden();
+			unlockRegionField();
+			return;
+		}
+		clearHidden();
+		clearFieldValueSilently( cityField() );
+		clearFieldValueSilently( stateField() );
+		clearFieldValueSilently( postcodeField() );
+		lockRegionField( stateField() );
 	}
 
 	function setFieldValue( $field, value ) {
@@ -636,11 +726,13 @@
 
 		if ( updateFields ) {
 			setFieldValue( $city, city );
+			clearFieldValueSilently( $postcode );
 			if ( location.postal_code ) {
 				setFieldValue( $postcode, location.postal_code );
 			}
 			setStateField( $state, location );
 		}
+		lockRegionField( $state );
 
 		debug( 'fields after', {
 			city: $city.val(),
@@ -689,6 +781,7 @@
 				place_type: location.place_type || '',
 				state_value: location.state_value || location.region_name || '',
 				city_value: city,
+				source: source,
 				lat: location.lat || location.latitude || '',
 				lng: location.lng || location.longitude || '',
 				country_code: location.country_code || 'RU'
@@ -769,6 +862,7 @@
 			ensureHiddenFields( $form );
 		}
 		if ( ! handleCountryAvailabilityChanged() ) {
+			unlockRegionField();
 			return;
 		}
 		restoreSelectedNotice();
@@ -784,6 +878,7 @@
 		debug( 'suppressSearch disabled after updated_checkout' );
 		if ( localDatabaseAvailable() ) {
 			restoreSelectedNotice();
+			syncRegionLockState();
 		}
 	}
 
@@ -836,6 +931,7 @@
 			var body = response && response.data ? response.data : {};
 			if ( false === body.local_database_available ) {
 				clearHidden();
+				unlockRegionField();
 				return;
 			}
 			if ( response && response.success && 'resolved' === body.status && body.selected ) {
@@ -843,10 +939,10 @@
 					restoreSelectedNotice();
 					return;
 				}
-				applySelectedLocation( body.selected, { updateCheckout: false, explicit: false, source: 'auto', updateFields: false } );
+				applySelectedLocation( body.selected, { updateCheckout: false, explicit: false, source: 'auto', updateFields: true } );
 				return;
 			}
-			clearHidden();
+			clearUnresolvedSupportedLocationFields();
 			showInvalidNotice();
 		} ).fail( function () {
 			clearHidden();
@@ -867,10 +963,22 @@
 		if ( isClearingCountryFields ) {
 			return;
 		}
+		if ( $( this ).hasClass( 'wdc-location-state-locked' ) ) {
+			if ( $( this ).is( 'select' ) ) {
+				$( this ).val( $( this ).data( 'wdcLockedValue' ) || $( this ).val() || '' );
+			}
+			return;
+		}
 		if ( ! isSelecting && ! suppressSearch ) {
 			explicitSelection = false;
 			clearHidden();
 			scheduleAutoResolve();
+		}
+	} );
+	$( document.body ).off( 'mousedown.wdcCitySelector keydown.wdcCitySelector', '#shipping_state.wdc-location-state-locked, select[name="shipping_state"].wdc-location-state-locked, #billing_state.wdc-location-state-locked, select[name="billing_state"].wdc-location-state-locked' );
+	$( document.body ).on( 'mousedown.wdcCitySelector keydown.wdcCitySelector', '#shipping_state.wdc-location-state-locked, select[name="shipping_state"].wdc-location-state-locked, #billing_state.wdc-location-state-locked, select[name="billing_state"].wdc-location-state-locked', function ( event ) {
+		if ( $( this ).is( 'select' ) ) {
+			event.preventDefault();
 		}
 	} );
 	$( document.body ).off( 'change.wdcCitySelector', '#shipping_country, select[name="shipping_country"], input[name="shipping_country"], #billing_country, select[name="billing_country"], input[name="billing_country"], #ship-to-different-address-checkbox, input[name="ship_to_different_address"]' );
@@ -885,7 +993,6 @@
 	$( document.body ).on( 'input.wdcCitySelector', '.wdc-city-picker-search', function () {
 		forceRegionCode = '';
 		currentBaseQuery = String( $( this ).val() || '' );
-		updatePickerActions();
 		scheduleSearch( currentBaseQuery );
 	} );
 	$( document.body ).off( 'mousedown.wdcCitySelector click.wdcCitySelector keydown.wdcCitySelector', '.wdc-city-selector__item' );
@@ -918,7 +1025,7 @@
 		if ( label && current.indexOf( label ) !== 0 ) {
 			searchInput().val( label + ( current ? ', ' + current : ', ' ) );
 		}
-		updatePickerActions();
+		setPickerState( 'typing' );
 		search( current, { force: true, forceRegionCode: forceRegionCode } );
 	} );
 	$( document.body ).off( 'click.wdcCitySelector', '.wdc-city-picker-close' );
@@ -949,9 +1056,12 @@
 		currentBaseQuery = '';
 		lastSearchQuery = '';
 		lastSearchForceRegionCode = '';
+		activeSearchSeq = ++searchRequestSeq;
+		currentSearchQuery = '';
+		currentSearchForceRegionCode = '';
 		searchInput().val( '' );
-		updatePickerActions();
-		renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
+		renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint', 'idle' );
+		searchInput().trigger( 'focus' );
 	} );
 	$( document.body ).off( 'mousedown.wdcCitySelector click.wdcCitySelector', '.wdc-city-picker-panel' );
 	$( document.body ).on( 'mousedown.wdcCitySelector click.wdcCitySelector', '.wdc-city-picker-panel', function ( event ) {

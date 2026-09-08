@@ -82,15 +82,36 @@ function WC(): WdcFiasSmokeWooCommerce {
 	return $wc;
 }
 
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {
+		public string $id = '';
+		public int $instance_id = 0;
+		public string $method_title = '';
+		public string $method_description = '';
+		public string $enabled = 'yes';
+		public string $title = '';
+		/** @var array<int,string> */
+		public array $supports = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $rates = array();
+
+		public function add_rate( array $rate ): void {
+			$this->rates[] = $rate;
+		}
+	}
+}
+
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = '';
 		public int $insert_id = 0;
+		/** @var array<int,array<string,mixed>> */
+		public array $rows = array();
 		/** @var array<string,array<int,array<string,mixed>>> */
 		public array $tables = array();
 		public function prepare( string $query, mixed ...$args ): array { return array( 'query' => $query, 'args' => $args ); }
 		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
-		public function insert( string $table, array $data, array $format ): int { ++$this->insert_id; $data['id'] = $this->insert_id; $this->tables[ $table ][ $this->insert_id ] = $data; return 1; }
+		public function insert( string $table, array $data, array $format ): int { ++$this->insert_id; $data['id'] = $this->insert_id; $this->tables[ $table ][ $this->insert_id ] = $data; if ( 'wdc_locations' === $table ) { $this->rows[ $this->insert_id ] = $data; } return 1; }
 		public function update( string $table, array $data, array $where, array $format, array $where_format ): int { return 1; }
 		public function get_row( array $prepared, string $output ): ?array {
 			$query = $prepared['query']; $value = (string) ( $prepared['args'][0] ?? '' );
@@ -144,7 +165,7 @@ $wpdb = new wpdb();
 $repository = new LocationRepository( $wpdb );
 ( new LocationImportService( $repository ) )->import_from_array(
 	array(
-		array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'postcode' => '630000', 'fias_id' => 'local-fias-nsk', 'gar_id' => 'local-gar-nsk' ),
+		array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'region_code' => '54', 'city_name' => 'Новосибирск', 'postal_code' => '630000', 'fias_id' => 'local-fias-nsk', 'gar_id' => 'local-gar-nsk' ),
 	)
 );
 

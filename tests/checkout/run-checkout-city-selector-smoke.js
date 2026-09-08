@@ -38,6 +38,7 @@ function createHarness(initial) {
       this.textContent = '';
       this.htmlContent = '';
       this.children = [];
+      this.dataStore = {};
     }
   }
 
@@ -126,9 +127,15 @@ function createHarness(initial) {
       return false;
     }
 
-    attr(name) {
+    attr(name, value) {
       const element = this.items[0];
-      return element ? element[name] || '' : '';
+      if (undefined === value) {
+        return element ? element[name] || '' : '';
+      }
+      this.items.forEach((item) => {
+        item[name] = String(value);
+      });
+      return this;
     }
 
     val(value) {
@@ -142,8 +149,23 @@ function createHarness(initial) {
     }
 
     prop(name, value) {
+      if (undefined === value) {
+        const element = this.items[0];
+        return element ? element[name] : undefined;
+      }
       this.items.forEach((element) => {
         element[name] = value;
+      });
+      return this;
+    }
+
+    data(name, value) {
+      const element = this.items[0];
+      if (undefined === value) {
+        return element ? element.dataStore[name] : undefined;
+      }
+      this.items.forEach((item) => {
+        item.dataStore[name] = value;
       });
       return this;
     }
@@ -223,8 +245,29 @@ function createHarness(initial) {
       return this;
     }
 
-    addClass() { return this; }
-    removeClass() { return this; }
+    addClass(className) {
+      this.items.forEach((element) => String(className || '').split(/\s+/).filter(Boolean).forEach((name) => element.classes.add(name)));
+      return this;
+    }
+    removeClass(className) {
+      this.items.forEach((element) => String(className || '').split(/\s+/).filter(Boolean).forEach((name) => element.classes.delete(name)));
+      return this;
+    }
+    hasClass(className) {
+      return !!(this.items[0] && this.items[0].classes.has(className));
+    }
+    removeAttr(name) {
+      this.items.forEach((element) => {
+        delete element[name];
+      });
+      return this;
+    }
+    removeData(name) {
+      this.items.forEach((element) => {
+        delete element.dataStore[name];
+      });
+      return this;
+    }
     toggleClass() { return this; }
     empty() { return this.html(''); }
     on() { return this; }
@@ -309,7 +352,7 @@ function createHarness(initial) {
 
   const instrumented = source.replace(
     "$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, afterCheckoutUpdated );\n}( jQuery ) );",
-    "window.__wdcCitySelectorTest = { applySelectedLocation: applySelectedLocation, applyManualFallbackCity: applyManualFallbackCity, handleCountryAvailabilityChanged: handleCountryAvailabilityChanged, currentCountryCode: currentCountryCode };\n$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, afterCheckoutUpdated );\n}( jQuery ) );"
+    "window.__wdcCitySelectorTest = { applySelectedLocation: applySelectedLocation, applyManualFallbackCity: applyManualFallbackCity, handleCountryAvailabilityChanged: handleCountryAvailabilityChanged, currentCountryCode: currentCountryCode, setPickerState: setPickerState };\n$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, afterCheckoutUpdated );\n}( jQuery ) );"
   );
   vm.runInNewContext(instrumented, context, { filename: sourcePath });
 
@@ -335,6 +378,9 @@ function createHarness(initial) {
     hidden(name) {
       const field = (byName.get(name) || [])[0];
       return field ? field.value : '';
+    },
+    element(name) {
+      return (byName.get(name) || [])[0] || null;
     },
     updates() {
       return updateCheckoutEvents.length;
@@ -376,7 +422,31 @@ const minskPayload = {
   assert.strictEqual(harness.hidden('wdc_platform_location_place_name'), 'Минск', 'canonical place_name hidden field must be set.');
   assert.strictEqual(harness.hidden('wdc_platform_location_district_name'), 'Минский', 'canonical district_name hidden field must be set.');
   assert.strictEqual(harness.hidden('wdc_platform_location_region_name'), 'Минская', 'canonical region_name hidden field must be set.');
+  assert(harness.element('billing_state').classes.has('wdc-location-state-locked'), 'canonical DB selection must lock region field without disabling its POST value.');
+  assert.strictEqual(harness.element('billing_state').disabled, false, 'locked region field must not be disabled.');
   assert.strictEqual(harness.updates(), 1, 'explicit location selection must schedule one checkout recalculation.');
+}
+
+{
+  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: '', billing_postcode: '630000' });
+  harness.context.window.__wdcCitySelectorTest.applyManualFallbackCity('Ручной город');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), '', 'manual fallback must be unavailable before a successful empty search state.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), '', 'manual source must not be set outside empty state.');
+}
+
+{
+  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: 'Старая область', billing_postcode: '630000' });
+  harness.context.window.__wdcCitySelectorTest.setPickerState('empty');
+  harness.context.window.__wdcCitySelectorTest.applyManualFallbackCity('Ручной город');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'Ручной город', 'manual fallback must write exact trimmed city text.');
+  assert.strictEqual(harness.field('billing_state'), '', 'manual fallback must clear stale region.');
+  assert.strictEqual(harness.field('billing_postcode'), '', 'manual fallback must clear stale postcode.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_id'), '', 'manual fallback must clear canonical location_id.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), 'manual', 'manual fallback must persist manual selected_source.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_display_name'), 'Ручной город', 'manual fallback display value must survive checkout refresh.');
+  assert(!harness.element('billing_state').classes.has('wdc-location-state-locked'), 'manual fallback must unlock region editing.');
 }
 
 {

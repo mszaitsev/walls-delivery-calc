@@ -336,8 +336,8 @@ final class ShippingMethodRegistrar {
 			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
 			'strings'   => array(
 				'start'     => __( 'Начните вводить населенный пункт', 'walls-delivery-calc' ),
-				'not_found' => __( 'Населенный пункт не найден. Можно использовать введенное название.', 'walls-delivery-calc' ),
-				'error'     => __( 'Ошибка поиска населенного пункта.', 'walls-delivery-calc' ),
+				'not_found' => __( 'Населённый пункт не найден. Проверьте введённое название.', 'walls-delivery-calc' ),
+				'error'     => __( 'Не удалось выполнить поиск. Проверьте подключение и попробуйте ещё раз.', 'walls-delivery-calc' ),
 				'searching' => __( 'Идёт поиск, подождите несколько секунд', 'walls-delivery-calc' ),
 			),
 		);
