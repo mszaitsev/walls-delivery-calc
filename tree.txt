@@ -1096,6 +1096,8 @@ C:.
     |       run-cdek-tariffs-sync-smoke.php
     |
     +---checkout
+    |       run-checkout-address-autocomplete-browser-smoke.js
+    |       run-checkout-address-autocomplete-smoke.js
     |       run-checkout-address-fields-smoke.js
     |       run-checkout-address-fields-smoke.php
     |       run-checkout-city-selector-smoke.js

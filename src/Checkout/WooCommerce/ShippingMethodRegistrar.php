@@ -309,21 +309,6 @@ final class ShippingMethodRegistrar {
 			'encryption_ready' => $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->encryption_ready(),
 			'action'    => AddressSuggestionAjax::ACTION,
 			'selection_action' => AddressSuggestionAjax::SELECTION_ACTION,
-			'actions'   => array(
-				'suggest' => AddressSuggestionAjax::ACTION,
-				'selection' => AddressSuggestionAjax::SELECTION_ACTION,
-			),
-			'stages'    => array(
-				'city'               => 'city',
-				'address'            => 'address',
-				'house_after_street' => 'house_after_street',
-				'resolve'            => 'resolve',
-			),
-			'strings'   => array(
-				'not_found' => __( 'Адрес не найден. Можно продолжить ручной ввод.', 'walls-delivery-calc' ),
-				'add_house' => __( 'Добавьте номер дома', 'walls-delivery-calc' ),
-				'selected'  => __( 'Адрес выбран:', 'walls-delivery-calc' ),
-			),
 		);
 	}
 

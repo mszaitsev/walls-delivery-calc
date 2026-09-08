@@ -58,6 +58,14 @@ final class CheckoutLocationSearch {
 				}
 			}
 		}
+		if ( $this->is_moscow_city_query( $query ) ) {
+			foreach ( $scored as $index => $row ) {
+				$location = $row['location'];
+				if ( 'RU' === $location->country_code && 'москва' === $parser->normalize( $location->resolved_place_name() ) && 'москва' === $parser->normalize( $location->region_name ) ) {
+					$scored[ $index ]['score']['group_rank_bucket'] = -1;
+				}
+			}
+		}
 		usort(
 			$scored,
 			fn( array $a, array $b ): int => $this->compare_scored_locations( $a, $b )
@@ -226,6 +234,10 @@ final class CheckoutLocationSearch {
 
 	private function normalize( string $value ): string {
 		return $this->search_service->normalize( $value );
+	}
+
+	private function is_moscow_city_query( string $query ): bool {
+		return in_array( $this->parser()->normalize( $query ), array( 'москва', 'москв' ), true );
 	}
 
 	/**
