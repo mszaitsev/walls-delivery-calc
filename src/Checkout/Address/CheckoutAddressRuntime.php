@@ -45,10 +45,16 @@ final class CheckoutAddressRuntime {
 	 */
 	public function resolve_checkout_address( array $checkoutData ): AddressNormalizationResult {
 		$context     = $this->context_from_checkout_data( $checkoutData );
+		$session_manual = ! $this->order_processed_cleanup_done && $this->has_matching_manual_session_context( $context );
+		if ( $session_manual ) {
+			$context['selected_source'] = 'manual';
+		}
 		$fingerprint = $this->fingerprint_from_context( $context );
 
 		if ( '' !== $this->session_manager->address_fingerprint() && $fingerprint !== $this->session_manager->address_fingerprint() ) {
-			$this->session_manager->clear_normalized_address();
+			if ( ! $session_manual ) {
+				$this->session_manager->clear_normalized_address();
+			}
 			$current_rate_id = $this->selected_shipping_method_from_checkout_data( $checkoutData );
 			$pickup_selection = $this->session_manager->pickup_selection();
 			if ( $this->posted_destination_conflicts_with_pickup( $context, $pickup_selection ) ) {
@@ -430,6 +436,32 @@ final class CheckoutAddressRuntime {
 			'selected_source' => 'manual',
 			'is_manual_city'  => true,
 		);
+	}
+
+	/** @param array<string,string> $context */
+	private function has_matching_manual_session_context( array $context ): bool {
+		$session_context = $this->session_manager->city_context();
+		if ( 'manual' !== (string) ( $session_context['selected_source'] ?? $session_context['source'] ?? '' ) ) {
+			return false;
+		}
+
+		$session_country = strtoupper( trim( (string) ( $session_context['country_code'] ?? '' ) ) );
+		$current_country = strtoupper( trim( (string) ( $context['country_code'] ?? '' ) ) );
+		if ( '' === $session_country || '' === $current_country || $session_country !== $current_country ) {
+			return false;
+		}
+
+		$session_city = $this->normalized_manual_identity_text( (string) ( $session_context['city_name'] ?? $session_context['display_name'] ?? '' ) );
+		$current_city = $this->normalized_manual_identity_text( (string) ( $context['city'] ?? '' ) );
+
+		return '' !== $session_city && '' !== $current_city && $session_city === $current_city;
+	}
+
+	private function normalized_manual_identity_text( string $value ): string {
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+		$value = str_replace( array( 'ё', 'Ё' ), array( 'е', 'е' ), $value );
+
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
 	}
 
 	/**

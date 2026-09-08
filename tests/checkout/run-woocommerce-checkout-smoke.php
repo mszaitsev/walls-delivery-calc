@@ -1220,6 +1220,71 @@ $manual_runtime->resolve_checkout_address(
 $manual_empty_region_context = $manual_session->city_context();
 wc_checkout_smoke_assert( 'manual' === (string) ( $manual_empty_region_context['selected_source'] ?? '' ) && ! empty( $manual_empty_region_context['is_manual_city'] ), 'Manual checkout context must keep transient manual marker during incomplete validation state.' );
 wc_checkout_smoke_assert( 'Тестоград' === (string) ( $manual_empty_region_context['city_name'] ?? '' ) && '' === (string) ( $manual_empty_region_context['region_name'] ?? '' ), 'Manual checkout context must preserve city and empty editable region for validation.' );
+$manual_reload_session = new CheckoutSessionManager();
+$manual_reload_session->save_city_context( array( 'source' => 'manual', 'selected_source' => 'manual', 'is_manual_city' => true, 'country_code' => 'BY', 'city_name' => 'Тестоград', 'display_name' => 'Тестоград', 'region_name' => '', 'postcode' => '' ) );
+$manual_reload_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$manual_reload_session
+);
+$manual_reload_session->save_address_fingerprint( $manual_reload_runtime->fingerprint_from_checkout_data( array( 'shipping_country' => 'BY', 'shipping_state' => '', 'shipping_city' => 'Тестоград', 'shipping_postcode' => '', 'shipping_address_1' => '' ) ) );
+$manual_reload_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Тестовая область',
+		'shipping_city' => '  тестоград  ',
+		'shipping_postcode' => '',
+		'shipping_address_1' => '',
+	)
+);
+$manual_same_session_region_context = $manual_reload_session->city_context();
+wc_checkout_smoke_assert( 'manual' === (string) ( $manual_same_session_region_context['selected_source'] ?? '' ) && 'Тестовая область' === (string) ( $manual_same_session_region_context['region_name'] ?? '' ), 'Same-session manual checkout reload must preserve manual trust when country/city match and region is added without hidden source.' );
+$manual_reload_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Тестовая область',
+		'shipping_city' => 'Тестоград',
+		'shipping_postcode' => '123456',
+		'shipping_address_1' => '',
+	)
+);
+$manual_same_session_postcode_context = $manual_reload_session->city_context();
+wc_checkout_smoke_assert( 'manual' === (string) ( $manual_same_session_postcode_context['selected_source'] ?? '' ) && '123456' === (string) ( $manual_same_session_postcode_context['postcode'] ?? '' ), 'Same-session manual checkout reload must preserve manual trust when postcode is added without hidden source.' );
+$manual_city_changed_session = new CheckoutSessionManager();
+$manual_city_changed_session->save_city_context( array( 'source' => 'manual', 'selected_source' => 'manual', 'is_manual_city' => true, 'country_code' => 'BY', 'city_name' => 'Тестоград', 'display_name' => 'Тестоград' ) );
+$manual_city_changed_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$manual_city_changed_session
+);
+$manual_city_changed_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Тестовая область',
+		'shipping_city' => 'Другойгород',
+		'shipping_postcode' => '123456',
+		'shipping_address_1' => '',
+	)
+);
+wc_checkout_smoke_assert( array() === $manual_city_changed_session->city_context(), 'Same-session manual trust must not protect a different city.' );
+$manual_country_changed_session = new CheckoutSessionManager();
+$manual_country_changed_session->save_city_context( array( 'source' => 'manual', 'selected_source' => 'manual', 'is_manual_city' => true, 'country_code' => 'RU', 'city_name' => 'Тестоград', 'display_name' => 'Тестоград' ) );
+$manual_country_changed_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$manual_country_changed_session
+);
+$manual_country_changed_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'KZ',
+		'shipping_state' => 'Тестовая область',
+		'shipping_city' => 'Тестоград',
+		'shipping_postcode' => '123456',
+		'shipping_address_1' => '',
+	)
+);
+wc_checkout_smoke_assert( array() === $manual_country_changed_session->city_context(), 'Same-session manual trust must not protect the same city after country changes.' );
+$manual_session->save_city_context( $manual_empty_region_context );
 $manual_validation = new CheckoutValidation( $manual_session );
 $manual_region_validation = new ReflectionMethod( $manual_validation, 'validate_manual_region' );
 $manual_region_validation->setAccessible( true );
