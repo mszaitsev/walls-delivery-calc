@@ -174,6 +174,16 @@
 		$field.val( '' );
 	}
 
+	function setFieldValueSilently( $field, value ) {
+		if ( $field.length && undefined !== value && null !== value ) {
+			$field.val( String( value ) );
+		}
+	}
+
+	function triggerCheckoutUpdate() {
+		$( document.body ).trigger( 'update_checkout' );
+	}
+
 	function clearDestinationFieldsForCountryChange( country ) {
 		isClearingCountryFields = true;
 		suppressSearch = true;
@@ -233,8 +243,8 @@
 	function selectedNotice( $field ) {
 		var $notice = $field.siblings( '.wdc-city-selector-selected' ).first();
 		if ( ! $notice.length ) {
-			$notice = $( '<div class="wdc-city-selector-selected" />' );
-			$field.after( $notice );
+			$field.after( '<div class="wdc-city-selector-selected"></div>' );
+			$notice = $field.siblings( '.wdc-city-selector-selected' ).first();
 		}
 		return $notice;
 	}
@@ -243,23 +253,46 @@
 		$( '.wdc-city-selector-selected' ).remove();
 	}
 
+	function renderCityStatus( state, text ) {
+		clearSelectedNotice();
+		var $field = cityField();
+		if ( ! $field.length || ! text ) {
+			return;
+		}
+		var className = 'wdc-city-selector-selected is-' + String( state || 'none' );
+		selectedNotice( $field )
+			.removeClass( 'is-checking is-selected is-manual-warning is-invalid is-none' )
+			.addClass( className )
+			.html( '<span class="wdc-city-status-dot" aria-hidden="true"></span><span class="wdc-city-status-text">' + escapeHtml( text ) + '</span>' );
+	}
+
 	function renderSelectedNotice( $field, label, postcode, invalid ) {
 		clearSelectedNotice();
 		if ( $field.length && label ) {
 			var text = invalid ? label : 'Выбран: ' + label;
-			if ( ! invalid && 'manual' === hiddenValue( 'wdc_platform_location_selected_source' ) ) {
-				text = 'Указан вручную: ' + label;
+			if ( invalid ) {
+				renderCityStatus( 'invalid', text );
+				return;
 			}
-			if ( ! invalid && postcode ) {
+			if ( 'manual' === hiddenValue( 'wdc_platform_location_selected_source' ) ) {
+				renderCityStatus( 'manual-warning', 'Указан неизвестный населенный пункт. Доставка может не рассчитаться' );
+				return;
+			}
+			if ( postcode ) {
 				text += ', ' + postcode;
 			}
-			selectedNotice( $field ).toggleClass( 'is-invalid', !! invalid ).text( text );
+			renderCityStatus( 'selected', text );
 		}
 	}
 
 	function restoreSelectedNotice() {
 		if ( ! localDatabaseAvailable() ) {
 			clearHidden();
+			return;
+		}
+		if ( hasManualLocationSelection() || restoreManualSessionSelection() ) {
+			renderSelectedNotice( cityField(), checkoutFieldText( cityField() ), '', false );
+			unlockRegionField();
 			return;
 		}
 		var displayName = hiddenValue( 'wdc_platform_location_display_name' );
@@ -293,6 +326,31 @@
 			return region + ', ' + city;
 		}
 		return city || region || '';
+	}
+
+	function manualSessionContext() {
+		var context = config.manual_city_context && 'object' === typeof config.manual_city_context ? config.manual_city_context : {};
+		return 'manual' === String( context.source || '' ) ? context : {};
+	}
+
+	function sameManualDestination( context ) {
+		var city = $.trim( String( context.city_name || context.display_name || '' ) );
+		var country = String( context.country_code || '' ).toUpperCase();
+		return !! city && country === currentCountryCode() && city === checkoutFieldText( cityField() );
+	}
+
+	function restoreManualSessionSelection() {
+		var context = manualSessionContext();
+		if ( ! sameManualDestination( context ) ) {
+			return false;
+		}
+		clearHidden();
+		setHidden( 'wdc_platform_location_country_code', currentCountryCode() );
+		setHidden( 'wdc_platform_location_display_name', checkoutFieldText( cityField() ) );
+		setHidden( 'wdc_platform_location_selected_source', 'manual' );
+		selectedDisplay = checkoutFieldText( cityField() );
+		unlockRegionField();
+		return true;
 	}
 
 	function picker() {
@@ -575,7 +633,7 @@
 		debug( 'manual fallback city', query );
 		explicitSelection = false;
 		clearHidden();
-		setFieldValue( $field, query );
+		setFieldValueSilently( $field, query );
 		clearFieldValueSilently( stateField() );
 		clearFieldValueSilently( postcodeField() );
 		setHidden( 'wdc_platform_location_country_code', currentCountryCode() );
@@ -599,7 +657,7 @@
 		isSelecting = false;
 		window.setTimeout( function () {
 			debug( 'update_checkout triggered after fallback' );
-			$( document.body ).trigger( 'update_checkout' );
+			triggerCheckoutUpdate();
 		}, 50 );
 		suppressTimer = window.setTimeout( function () {
 			suppressSearch = false;
@@ -664,25 +722,26 @@
 		}
 	}
 
-	function setStateField( $state, location ) {
+	function setStateField( $state, location, silent ) {
 		var regionCode = location.region_code || '';
 		var regionName = location.state_value || location.region_name || '';
+		var setter = silent ? setFieldValueSilently : setFieldValue;
 		if ( ! $state.length ) {
 			return;
 		}
 
 		if ( $state.is( 'select' ) ) {
 			if ( regionCode && $state.find( 'option[value="' + regionCode.replace( /"/g, '\\"' ) + '"]' ).length ) {
-				setFieldValue( $state, regionCode );
+				setter( $state, regionCode );
 				return;
 			}
 			if ( regionName && $state.find( 'option[value="' + regionName.replace( /"/g, '\\"' ) + '"]' ).length ) {
-				setFieldValue( $state, regionName );
+				setter( $state, regionName );
 			}
 			return;
 		}
 
-		setFieldValue( $state, regionName || regionCode );
+		setter( $state, regionName || regionCode );
 	}
 
 	function selectLocationFromItem( $item ) {
@@ -725,12 +784,12 @@
 		} );
 
 		if ( updateFields ) {
-			setFieldValue( $city, city );
+			setFieldValueSilently( $city, city );
 			clearFieldValueSilently( $postcode );
 			if ( location.postal_code ) {
-				setFieldValue( $postcode, location.postal_code );
+				setFieldValueSilently( $postcode, location.postal_code );
 			}
-			setStateField( $state, location );
+			setStateField( $state, location, true );
 		}
 		lockRegionField( $state );
 
@@ -799,7 +858,7 @@
 		if ( updateCheckout ) {
 			window.setTimeout( function () {
 				debug( 'update_checkout triggered' );
-				$( document.body ).trigger( 'update_checkout' );
+				triggerCheckoutUpdate();
 			}, 50 );
 		}
 		suppressTimer = window.setTimeout( function () {
@@ -866,7 +925,7 @@
 			return;
 		}
 		restoreSelectedNotice();
-		if ( ! hasSelectedLocation() ) {
+		if ( ! hasSelectedLocation() && ! hasManualLocationSelection() ) {
 			scheduleAutoResolve();
 		}
 	}
@@ -894,20 +953,33 @@
 		return !! ( ( hiddenValue( 'wdc_platform_location_id' ) || hiddenValue( 'wdc_platform_location_fias_id' ) ) && hiddenValue( 'wdc_platform_location_display_name' ) );
 	}
 
+	function hasManualLocationSelection() {
+		var city = checkoutFieldText( cityField() );
+		var displayName = hiddenValue( 'wdc_platform_location_display_name' );
+		return localDatabaseAvailable()
+			&& 'manual' === hiddenValue( 'wdc_platform_location_selected_source' )
+			&& '' !== city
+			&& ( '' === displayName || displayName === city );
+	}
+
 	function scheduleAutoResolve() {
 		window.clearTimeout( autoResolveTimer );
 		if ( ! localDatabaseAvailable() ) {
 			clearHidden();
 			return;
 		}
-		if ( explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() ) {
+		if ( explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() || hasManualLocationSelection() ) {
 			return;
 		}
+		if ( ! checkoutFieldText( stateField() ) && ! checkoutFieldText( cityField() ) ) {
+			return;
+		}
+		renderCityStatus( 'checking', 'Проверяем...' );
 		autoResolveTimer = window.setTimeout( autoResolve, 450 );
 	}
 
 	function autoResolve() {
-		if ( ! config.ajax_url || ! localDatabaseAvailable() || explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() ) {
+		if ( ! config.ajax_url || ! localDatabaseAvailable() || explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() || hasManualLocationSelection() ) {
 			return;
 		}
 		var regionText = checkoutFieldText( stateField() );
@@ -916,6 +988,7 @@
 			clearHidden();
 			return;
 		}
+		renderCityStatus( 'checking', 'Проверяем...' );
 		$.ajax( {
 			url: config.ajax_url,
 			method: 'POST',
@@ -939,7 +1012,7 @@
 					restoreSelectedNotice();
 					return;
 				}
-				applySelectedLocation( body.selected, { updateCheckout: false, explicit: false, source: 'auto', updateFields: true } );
+				applySelectedLocation( body.selected, { updateCheckout: true, explicit: false, source: 'auto', updateFields: true } );
 				return;
 			}
 			clearUnresolvedSupportedLocationFields();

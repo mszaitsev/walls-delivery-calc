@@ -3087,7 +3087,7 @@ final class LocationRepository {
 
 	private function profile_candidate_compact_sql_expression( string $column ): string {
 		$expression = "LOWER(REPLACE(REPLACE({$column}, 'Ё', 'Е'), 'ё', 'е'))";
-		foreach ( array( ' ', '.', ',', '/', '(', ')', '-', '–', '—' ) as $separator ) {
+		foreach ( array( ' ', '.', ',', '/', '(', ')', '_', '-', '–', '—' ) as $separator ) {
 			$expression = "REPLACE({$expression}, '" . str_replace( "'", "''", $separator ) . "', '')";
 		}
 

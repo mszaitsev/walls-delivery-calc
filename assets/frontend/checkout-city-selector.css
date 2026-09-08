@@ -260,6 +260,9 @@
 }
 
 .wdc-city-selector-selected {
+	display: flex;
+	align-items: center;
+	gap: 7px;
 	margin-top: 6px;
 	width: 100%;
 	max-width: none;
@@ -273,9 +276,43 @@
 	color: #b32d2e;
 }
 
+.wdc-city-selector-selected.is-checking {
+	color: #6c4b00;
+}
+
+.wdc-city-selector-selected.is-selected {
+	color: #2271b1;
+}
+
+.wdc-city-selector-selected.is-manual-warning {
+	color: #b32d2e;
+}
+
+.wdc-city-status-dot {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: currentColor;
+}
+
+.wdc-city-selector-selected.is-checking .wdc-city-status-dot {
+	background: #dba617;
+}
+
+.wdc-city-selector-selected.is-selected .wdc-city-status-dot {
+	background: #2e7d32;
+}
+
+.wdc-city-selector-selected.is-manual-warning .wdc-city-status-dot,
+.wdc-city-selector-selected.is-invalid .wdc-city-status-dot {
+	background: #b32d2e;
+}
+
 .wdc-location-state-locked {
-	background-color: #f6f7f7;
-	cursor: default;
+	background-color: #f2f2f2 !important;
+	color: #666 !important;
+	cursor: not-allowed;
 }
 
 @media (max-width: 900px) {

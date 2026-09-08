@@ -24,11 +24,16 @@ final class CheckoutAddressRuntime {
 
 	public function register(): void {
 		add_action( 'woocommerce_checkout_update_order_review', array( $this, 'update_order_review' ), 10, 1 );
+		add_action( 'woocommerce_checkout_order_processed', array( $this, 'clear_checkout_session_after_order_processed' ), 20 );
 	}
 
 	public function update_order_review( mixed $posted_data ): void {
 		$data = $this->parse_posted_data( $posted_data );
 		$this->resolve_checkout_address( $data );
+	}
+
+	public function clear_checkout_session_after_order_processed(): void {
+		$this->session_manager->clear_normalized_address();
 	}
 
 	/**

@@ -832,6 +832,9 @@ runtime_smoke_assert( 3 === $city_selector_config['min_chars'], 'City selector c
 runtime_smoke_assert( str_starts_with( $city_selector_config['nonce'], 'nonce-' ), 'City selector config must expose nonce.' );
 runtime_smoke_assert( 100 === (int) ( $city_selector_config['checkout_location_search_limit'] ?? 0 ), 'City selector config must expose checkout location search limit.' );
 runtime_smoke_assert( 'Идёт поиск, подождите несколько секунд' === $city_selector_config['strings']['searching'], 'City selector config strings must be Russian.' );
+$container->get( CheckoutSessionManager::class )->save_city_context( array( 'source' => 'manual', 'country_code' => 'RU', 'city_name' => 'Ручной город', 'region_name' => 'Ручная область' ) );
+$manual_city_selector_config = $registrar->city_selector_config();
+runtime_smoke_assert( 'manual' === (string) ( $manual_city_selector_config['manual_city_context']['source'] ?? '' ) && 'Ручной город' === (string) ( $manual_city_selector_config['manual_city_context']['city_name'] ?? '' ), 'City selector config must expose transient manual city context for current checkout reload.' );
 
 $location_repository = new LocationRepository( $GLOBALS['wpdb'] );
 ( new LocationImportService( $location_repository ) )->import_from_json_file( dirname( __DIR__ ) . '/fixtures/demo/locations-demo.json' );

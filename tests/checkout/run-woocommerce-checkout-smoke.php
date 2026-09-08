@@ -1109,6 +1109,8 @@ $manual_context = $manual_session->city_context();
 wc_checkout_smoke_assert( 'BY' === (string) ( $manual_context['country_code'] ?? '' ) && 'Минск' === (string) ( $manual_context['city_name'] ?? '' ), 'Manual BY checkout city context must preserve country and city when local BY location is absent.' );
 wc_checkout_smoke_assert( 'Минская область' === (string) ( $manual_context['region_name'] ?? '' ), 'Manual BY checkout city context must preserve shipping_state region.' );
 wc_checkout_smoke_assert( '' === (string) ( $manual_context['postcode'] ?? '' ), 'Manual BY checkout city context must not autofill postcode from RU namesake.' );
+$manual_runtime->clear_checkout_session_after_order_processed();
+wc_checkout_smoke_assert( array() === $manual_session->city_context() && '' === $manual_session->fallback_city(), 'Checkout order completion cleanup must clear transient manual city trust from session.' );
 
 $checkout_formatter = LocationDisplayNameFormatter::from_rules( array() );
 $formatter_minsk = Location::from_array(
