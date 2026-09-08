@@ -592,6 +592,7 @@ C:.
 |   |   +---Locations
 |   |   |       CheckoutCityResolver.php
 |   |   |       CheckoutLocationAjax.php
+|   |   |       CheckoutLocationProfileMatcher.php
 |   |   |       CheckoutLocationSearch.php
 |   |   |       CheckoutLocationSearchParser.php
 |   |   |       LocationCoordinateEnricher.php

@@ -332,14 +332,37 @@ final class ShippingMethodRegistrar {
 			'checkout_location_search_limit' => $this->city_location_limit(),
 			'location_region_limit' => max( 3, min( 50, $this->settings->get_int( 'checkout_location_region_limit', 10 ) ) ),
 			'supported_location_countries' => $this->location_country_index instanceof LocationCountryIndexService ? $this->location_country_index->countries() : array(),
+			'manual_city_context' => $this->manual_city_context_config(),
 			'resolve_action' => CheckoutLocationAjax::RESOLVE_ACTION,
 			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
 			'strings'   => array(
 				'start'     => __( 'Начните вводить населенный пункт', 'walls-delivery-calc' ),
-				'not_found' => __( 'Населенный пункт не найден. Можно использовать введенное название.', 'walls-delivery-calc' ),
-				'error'     => __( 'Ошибка поиска населенного пункта.', 'walls-delivery-calc' ),
+				'not_found' => __( 'Населённый пункт не найден. Проверьте введённое название.', 'walls-delivery-calc' ),
+				'error'     => __( 'Не удалось выполнить поиск. Проверьте подключение и попробуйте ещё раз.', 'walls-delivery-calc' ),
 				'searching' => __( 'Идёт поиск, подождите несколько секунд', 'walls-delivery-calc' ),
 			),
+		);
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function manual_city_context_config(): array {
+		$context = $this->session_manager->city_context();
+		if ( 'manual' !== (string) ( $context['source'] ?? '' ) ) {
+			return array();
+		}
+		$city = trim( (string) ( $context['city_name'] ?? $context['display_name'] ?? '' ) );
+		$country_code = strtoupper( trim( (string) ( $context['country_code'] ?? '' ) ) );
+		if ( '' === $city || '' === $country_code ) {
+			return array();
+		}
+
+		return array(
+			'source' => 'manual',
+			'country_code' => $country_code,
+			'city_name' => $city,
+			'region_name' => trim( (string) ( $context['region_name'] ?? '' ) ),
 		);
 	}
 

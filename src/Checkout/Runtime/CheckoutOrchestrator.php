@@ -89,6 +89,17 @@ final class CheckoutOrchestrator {
 			if ( $service instanceof DeliveryService ) {
 				$service_request = $this->request_for_service( $service_request, $service, $delivery_type );
 			}
+			if ( $this->should_skip_api_quote_for_incomplete_manual_destination( $carrier, $service_request ) ) {
+				$this->logger->info(
+					'Carrier quote skipped for incomplete manual destination.',
+					array(
+						'carrier' => $carrier_key,
+						'service' => $service_key,
+						'delivery_type' => $delivery_type,
+					)
+				);
+				continue;
+			}
 			$carrier_cache_context = $carrier instanceof CarrierQuoteCacheContextProviderInterface ? $carrier->quote_cache_context( $service_request ) : array();
 
 			if ( $cache_enabled && $this->quote_cache instanceof QuoteCache ) {
@@ -174,6 +185,20 @@ final class CheckoutOrchestrator {
 
 	private function should_cache_quote( DeliveryQuote $quote ): bool {
 		return $quote->success && array() !== $quote->rates;
+	}
+
+	private function should_skip_api_quote_for_incomplete_manual_destination( object $carrier, QuoteRequest $request ): bool {
+		if ( 'api' !== $carrier->get_identity()->type ) {
+			return false;
+		}
+		if ( 'manual' !== (string) ( $request->customer_context['selected_source'] ?? '' ) && empty( $request->customer_context['is_manual_city'] ) ) {
+			return false;
+		}
+		$city_present = '' !== trim( $request->destination->city ) || '' !== trim( $request->destination->settlement );
+		$region_present = '' !== trim( $request->destination->region_name );
+		$postcode_present = '' !== trim( $request->destination->postcode );
+
+		return ! ( $city_present && $region_present && $postcode_present );
 	}
 
 	/**

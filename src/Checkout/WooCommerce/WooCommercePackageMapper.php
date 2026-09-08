@@ -68,6 +68,8 @@ final class WooCommercePackageMapper {
 				'city_name' => (string) $location_context['city_name'],
 				'settlement_name' => (string) $location_context['settlement_name'],
 				'place_name' => (string) $location_context['place_name'],
+				'selected_source' => (string) $location_context['selected_source'],
+				'is_manual_city' => ! empty( $location_context['is_manual_city'] ),
 			),
 			$this->strip_untrusted_dadata_context( $customer_context ),
 			$this->trusted_dadata_address_context( $address )
@@ -106,6 +108,7 @@ final class WooCommercePackageMapper {
 
 		return new Address(
 			country_code: '' !== $country ? $country : 'RU',
+			region_name: (string) ( $destination['state'] ?? '' ),
 			city: trim( (string) ( $destination['city'] ?? '' ) ),
 			postcode: (string) ( $destination['postcode'] ?? '' ),
 			street: (string) ( $destination['address'] ?? $destination['address_1'] ?? '' ),
@@ -469,13 +472,21 @@ final class WooCommercePackageMapper {
 
 	/**
 	 * @param array<string,mixed> $destination
-	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,region_name:string,city_name:string,settlement_name:string,place_name:string,place_type:string,place_level:string}
+	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,region_name:string,city_name:string,settlement_name:string,place_name:string,place_type:string,place_level:string,selected_source:string,is_manual_city:bool}
 	 */
 	private function checkout_location_context( array $destination, Address $address, string $country_code ): array {
+		$posted_manual = $this->current_posted_manual_location_context( $country_code );
+		if ( array() !== $posted_manual ) {
+			return $this->location_context_result( '', 'frontend_post_manual', 'manual', null, $posted_manual );
+		}
+
 		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
 		$city_id = $this->positive_location_id( $city['id'] ?? '' );
 		if ( $city_id > 0 ) {
 			return $this->location_context_result( (string) $city_id, 'frontend', 'resolved', null, $city );
+		}
+		if ( $this->is_manual_location_context( $city ) ) {
+			return $this->location_context_result( '', 'frontend_manual', 'manual', null, $city );
 		}
 		if ( $this->has_textual_location_identity( $city ) ) {
 			return $this->location_context_result( '', 'frontend_textual', 'resolved', null, $city );
@@ -486,11 +497,51 @@ final class WooCommercePackageMapper {
 		if ( $context_id > 0 ) {
 			return $this->location_context_result( (string) $context_id, 'session', 'resolved', null, $context );
 		}
+		if ( $this->is_manual_location_context( $context ) ) {
+			return $this->location_context_result( '', 'session_manual', 'manual', null, $context );
+		}
 		if ( $this->has_textual_location_identity( $context ) ) {
 			return $this->location_context_result( '', 'session_textual', 'resolved', null, $context );
 		}
 
 		return $this->recover_checkout_location_context( $destination, $address, $country_code );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function current_posted_manual_location_context( string $country_code ): array {
+		$parsed = $this->checkout_post_data();
+		if ( array() === $parsed ) {
+			$parsed = $_POST;
+		}
+		if ( array() === $parsed || 'manual' !== $this->post_scalar( $parsed, 'wdc_platform_location_selected_source' ) ) {
+			return array();
+		}
+
+		$prefix = $this->active_checkout_prefix( $parsed );
+		$city = $this->post_scalar( $parsed, $prefix . '_city' );
+		if ( '' === $city ) {
+			return array();
+		}
+
+		$country = strtoupper( $this->post_scalar( $parsed, $prefix . '_country' ) );
+		if ( '' === $country ) {
+			$country = strtoupper( trim( $country_code ) );
+		}
+
+		return array(
+			'country_code'     => $country,
+			'location_id'      => '',
+			'city_name'        => $city,
+			'settlement_name'  => '',
+			'display_name'     => $city,
+			'region_name'      => $this->post_scalar( $parsed, $prefix . '_state' ),
+			'postcode'         => $this->post_scalar( $parsed, $prefix . '_postcode' ),
+			'source'           => 'manual',
+			'selected_source'  => 'manual',
+			'is_manual_city'   => true,
+		);
 	}
 
 	/** @param array<string,mixed> $context */
@@ -501,9 +552,20 @@ final class WooCommercePackageMapper {
 		return '' !== $region && '' !== $location;
 	}
 
+	/** @param array<string,mixed> $context */
+	private function is_manual_location_context( array $context ): bool {
+		$source = (string) ( $context['selected_source'] ?? $context['source'] ?? '' );
+		if ( 'manual' !== $source && empty( $context['is_manual_city'] ) ) {
+			return false;
+		}
+		$location = trim( (string) ( $context['place_name'] ?? $context['settlement_name'] ?? $context['city_name'] ?? $context['display_name'] ?? '' ) );
+
+		return '' !== $location;
+	}
+
 	/**
 	 * @param array<string,mixed> $destination
-	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,region_name:string,city_name:string,settlement_name:string,place_name:string,place_type:string,place_level:string}
+	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,region_name:string,city_name:string,settlement_name:string,place_name:string,place_type:string,place_level:string,selected_source:string,is_manual_city:bool}
 	 */
 	private function recover_checkout_location_context( array $destination, Address $address, string $country_code ): array {
 		$country_code = strtoupper( trim( $country_code ) );
@@ -540,6 +602,8 @@ final class WooCommercePackageMapper {
 			'place_name'    => $location instanceof Location ? $location->resolved_place_name() : (string) ( $source_data['place_name'] ?? $source_data['settlement_name'] ?? $source_data['city_name'] ?? '' ),
 			'place_type'    => $location instanceof Location ? $location->resolved_place_type() : (string) ( $source_data['place_type'] ?? $source_data['settlement_type'] ?? '' ),
 			'place_level'   => $location instanceof Location ? (string) $location->place_level : (string) ( $source_data['place_level'] ?? '' ),
+			'selected_source' => (string) ( $source_data['selected_source'] ?? $source_data['source'] ?? '' ),
+			'is_manual_city' => ! empty( $source_data['is_manual_city'] ) || 'manual' === (string) ( $source_data['selected_source'] ?? $source_data['source'] ?? '' ),
 		);
 	}
 

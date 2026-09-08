@@ -1,12 +1,14 @@
 # Walls Delivery Calc
 
-Version: 0.155.10
+Version: 0.155.11
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.10 adds global checkout delivery messages on the platform settings page. Administrators can enable an informational WYSIWYG text and an optional promo WYSIWYG text before the delivery sort selector; both are off by default for upgrades. Promo rendering compares an integer kopeck threshold against either the existing full-cart post-discount total or the new minimal WooCommerce-boundary shippable-items total, replaces `{s}` and `{d}` with plain numeric ruble amounts, sanitizes stored/rendered HTML, and refreshes through the normal WooCommerce checkout review lifecycle. The server emits a valid source table row and the existing checkout DOM enhancement moves messages into the shipping cell before the sort control.
+Current stage: 0.155.11 improves checkout country/region/city handling for countries present in the local location database. Legacy WooCommerce city/state values are reconciled by a conservative PHP matcher with no fuzzy matching: country must match exactly, normalized settlement names must match exactly, and normalized region must match when present; ambiguous or missing matches clear checkout city/state/postcode and WDC location metadata so the customer selects a supported location. Canonical database selections fill city/state/postcode and lock the region field without disabling POST; manual fallback is available only after a successful zero-result search, marks `wdc_platform_location_selected_source=manual`, clears canonical identifiers, unlocks region entry, and requires city plus region at validation. Manual trust is transient to the current WooCommerce checkout session and is cleared after successful order processing, so later checkout loads re-check saved Woo profile text.
+
+0.155.10 adds global checkout delivery messages on the platform settings page. Administrators can enable an informational WYSIWYG text and an optional promo WYSIWYG text before the delivery sort selector; both are off by default for upgrades. Promo rendering compares an integer kopeck threshold against either the existing full-cart post-discount total or the new minimal WooCommerce-boundary shippable-items total, replaces `{s}` and `{d}` with plain numeric ruble amounts, sanitizes stored/rendered HTML, and refreshes through the normal WooCommerce checkout review lifecycle. The server emits a valid source table row and the existing checkout DOM enhancement moves messages into the shipping cell before the sort control.
 
 ## Quick Start
 

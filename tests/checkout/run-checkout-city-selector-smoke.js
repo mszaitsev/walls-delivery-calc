@@ -6,6 +6,8 @@ const path = require('path');
 const root = path.resolve(__dirname, '..', '..');
 const sourcePath = path.join(root, 'assets', 'frontend', 'checkout-city-selector.js');
 const source = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n');
+const cssPath = path.join(root, 'assets', 'frontend', 'checkout-city-selector.css');
+const css = fs.readFileSync(cssPath, 'utf8').replace(/\r\n/g, '\n');
 
 assert(!source.includes('setInterval('), 'checkout city selector must not use setInterval.');
 assert(source.includes('wdc_platform_location_country_code'), 'city selector must persist selected location country_code.');
@@ -17,6 +19,8 @@ function createHarness(initial) {
   const timers = [];
   const updateCheckoutEvents = [];
   const dispatchedEvents = [];
+  const ajaxRequests = [];
+  const ajaxResponses = Array.isArray(initial.ajaxResponses) ? initial.ajaxResponses.slice() : [];
   const elements = [];
   const byId = new Map();
   const byName = new Map();
@@ -38,6 +42,7 @@ function createHarness(initial) {
       this.textContent = '';
       this.htmlContent = '';
       this.children = [];
+      this.dataStore = {};
     }
   }
 
@@ -126,9 +131,15 @@ function createHarness(initial) {
       return false;
     }
 
-    attr(name) {
+    attr(name, value) {
       const element = this.items[0];
-      return element ? element[name] || '' : '';
+      if (undefined === value) {
+        return element ? element[name] || '' : '';
+      }
+      this.items.forEach((item) => {
+        item[name] = String(value);
+      });
+      return this;
     }
 
     val(value) {
@@ -142,8 +153,23 @@ function createHarness(initial) {
     }
 
     prop(name, value) {
+      if (undefined === value) {
+        const element = this.items[0];
+        return element ? element[name] : undefined;
+      }
       this.items.forEach((element) => {
         element[name] = value;
+      });
+      return this;
+    }
+
+    data(name, value) {
+      const element = this.items[0];
+      if (undefined === value) {
+        return element ? element.dataStore[name] : undefined;
+      }
+      this.items.forEach((item) => {
+        item.dataStore[name] = value;
       });
       return this;
     }
@@ -223,11 +249,40 @@ function createHarness(initial) {
       return this;
     }
 
-    addClass() { return this; }
-    removeClass() { return this; }
+    addClass(className) {
+      this.items.forEach((element) => String(className || '').split(/\s+/).filter(Boolean).forEach((name) => element.classes.add(name)));
+      return this;
+    }
+    removeClass(className) {
+      this.items.forEach((element) => String(className || '').split(/\s+/).filter(Boolean).forEach((name) => element.classes.delete(name)));
+      return this;
+    }
+    hasClass(className) {
+      return !!(this.items[0] && this.items[0].classes.has(className));
+    }
+    removeAttr(name) {
+      this.items.forEach((element) => {
+        delete element[name];
+      });
+      return this;
+    }
+    removeData(name) {
+      this.items.forEach((element) => {
+        delete element.dataStore[name];
+      });
+      return this;
+    }
     toggleClass() { return this; }
     empty() { return this.html(''); }
-    on() { return this; }
+    on(events, selector, handler) {
+      if (this.items.includes(body) && 'string' === typeof events) {
+        const callback = 'function' === typeof selector ? selector : handler;
+        String(events).split(/\s+/).filter(Boolean).forEach((eventName) => {
+          bodyHandlers.push({ type: eventName.split('.')[0], selector: 'function' === typeof selector ? '' : selector, handler: callback });
+        });
+      }
+      return this;
+    }
     off() { return this; }
   }
 
@@ -271,7 +326,24 @@ function createHarness(initial) {
     return new Wrapper(select(selector));
   }
   $.trim = (value) => String(value || '').trim();
-  $.ajax = () => ({ done() { return this; }, fail() { return this; } });
+  $.ajax = (request) => {
+    ajaxRequests.push(request || {});
+    const response = ajaxResponses.length ? ajaxResponses.shift() : null;
+    return {
+      done(callback) {
+        if (!response || 'fail' !== response.type) {
+          callback(response && Object.prototype.hasOwnProperty.call(response, 'body') ? response.body : response);
+        }
+        return this;
+      },
+      fail(callback) {
+        if (response && 'fail' === response.type) {
+          callback(response.xhr || {});
+        }
+        return this;
+      }
+    };
+  };
 
   const context = {
     window: {
@@ -280,7 +352,8 @@ function createHarness(initial) {
         nonce: 'nonce',
         supported_location_countries: ['RU', 'AM', 'BY', 'KZ', 'KG'],
         min_chars: 3,
-        strings: { start: 'start', searching: 'searching', error: 'error', not_found: 'not_found' }
+        strings: { start: 'start', searching: 'searching', error: 'error', not_found: 'not_found' },
+        manual_city_context: initial.manual_city_context || {}
       },
       setTimeout(callback) {
         const id = nextTimerId++;
@@ -309,7 +382,7 @@ function createHarness(initial) {
 
   const instrumented = source.replace(
     "$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, afterCheckoutUpdated );\n}( jQuery ) );",
-    "window.__wdcCitySelectorTest = { applySelectedLocation: applySelectedLocation, applyManualFallbackCity: applyManualFallbackCity, handleCountryAvailabilityChanged: handleCountryAvailabilityChanged, currentCountryCode: currentCountryCode };\n$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, afterCheckoutUpdated );\n}( jQuery ) );"
+    "window.__wdcCitySelectorTest = { applySelectedLocation: applySelectedLocation, applyManualFallbackCity: applyManualFallbackCity, handleCountryAvailabilityChanged: handleCountryAvailabilityChanged, currentCountryCode: currentCountryCode, setPickerState: setPickerState, scheduleAutoResolve: scheduleAutoResolve, autoResolve: autoResolve, afterCheckoutUpdated: afterCheckoutUpdated, hasManualLocationSelection: hasManualLocationSelection };\n$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, afterCheckoutUpdated );\n}( jQuery ) );"
   );
   vm.runInNewContext(instrumented, context, { filename: sourcePath });
 
@@ -332,12 +405,32 @@ function createHarness(initial) {
         field.value = value;
       }
     },
+    triggerStateEvent(eventName = 'change') {
+      const field = (byName.get('billing_state') || [])[0];
+      bodyHandlers
+        .filter((item) => item.type === eventName && 'function' === typeof item.handler)
+        .forEach((item) => item.handler({ target: field, type: eventName }));
+    },
     hidden(name) {
       const field = (byName.get(name) || [])[0];
       return field ? field.value : '';
     },
+    element(name) {
+      return (byName.get(name) || [])[0] || null;
+    },
     updates() {
       return updateCheckoutEvents.length;
+    },
+    ajaxRequests() {
+      return ajaxRequests.slice();
+    },
+    noticeText() {
+      const notice = elements.find((element) => element.classes && element.classes.has('wdc-city-selector-selected'));
+      return notice ? notice.textContent || notice.htmlContent : '';
+    },
+    noticeClasses() {
+      const notice = elements.find((element) => element.classes && element.classes.has('wdc-city-selector-selected'));
+      return notice ? Array.from(notice.classes) : [];
     },
     clearedEvents() {
       return dispatchedEvents.filter((event) => event.type === 'wdc:location-cleared');
@@ -364,6 +457,22 @@ const minskPayload = {
   place_type: 'г'
 };
 
+const sakhaPayload = {
+  id: 920001,
+  country_code: 'RU',
+  display_name: 'респ Саха (Якутия), г Якутск',
+  city_value: 'г Якутск',
+  state_value: 'респ Саха (Якутия)',
+  postal_code: '677000',
+  region_name: 'Саха (Якутия)',
+  region_type: 'респ',
+  city_name: 'Якутск',
+  city_type: 'г',
+  place_name: 'Якутск',
+  place_type: 'г',
+  fias_id: 'fias-yakutsk'
+};
+
 {
   const harness = createHarness({ billing_country: 'BY', billing_city: '', billing_state: '', billing_postcode: '' });
   harness.context.window.WDCCheckoutCitySelector.applyLocation(minskPayload, { updateCheckout: true, explicit: true, source: 'modal', updateFields: true });
@@ -376,7 +485,172 @@ const minskPayload = {
   assert.strictEqual(harness.hidden('wdc_platform_location_place_name'), 'Минск', 'canonical place_name hidden field must be set.');
   assert.strictEqual(harness.hidden('wdc_platform_location_district_name'), 'Минский', 'canonical district_name hidden field must be set.');
   assert.strictEqual(harness.hidden('wdc_platform_location_region_name'), 'Минская', 'canonical region_name hidden field must be set.');
+  assert(harness.element('billing_state').classes.has('wdc-location-state-locked'), 'canonical DB selection must lock region field without disabling its POST value.');
+  assert.strictEqual(harness.element('billing_state').disabled, false, 'locked region field must not be disabled.');
   assert.strictEqual(harness.updates(), 1, 'explicit location selection must schedule one checkout recalculation.');
+}
+
+{
+  const harness = createHarness({
+    billing_country: 'RU',
+    billing_city: 'якутск',
+    billing_state: 'саха /Якутия/ республика',
+    billing_postcode: '',
+    ajaxResponses: [{
+      success: true,
+      data: {
+        local_database_available: true,
+        status: 'resolved',
+        selected: sakhaPayload
+      }
+    }]
+  });
+  harness.setField('wdc_platform_location_fias_id', 'fias-yakutsk');
+  harness.setField('wdc_platform_location_display_name', 'респ Саха (Якутия), г Якутск');
+  harness.setField('wdc_platform_location_place_type', 'г');
+  harness.setField('wdc_platform_location_place_name', 'Якутск');
+  harness.setField('wdc_platform_location_region_type', 'респ');
+  harness.setField('wdc_platform_location_region_name', 'Саха (Якутия)');
+  harness.setField('wdc_platform_location_postcode', '677000');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'г Якутск', 'same canonical identity with stale visible city must repair city on first resolve.');
+  assert.strictEqual(harness.field('billing_state'), 'респ Саха (Якутия)', 'same canonical identity with stale visible state must repair state on first resolve.');
+  assert.strictEqual(harness.field('billing_postcode'), '677000', 'same canonical identity with stale visible postcode must repair postcode on first resolve.');
+  assert(harness.noticeClasses().includes('is-selected'), 'repaired canonical identity must keep selected status.');
+  assert.strictEqual(harness.updates(), 1, 'repaired canonical identity must trigger exactly one checkout recalculation.');
+  assert.strictEqual(harness.ajaxRequests().length, 1, 'stale visible canonical fields must still perform one resolve request.');
+
+  harness.context.window.__wdcCitySelectorTest.scheduleAutoResolve();
+  harness.runTimers();
+  assert.strictEqual(harness.ajaxRequests().length, 1, 'already canonical visible fields must not schedule another resolve.');
+  assert.strictEqual(harness.updates(), 1, 'already canonical visible fields must not trigger another checkout update.');
+}
+
+{
+  const harness = createHarness({
+    billing_country: 'RU',
+    billing_city: 'Якутск',
+    billing_state: 'Саха /Якутия/ республика',
+    billing_postcode: '',
+    ajaxResponses: [{
+      success: true,
+      data: {
+        local_database_available: true,
+        status: 'resolved',
+        selected: sakhaPayload
+      }
+    }]
+  });
+  assert(harness.noticeText().includes('Проверяем...'), 'initial auto resolve must show checking status before AJAX completes.');
+  assert(harness.noticeClasses().includes('is-checking'), 'checking status must use is-checking class.');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'г Якутск', 'successful auto resolve must canonicalize city.');
+  assert.strictEqual(harness.field('billing_state'), 'респ Саха (Якутия)', 'successful auto resolve must canonicalize state.');
+  assert.strictEqual(harness.field('billing_postcode'), '677000', 'successful auto resolve must canonicalize postcode.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_fias_id'), 'fias-yakutsk', 'successful auto resolve must set canonical hidden metadata.');
+  assert(harness.noticeText().includes('Выбран: респ Саха (Якутия), г Якутск, 677000'), 'successful auto resolve must show selected status text.');
+  assert(harness.noticeClasses().includes('is-selected'), 'selected status must use is-selected class.');
+  assert.strictEqual(harness.updates(), 1, 'successful auto resolve must trigger exactly one checkout recalculation after all fields are set.');
+  assert.strictEqual(harness.ajaxRequests().length, 1, 'successful auto resolve must use one resolve request.');
+  harness.context.window.__wdcCitySelectorTest.afterCheckoutUpdated();
+  harness.runTimers();
+  assert.strictEqual(harness.ajaxRequests().length, 1, 'updated_checkout after canonical selection must not start recursive auto resolve.');
+}
+
+{
+  const harness = createHarness({
+    billing_country: 'RU',
+    billing_city: 'Непонятный город',
+    billing_state: 'Старая область',
+    billing_postcode: '630000',
+    ajaxResponses: [{
+      success: true,
+      data: {
+        local_database_available: true,
+        status: 'not_found'
+      }
+    }]
+  });
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), '', 'unresolved initial profile must clear city.');
+  assert(harness.noticeText().includes('Просим проверить название и внести верный населенный пункт'), 'unresolved initial profile must keep existing invalid notice text.');
+  assert(harness.noticeClasses().includes('is-invalid'), 'unresolved initial profile must use invalid status class.');
+}
+
+{
+  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: '', billing_postcode: '630000' });
+  harness.context.window.__wdcCitySelectorTest.applyManualFallbackCity('Ручной город');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), '', 'manual fallback must be unavailable before a successful empty search state.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), '', 'manual source must not be set outside empty state.');
+}
+
+{
+  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: 'Старая область', billing_postcode: '630000' });
+  harness.context.window.__wdcCitySelectorTest.setPickerState('empty');
+  harness.context.window.__wdcCitySelectorTest.applyManualFallbackCity('Ручной город');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'Ручной город', 'manual fallback must write exact trimmed city text.');
+  assert.strictEqual(harness.field('billing_state'), '', 'manual fallback must clear stale region.');
+  assert.strictEqual(harness.field('billing_postcode'), '', 'manual fallback must clear stale postcode.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_id'), '', 'manual fallback must clear canonical location_id.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), 'manual', 'manual fallback must persist manual selected_source.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_display_name'), 'Ручной город', 'manual fallback display value must survive checkout refresh.');
+  assert(!harness.element('billing_state').classes.has('wdc-location-state-locked'), 'manual fallback must unlock region editing.');
+  assert(harness.noticeText().includes('Указан неизвестный населенный пункт. Доставка может не рассчитаться'), 'manual fallback must show red unknown-settlement warning.');
+  assert(harness.noticeClasses().includes('is-manual-warning'), 'manual fallback status must use is-manual-warning class.');
+  harness.context.window.__wdcCitySelectorTest.afterCheckoutUpdated();
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'Ручной город', 'manual fallback city must survive updated_checkout reinitialization.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'manual fallback must not auto-resolve again in the same checkout session.');
+}
+
+{
+  const harness = createHarness({
+    billing_country: 'RU',
+    billing_city: 'Ручной город',
+    billing_state: 'Ручная область',
+    billing_postcode: '',
+    manual_city_context: {
+      source: 'manual',
+      country_code: 'RU',
+      city_name: 'Ручной город',
+      region_name: 'Ручная область'
+    }
+  });
+  harness.runTimers();
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), 'manual', 'session-backed reload must restore manual selected_source.');
+  assert(harness.noticeClasses().includes('is-manual-warning'), 'session-backed reload must restore manual warning state.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'session-backed manual reload must not run DB reconciliation.');
+  harness.context.window.WDCCheckoutCitySelector.applyLocation(sakhaPayload, { updateCheckout: true, explicit: true, source: 'modal', updateFields: true });
+  harness.runTimers();
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), 'modal', 'canonical selection must replace manual source.');
+  assert(harness.element('billing_state').classes.has('wdc-location-state-locked'), 'canonical selection after manual reload must lock region again.');
+}
+
+{
+  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: 'Старая область', billing_postcode: '630000' });
+  harness.context.window.__wdcCitySelectorTest.setPickerState('empty');
+  harness.context.window.__wdcCitySelectorTest.applyManualFallbackCity('Тестоград');
+  harness.runTimers();
+  harness.triggerStateEvent('blur');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'Тестоград', 'manual city must survive editable region focus/blur without changes.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), 'manual', 'manual source must survive editable region blur.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'manual region blur must not trigger profile reconciliation.');
+
+  harness.setField('billing_state', 'Тестовая область');
+  harness.triggerStateEvent('change');
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'Тестоград', 'manual city must survive manual region edit.');
+  assert.strictEqual(harness.field('billing_state'), 'Тестовая область', 'manual region edit must keep entered state value.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_selected_source'), 'manual', 'manual source must survive manual region edit.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'manual region edit must not run DB reconciliation.');
+  harness.context.window.__wdcCitySelectorTest.afterCheckoutUpdated();
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_city'), 'Тестоград', 'manual city must survive checkout validation/update refresh.');
+  assert(harness.noticeClasses().includes('is-manual-warning'), 'manual warning must survive checkout validation/update refresh.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'manual validation/update refresh must not run DB reconciliation.');
 }
 
 {
@@ -449,5 +723,13 @@ const minskPayload = {
 
 assert(source.includes('isClearingCountryFields'), 'country-change clearing must have a reentrancy guard.');
 assert(source.includes("$( document.body ).trigger( 'update_checkout' );"), 'country-change clearing must request checkout recalculation.');
+assert(source.includes('function renderCityStatus') && source.includes('wdc-city-status-dot'), 'city selector must render one status element with a CSS dot.');
+assert(source.includes('Проверяем...') && source.includes('is-checking'), 'auto resolve must expose checking status.');
+assert(source.includes('Указан неизвестный населенный пункт. Доставка может не рассчитаться') && source.includes('is-manual-warning'), 'manual fallback must expose warning status.');
+assert(source.includes('setFieldValueSilently') && source.includes('triggerCheckoutUpdate'), 'canonical location apply must batch field writes before a single checkout update.');
+assert(source.includes('visibleFieldsMatchCanonicalLocation') && source.includes('hasCompleteVisibleCanonicalSelection'), 'canonical identity shortcut must verify visible city/state/postcode before skipping field repair.');
+assert(source.includes('hasManualLocationSelection') && source.includes('manual_city_context'), 'manual selection must survive updated_checkout and session-backed reload without DB re-resolve.');
+assert(css.includes('.wdc-city-selector-selected.is-checking') && css.includes('.wdc-city-selector-selected.is-selected') && css.includes('.wdc-city-selector-selected.is-manual-warning'), 'city status CSS must define checking/selected/manual states.');
+assert(css.includes('.wdc-location-state-locked') && css.includes('background-color: #f2f2f2') && css.includes('cursor: not-allowed'), 'locked region field must look readonly without using disabled.');
 
 console.log('Checkout city selector smoke passed.');

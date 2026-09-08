@@ -82,15 +82,36 @@ function WC(): WdcFiasSmokeWooCommerce {
 	return $wc;
 }
 
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {
+		public string $id = '';
+		public int $instance_id = 0;
+		public string $method_title = '';
+		public string $method_description = '';
+		public string $enabled = 'yes';
+		public string $title = '';
+		/** @var array<int,string> */
+		public array $supports = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $rates = array();
+
+		public function add_rate( array $rate ): void {
+			$this->rates[] = $rate;
+		}
+	}
+}
+
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = '';
 		public int $insert_id = 0;
+		/** @var array<int,array<string,mixed>> */
+		public array $rows = array();
 		/** @var array<string,array<int,array<string,mixed>>> */
 		public array $tables = array();
 		public function prepare( string $query, mixed ...$args ): array { return array( 'query' => $query, 'args' => $args ); }
 		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
-		public function insert( string $table, array $data, array $format ): int { ++$this->insert_id; $data['id'] = $this->insert_id; $this->tables[ $table ][ $this->insert_id ] = $data; return 1; }
+		public function insert( string $table, array $data, array $format ): int { ++$this->insert_id; $data['id'] = $this->insert_id; $this->tables[ $table ][ $this->insert_id ] = $data; if ( 'wdc_locations' === $table ) { $this->rows[ $this->insert_id ] = $data; } return 1; }
 		public function update( string $table, array $data, array $where, array $format, array $where_format ): int { return 1; }
 		public function get_row( array $prepared, string $output ): ?array {
 			$query = $prepared['query']; $value = (string) ( $prepared['args'][0] ?? '' );
@@ -144,7 +165,7 @@ $wpdb = new wpdb();
 $repository = new LocationRepository( $wpdb );
 ( new LocationImportService( $repository ) )->import_from_array(
 	array(
-		array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'postcode' => '630000', 'fias_id' => 'local-fias-nsk', 'gar_id' => 'local-gar-nsk' ),
+		array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'region_code' => '54', 'city_name' => 'Новосибирск', 'postal_code' => '630000', 'fias_id' => 'local-fias-nsk', 'gar_id' => 'local-gar-nsk' ),
 	)
 );
 
@@ -179,12 +200,16 @@ $local_city_html = (string) ob_get_clean();
 fias_smoke_assert( str_contains( $local_city_html, 'Населенный пункт выбран из справочника' ), 'Renderer must show dictionary city for local city context.' );
 fias_smoke_assert( ! str_contains( $local_city_html, 'Используется введенный вручную населенный пункт' ), 'Renderer must not show manual city for local city context.' );
 
-$manual = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Berlin', 'shipping_address_1' => 'Manual street' ) );
-fias_smoke_assert( 'manual' === ( $session->city_context()['source'] ?? '' ), 'Unknown city must set manual city source.' );
+$unknown = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Berlin', 'shipping_address_1' => 'Manual street' ) );
+fias_smoke_assert( array() === $session->city_context(), 'Unknown profile city must not create manual city trust without explicit manual source.' );
+fias_smoke_assert( ! $unknown->success, 'Unknown profile city chain must remain unsuccessful normalization.' );
+
+$manual = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Berlin', 'shipping_address_1' => 'Manual street', 'wdc_platform_location_selected_source' => 'manual' ) );
+fias_smoke_assert( 'manual' === ( $session->city_context()['source'] ?? '' ), 'Explicit manual source must set manual city context.' );
 ob_start();
 ( new CheckoutAddressRenderer( $session ) )->render();
 $manual_city_html = (string) ob_get_clean();
-fias_smoke_assert( str_contains( $manual_city_html, 'Используется введенный вручную населенный пункт' ), 'Renderer must show manual city state for manual fallback city.' );
+fias_smoke_assert( str_contains( $manual_city_html, 'Используется введенный вручную населенный пункт' ), 'Renderer must show manual city state for explicit manual fallback city.' );
 fias_smoke_assert( ! $manual->success, 'Manual city chain must remain unsuccessful normalization.' );
 
 $gar = new GarSyncManager( new ActionScheduler( new Logger() ), new GarChangesClient( $http ), new Logger(), $settings, $wpdb );

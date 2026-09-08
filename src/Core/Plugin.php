@@ -233,6 +233,7 @@ use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentRenderer;
 use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentSnapshotBuilder;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationProfileMatcher;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Locations\LocationCoordinateEnricher;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
@@ -855,7 +856,8 @@ final class Plugin {
 			)
 		) );
 		$this->container->register( CheckoutLocationSearch::class, fn(): CheckoutLocationSearch => new CheckoutLocationSearch( $this->container->get( LocationSearchService::class ) ) );
-		$this->container->register( CheckoutLocationAjax::class, fn(): CheckoutLocationAjax => new CheckoutLocationAjax( $this->container->get( CheckoutLocationSearch::class ), $this->container->get( SettingsRepository::class ), $this->container->get( LocationCountryIndexService::class ) ) );
+		$this->container->register( CheckoutLocationProfileMatcher::class, fn(): CheckoutLocationProfileMatcher => new CheckoutLocationProfileMatcher( $this->container->get( LocationRepository::class ) ) );
+		$this->container->register( CheckoutLocationAjax::class, fn(): CheckoutLocationAjax => new CheckoutLocationAjax( $this->container->get( CheckoutLocationSearch::class ), $this->container->get( SettingsRepository::class ), $this->container->get( LocationCountryIndexService::class ), $this->container->get( CheckoutLocationProfileMatcher::class ) ) );
 		$this->container->register( CheckoutCityResolver::class, fn(): CheckoutCityResolver => new CheckoutCityResolver( $this->container->get( LocationRepository::class ), $this->container->get( CheckoutLocationSearch::class ) ) );
 		$this->container->register( FiasEndpoints::class, fn(): FiasEndpoints => new FiasEndpoints() );
 		$this->container->register( FiasLogger::class, fn(): FiasLogger => new FiasLogger( $this->container->get( Logger::class ) ) );
