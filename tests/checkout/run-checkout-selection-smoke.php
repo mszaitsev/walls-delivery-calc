@@ -167,6 +167,10 @@ final class WdcCheckoutSelectionSmokeSession {
 	/** @var array<string,mixed> */
 	public array $data = array();
 
+	public function get_session_data(): array {
+		return $this->data;
+	}
+
 	public function set( string $key, mixed $value ): void {
 		$this->data[ $key ] = $value;
 	}
@@ -696,5 +700,94 @@ checkout_selection_assert( str_contains( $new_shipping_method_source, 'save_rate
 checkout_selection_assert( str_contains( $new_shipping_method_source, '$previous_stored_rates' ) && str_contains( $new_shipping_method_source, 'fresh_wdc_method_id' ) && ! str_contains( $reconcile_source, "self::METHOD_ID . ':' . \$normalized_rate_id" ), 'Shipping choice reconciliation must use previous stored WDC ownership evidence and return exact fresh raw Woo rate keys.' );
 $shipping_registrar_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
 checkout_selection_assert( str_contains( $shipping_registrar_source, "add_filter( 'woocommerce_shipping_chosen_method'" ) && str_contains( $shipping_registrar_source, 'preserve_chosen_wdc_method' ) && str_contains( $shipping_registrar_source, 'fresh_wdc_rate_id' ) && str_contains( $shipping_registrar_source, 'is_fresh_wdc_rate' ) && ! str_contains( $shipping_registrar_source, 'is_wdc_shipping_method_choice' ), 'Shipping registrar must hook the final WooCommerce chosen-method boundary using fresh package rates and WDC metadata ownership.' );
+
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( string $value ): string {
+		return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $value ) ) ?? '';
+	}
+}
+
+// Replay Woo's POST overwrite before the post-calculation packages boundary.
+$session = checkout_selection_reset();
+$settings = new SettingsRepository();
+$settings->set( 'checkout_sort_mode', RateSorter::CHEAPEST );
+$selector = new \WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector( $session, $settings );
+$registrar = checkout_selection_registrar( $carrier, $session );
+$method = checkout_selection_method( $carrier, $session );
+$rates_for_wc = new ReflectionMethod( NewShippingMethod::class, 'rates_for_wc' );
+$rates = array();
+foreach ( array( 'g1' => array( array( 'A', 100, 8 ), array( 'B', 500, 2 ), array( 'C', 300, 4 ) ), 'g2' => array( array( 'A', 200, 6 ), array( 'B', 400, 1 ), array( 'C', 600, 5 ) ) ) as $group => $specs ) {
+	foreach ( $specs as [ $tariff, $price, $days ] ) {
+		$rates[] = DeliveryRate::from_array( array(
+			'rate_id' => $group . ':' . $tariff, 'tariff_key' => $tariff, 'title' => $tariff,
+			'carrier_key' => 'selection_demo', 'service_key' => 'selection_demo', 'delivery_type' => DeliveryType::COURIER,
+			'price' => Money::from_rubles( $price )->to_array(), 'delivery_days' => DateRange::single( $days )->to_array(),
+			'meta' => array( 'tariff_selector_group' => true, 'checkout_group_id' => $group ),
+		) );
+	}
+}
+$session->save_selected_tariff( 'g1', array( 'object_code' => 'C' ) );
+$session->save_selected_tariff( 'g2', array( 'object_code' => 'C' ) );
+WC()->session->set( 'chosen_shipping_methods', array( 0 => 'g1', 3 => 'g1', 7 => 'flat_rate:8' ) );
+WC()->session->set( 'wdc_platform_city_context', array( 'source' => 'manual', 'city_name' => 'Keep city' ) );
+WC()->session->set( 'wdc_platform_normalized_address', array( 'address' => 'Keep address' ) );
+$session->save_pickup_selection_for_family( 'selection_demo:pickup', array( 'carrier_key' => 'selection_demo', 'service_key' => 'selection_demo', 'pickup_family' => 'selection_demo:pickup', 'point_code' => 'KEEP', 'point_address' => 'Keep point' ) );
+$before = WC()->session->data;
+$selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=cheapest' );
+checkout_selection_assert( ! $session->has_pending_sort_selection_reset() && 'C' === $session->selected_tariff( 'g1' )['object_code'], 'Initial mode must preserve existing choices.' );
+foreach ( array( 'cheapest', 'invalid-value' ) as $posted ) {
+	$selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=' . $posted );
+	checkout_selection_assert( ! $session->has_pending_sort_selection_reset() && RateSorter::CHEAPEST === $session->selected_sort_mode(), 'Same/invalid mode must not reset selection or replace effective mode.' );
+}
+
+foreach ( array( RateSorter::FASTEST => 'g2', RateSorter::CHEAPEST => 'g1' ) as $mode => $first_group ) {
+	WC()->session->set( 'shipping_for_package_23', array( 'rates' => 'stale-order' ) );
+	$selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=' . $mode );
+	checkout_selection_assert( null === WC()->session->get( 'shipping_for_package_23' ), 'Sort transition must invalidate cached packages beyond index 19.' );
+	checkout_selection_assert( $session->has_pending_sort_selection_reset() && array() === $session->selected_tariffs(), 'Explicit mode transition must clear every tariff group before active-rate construction.' );
+	$selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=' . $mode );
+	$sorted = $rates_for_wc->invoke( $method, $rates );
+	$expected_tariff = RateSorter::FASTEST === $mode ? 'B' : 'A';
+	foreach ( $sorted as $rate ) {
+		checkout_selection_assert( $expected_tariff === $rate->tariff_key && $rate->tariff_key === $rate->meta['tariff_variants'][0]['object_code'], 'Every method must use its first newly sorted tariff.' );
+	}
+	checkout_selection_assert( $first_group === $sorted[0]->rate_id, 'Method ordering must follow newly active tariffs.' );
+	$other_package_rates = array_map( static function ( DeliveryRate $rate ): DeliveryRate {
+		return DeliveryRate::from_array( array_merge( $rate->to_array(), array(
+			'price' => Money::from_rubles( 'C' === $rate->tariff_key ? 1 : 1000 )->to_array(),
+			'delivery_days' => DateRange::single( 'C' === $rate->tariff_key ? 1 : 10 )->to_array(),
+		) ) );
+	}, $rates );
+	foreach ( $rates_for_wc->invoke( $method, $other_package_rates ) as $rate ) {
+		checkout_selection_assert( 'C' === $rate->tariff_key, 'Another package sharing group IDs must use its own first rate during transition, not defaults saved by the first package.' );
+	}
+	$specs = array();
+	foreach ( $sorted as $rate ) {
+		$specs[ $rate->rate_id ] = $rate->price->get_rubles();
+	}
+	$fresh = checkout_selection_filter_rates( $specs );
+	$packages = array( 0 => array( 'rates' => $fresh ), 3 => array( 'rates' => $fresh ), 7 => array( 'rates' => array_merge( $fresh, array( 'flat_rate:8' => array( 'cost' => '10' ) ) ) ) );
+	$old_method = 'g1' === $first_group ? 'g2' : 'g1';
+	WC()->session->set( 'chosen_shipping_methods', array( 0 => $old_method, 3 => $old_method, 7 => 'flat_rate:8' ) );
+	checkout_selection_assert( $packages === $registrar->apply_sort_shipping_choices( $packages ), 'Reset boundary must not modify rates or package order.' );
+	checkout_selection_assert( array( 0 => $first_group, 3 => $first_group, 7 => 'flat_rate:8' ) === WC()->session->get( 'chosen_shipping_methods' ), 'Reset must win over stale POST in every WDC package, preserving third-party choice.' );
+	checkout_selection_assert( $first_group === $registrar->preserve_chosen_wdc_method( 'free_shipping:1', $fresh, $first_group ), 'Woo default filtering must retain the new first WDC choice, not a free-shipping preference.' );
+	checkout_selection_assert( ! $session->has_pending_sort_selection_reset(), 'Reset must be consumed once after all packages, not persisted across requests.' );
+	foreach ( array( 'wdc_platform_city_context', 'wdc_platform_normalized_address', 'wdc_platform_pickup_selections' ) as $key ) {
+		checkout_selection_assert( ( $before[ $key ] ?? null ) === ( WC()->session->data[ $key ] ?? null ), 'Sorting must preserve unrelated destination/pickup session state: ' . $key );
+	}
+	$session->save_selected_tariff( 'g1', array( 'object_code' => 'C' ) );
+	$session->save_selected_tariff( 'g2', array( 'object_code' => 'C' ) );
+	WC()->session->set( 'chosen_shipping_methods', array( 0 => $old_method, 3 => $old_method, 7 => 'flat_rate:8' ) );
+	$selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=' . $mode );
+	foreach ( $rates_for_wc->invoke( $method, $rates ) as $rate ) {
+		checkout_selection_assert( 'C' === $rate->tariff_key, 'Manual tariff chosen after reset must survive ordinary refresh.' );
+	}
+	$registrar->apply_sort_shipping_choices( $packages );
+	checkout_selection_assert( $old_method === WC()->session->get( 'chosen_shipping_methods' )[0], 'Ordinary refresh must preserve manually reselected method.' );
+}
+$fresh_request_session = new CheckoutSessionManager();
+checkout_selection_assert( ! $fresh_request_session->has_pending_sort_selection_reset(), 'Sort reset signal must be request-local.' );
+checkout_selection_assert( str_contains( $shipping_registrar_source, "add_filter( 'woocommerce_shipping_packages'" ), 'Sort reset must run after Woo has reapplied POST and calculated all packages.' );
 
 echo "Checkout selection smoke test passed.\n";

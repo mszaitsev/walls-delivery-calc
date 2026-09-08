@@ -52,6 +52,9 @@ final class CheckoutSortSelector {
 		$mode = isset( $data['wdc_platform_checkout_sort_mode'] ) ? sanitize_key( wp_unslash( (string) $data['wdc_platform_checkout_sort_mode'] ) ) : '';
 		if ( in_array( $mode, array( RateSorter::CHEAPEST, RateSorter::FASTEST ), true ) ) {
 			$previous = $this->session_manager->selected_sort_mode();
+			if ( in_array( $previous, array( RateSorter::CHEAPEST, RateSorter::FASTEST ), true ) && $previous !== $mode ) {
+				$this->session_manager->reset_selections_for_sort_change();
+			}
 			$this->session_manager->save_sort_mode( $mode );
 			if ( $previous !== $mode ) {
 				$this->clear_shipping_rate_cache();
@@ -72,8 +75,12 @@ final class CheckoutSortSelector {
 		}
 
 		$session = WC()->session;
-		for ( $index = 0; $index < 20; $index++ ) {
-			$key = 'shipping_for_package_' . $index;
+		$keys = array_map( static fn( int $index ): string => 'shipping_for_package_' . $index, range( 0, 19 ) );
+		if ( method_exists( $session, 'get_session_data' ) ) {
+			$data = $session->get_session_data();
+			$keys = array_filter( array_keys( is_array( $data ) ? $data : array() ), static fn( mixed $key ): bool => is_string( $key ) && str_starts_with( $key, 'shipping_for_package_' ) );
+		}
+		foreach ( $keys as $key ) {
 			if ( method_exists( $session, '__unset' ) ) {
 				$session->__unset( $key );
 				continue;

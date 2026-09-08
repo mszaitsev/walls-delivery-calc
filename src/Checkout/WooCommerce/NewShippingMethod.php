@@ -431,7 +431,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	 * @param array<int,DeliveryRate> $rates
 	 */
 	private function tariff_selector_rate( string $group_id, array $rates ): DeliveryRate {
-		$selected = $this->session_manager->selected_tariff( $group_id );
+		$selected = $this->session_manager->has_pending_sort_selection_reset() ? array() : $this->session_manager->selected_tariff( $group_id );
 		$selected_object = (string) ( $selected['object_code'] ?? '' );
 		$active = $rates[0];
 		$selected_found = false;

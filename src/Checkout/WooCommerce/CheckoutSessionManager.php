@@ -31,6 +31,7 @@ final class CheckoutSessionManager {
 	private const DADATA_SUGGESTION_CACHE_LIMIT = 40;
 
 	private CheckoutLocationFingerprint $location_fingerprint;
+	private bool $sort_selection_reset_pending = false;
 
 	public function __construct( ?CheckoutLocationFingerprint $location_fingerprint = null ) {
 		$this->location_fingerprint = $location_fingerprint ?? new CheckoutLocationFingerprint();
@@ -741,6 +742,26 @@ final class CheckoutSessionManager {
 		return (string) $this->get( self::SORT_MODE_KEY, '' );
 	}
 
+	public function reset_selections_for_sort_change(): void {
+		$this->clear_selected_tariffs();
+		$this->sort_selection_reset_pending = true;
+	}
+
+	public function has_pending_sort_selection_reset(): bool {
+		return $this->sort_selection_reset_pending;
+	}
+
+	/** @param array<int|string,string> $first_methods */
+	public function apply_sort_shipping_choices( array $first_methods ): void {
+		$chosen = $this->get( 'chosen_shipping_methods', array() );
+		$chosen = is_array( $chosen ) ? $chosen : array();
+		foreach ( $first_methods as $package_key => $method_id ) {
+			$chosen[ $package_key ] = $method_id;
+		}
+		$this->set( 'chosen_shipping_methods', $chosen );
+		$this->sort_selection_reset_pending = false;
+	}
+
 	/**
 	 * @param array<string,array<string,mixed>> $rates
 	 */
@@ -783,6 +804,10 @@ final class CheckoutSessionManager {
 		$selected = $this->get( self::SELECTED_TARIFFS_KEY, array() );
 
 		return is_array( $selected ) ? $selected : array();
+	}
+
+	public function clear_selected_tariffs(): void {
+		$this->set( self::SELECTED_TARIFFS_KEY, array() );
 	}
 
 	/**
