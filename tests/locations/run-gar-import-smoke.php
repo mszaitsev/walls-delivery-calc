@@ -8,7 +8,6 @@ use WallsShop\WDC\Locations\Import\GarPlacesCsvImporter;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotExporter;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotImporter;
-use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\RegionRepository;
@@ -432,7 +431,7 @@ gar_smoke_assert( true, '0011 migration must tolerate duplicate column/index SQL
 
 $outdated_db = new wpdb();
 $outdated_db->stage_columns = array_values( array_diff( $outdated_db->stage_columns, array( 'district_name' ) ) );
-$outdated_importer = new GarPlacesCsvImporter( new LocationRepository( $outdated_db ), new RegionRepository( $outdated_db ), new LocationAliasGenerator(), $outdated_db );
+$outdated_importer = new GarPlacesCsvImporter( new LocationRepository( $outdated_db ), new RegionRepository( $outdated_db ), $outdated_db );
 $outdated_result = $outdated_importer->import_from_file( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv' );
 gar_smoke_assert( ! $outdated_result->success && str_contains( implode( ' ', $outdated_result->errors ), 'GAR staging table schema is outdated. Run plugin migrations.' ), 'Outdated stage schema must fail with clear preflight error.' );
 
@@ -440,7 +439,7 @@ $failing_db = new wpdb();
 $failing_db->force_sql_bulk = true;
 $failing_db->fail_bulk_insert = true;
 $failing_db->last_error = 'Unknown column district_name';
-$failing_importer = new GarPlacesCsvImporter( new LocationRepository( $failing_db ), new RegionRepository( $failing_db ), new LocationAliasGenerator(), $failing_db );
+$failing_importer = new GarPlacesCsvImporter( new LocationRepository( $failing_db ), new RegionRepository( $failing_db ), $failing_db );
 $failing_job = $failing_importer->create_job( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv', 'failing-job' );
 $failing_job = $failing_importer->step_job( $failing_job );
 gar_smoke_assert( 'failed' === $failing_job['phase'], 'Failed stage bulk insert must set GAR job phase to failed.' );
@@ -450,7 +449,7 @@ gar_smoke_assert( array() !== $failing_job['errors'] && str_contains( implode( '
 $direct_failure_db = new wpdb();
 $direct_failure_db->fail_bulk_insert = true;
 $direct_failure_db->last_error = 'simulated stage insert failure';
-$direct_failure_importer = new GarPlacesCsvImporter( new LocationRepository( $direct_failure_db ), new RegionRepository( $direct_failure_db ), new LocationAliasGenerator(), $direct_failure_db );
+$direct_failure_importer = new GarPlacesCsvImporter( new LocationRepository( $direct_failure_db ), new RegionRepository( $direct_failure_db ), $direct_failure_db );
 $bulk_stage = new ReflectionMethod( GarPlacesCsvImporter::class, 'bulk_insert_stage_rows' );
 $bulk_stage->setAccessible( true );
 $thrown = false;
@@ -478,7 +477,7 @@ $wpdb = new wpdb();
 $locations = new LocationRepository( $wpdb );
 $regions = new RegionRepository( $wpdb );
 $search_service = new LocationSearchService( $locations );
-$importer = new GarPlacesCsvImporter( $locations, $regions, new LocationAliasGenerator(), $wpdb );
+$importer = new GarPlacesCsvImporter( $locations, $regions, $wpdb );
 $result = $importer->import_from_file( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv' );
 
 gar_smoke_assert( $result->success, 'GAR import must succeed.' );
@@ -652,12 +651,12 @@ gar_smoke_assert( ! $bad_result->success && str_contains( implode( ' ', $bad_res
 
 $missing_stage_db = new wpdb();
 $missing_stage_db->missing_tables = array( 'wdc_gar_places_stage' );
-$missing_stage = new GarPlacesCsvImporter( new LocationRepository( $missing_stage_db ), new RegionRepository( $missing_stage_db ), new LocationAliasGenerator(), $missing_stage_db );
+$missing_stage = new GarPlacesCsvImporter( new LocationRepository( $missing_stage_db ), new RegionRepository( $missing_stage_db ), $missing_stage_db );
 $missing_stage_result = $missing_stage->import_from_file( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv' );
 gar_smoke_assert( ! $missing_stage_result->success && str_contains( implode( ' ', $missing_stage_result->errors ), 'GAR staging table does not exist. Run plugin migrations first.' ), 'clear_stage must report missing staging table.' );
 
 $job_db = new wpdb();
-$job_importer = new GarPlacesCsvImporter( new LocationRepository( $job_db ), new RegionRepository( $job_db ), new LocationAliasGenerator(), $job_db );
+$job_importer = new GarPlacesCsvImporter( new LocationRepository( $job_db ), new RegionRepository( $job_db ), $job_db );
 $job = $job_importer->create_job( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv', 'test-job' );
 gar_smoke_assert( 'staging' === $job['phase'], 'GAR progress job must start in staging phase.' );
 for ( $i = 0; $i < 10 && 'finished' !== $job['phase'] && 'failed' !== $job['phase']; $i++ ) {

@@ -5,7 +5,6 @@ namespace WallsShop\WDC\Locations\Import;
 
 use RuntimeException;
 use SplFileObject;
-use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
@@ -16,7 +15,6 @@ defined( 'ABSPATH' ) || exit;
 final class LocationIncrementalUpdateService {
 	private const ACTIVE_JOB_OPTION = 'wdc_locations_incremental_update_job';
 	private const CSV_BATCH_SIZE = 1000;
-	private const ALIAS_BATCH_SIZE = 500;
 	private const SAMPLE_LIMIT = 100;
 	private const MAX_COUNT_DELTA_RATIO = 0.20;
 
@@ -100,13 +98,13 @@ final class LocationIncrementalUpdateService {
 		'city_fias_id', 'city_kladr_id',
 		'settlement_name',
 		'settlement_type',
-		'place_name', 'place_type', 'place_level', 'kladr_id', 'okato', 'oktmo', 'postal_code',
+		'place_name', 'place_type', 'place_level', 'kladr_id', 'okato', 'oktmo',
 		'active',
 	);
 
 	private \wpdb $wpdb;
 
-	public function __construct( private LocationAliasGenerator $alias_generator, ?\wpdb $db = null, private ?LocationIncrementalCandidateEnricher $enricher = null, private ?DeliveryQuoteCacheManager $delivery_cache = null ) {
+	public function __construct( ?\wpdb $db = null, private ?LocationIncrementalCandidateEnricher $enricher = null, private ?DeliveryQuoteCacheManager $delivery_cache = null ) {
 		global $wpdb;
 
 		$this->wpdb = $db ?? $wpdb;
@@ -139,12 +137,9 @@ final class LocationIncrementalUpdateService {
 			'changed_count'          => 0,
 			'changed_by_field'       => array(),
 			'candidate_count'        => 0,
-			'candidate_aliases'      => 0,
 			'staging_table'          => $this->staging_table( $token ),
 			'candidate_table'        => $this->candidate_table( $token ),
-			'candidate_alias_table'  => $this->candidate_alias_table( $token ),
 			'previous_table'         => $this->previous_table( $token ),
-			'previous_alias_table'   => $this->previous_alias_table( $token ),
 			'validation'             => array(),
 			'errors'                 => array(),
 			'started_at'             => $this->now(),
@@ -170,6 +165,7 @@ final class LocationIncrementalUpdateService {
 	}
 
 	private function advance_workflow( array $job ): array {
+		unset( $job['changed_by_field']['postal_code'] );
 		$phase = (string) ( $job['phase'] ?? '' );
 		if ( 'staging' === $phase ) {
 			return $this->step_staging_job( $job );
@@ -202,7 +198,6 @@ final class LocationIncrementalUpdateService {
 			return $job;
 		}
 		$candidate = $this->table_name( (string) $job['candidate_table'] );
-		$aliases = $this->table_name( (string) $job['candidate_alias_table'] );
 		$cursor = (int) ( $job['cursor'] ?? 0 );
 		if ( 'candidate_seed' === $phase ) {
 			if ( empty( $job['seed_initialized'] ) ) {
@@ -296,26 +291,13 @@ final class LocationIncrementalUpdateService {
 				throw new RuntimeException( 'Candidate row count does not match the source diff.' );
 			}
 			if ( ! $job['validation']['passed'] ) { throw new RuntimeException( implode( ' ', $job['validation']['errors'] ) ); }
-			$this->create_working_table( $aliases, $this->aliases_table() );
-			$job['phase'] = 'aliases_build'; $job['cursor'] = 0;
-			return $job;
-		}
-		if ( 'aliases_build' === $phase ) {
-			$rows = $this->rows_after( $candidate, $cursor, self::ALIAS_BATCH_SIZE );
-			$batch = $this->alias_rows_for( $rows );
-			if ( $this->is_memory_db() ) {
-				$this->wpdb->wdc_incremental_tables[$aliases] = array_merge( $this->wpdb->wdc_incremental_tables[$aliases], $batch );
-			} else { $this->insert_alias_rows( $aliases, $batch ); }
-			$job['candidate_aliases'] += count( $batch );
-			if ( array() !== $rows ) { $job['cursor'] = (int) end( $rows )['id']; }
-			$job['aliases_processed'] = (int) ( $job['aliases_processed'] ?? 0 ) + count( $rows );
-			if ( count( $rows ) < self::ALIAS_BATCH_SIZE ) { $job['phase'] = 'ready_to_apply'; }
+			$job['phase'] = 'ready_to_apply'; $job['cursor'] = 0;
 			return $job;
 		}
 		if ( 'ready_to_apply' === $phase ) { $job['phase'] = 'applying'; return $job; }
 		if ( 'applying' === $phase ) {
 			if ( null === $this->delivery_cache ) { throw new RuntimeException( 'Delivery cache service is unavailable.' ); }
-			// Recover an interrupted response after the paired atomic rename.
+			// Recover an interrupted response after the atomic rename.
 			if ( $this->swap_completed( $job ) ) {
 				$job['phase'] = 'applied';
 				$job['applied_at'] = $job['applied_at'] ?? $this->now();
@@ -363,7 +345,7 @@ final class LocationIncrementalUpdateService {
 
 	private function cleanup_job( array $job ): void {
 		$token = $this->token( (string) $job['job_id'] );
-		foreach ( array( $this->staging_table( $token ), $this->candidate_table( $token ), $this->candidate_alias_table( $token ), $this->previous_table( $token ), $this->previous_alias_table( $token ) ) as $table ) {
+		foreach ( array( $this->staging_table( $token ), $this->candidate_table( $token ), $this->previous_table( $token ) ) as $table ) {
 			if ( $this->is_memory_db() ) { unset( $this->wpdb->wdc_incremental_tables[$table] ); }
 			else { $this->query_or_fail( "DROP TABLE IF EXISTS {$table}", 'Unable to clean update tables.' ); }
 		}
@@ -371,11 +353,8 @@ final class LocationIncrementalUpdateService {
 
 	private function swap_completed( array $job ): bool {
 		return $this->table_exists( $job['previous_table'] )
-			&& $this->table_exists( $job['previous_alias_table'] )
 			&& ! $this->table_exists( $job['candidate_table'] )
-			&& ! $this->table_exists( $job['candidate_alias_table'] )
-			&& $this->table_exists( $this->locations_table() )
-			&& $this->table_exists( $this->aliases_table() );
+			&& $this->table_exists( $this->locations_table() );
 	}
 
 	private function table_exists( string $table ): bool {
@@ -448,7 +427,7 @@ final class LocationIncrementalUpdateService {
 			'candidate_seed' => 'Подготовка новой базы', 'candidate_changes' => 'Применение изменений',
 			'candidate_derived' => 'Подготовка названий', 'enrich_postcodes' => 'Получение почтовых индексов',
 			'enrich_coordinates' => 'Получение координат', 'enrich_russianpost_courier' => 'Подбор индексов курьерской Почты',
-			'candidate_validate' => 'Проверка новой базы', 'aliases_build' => 'Создание поисковых алиасов',
+			'candidate_validate' => 'Проверка новой базы',
 			'ready_to_apply' => 'Новая база готова', 'applying' => 'Применение новой базы',
 			'cache_invalidate' => 'Очистка кеша доставки', 'cleanup' => 'Очистка временных данных', 'finished' => 'Готово',
 		);
@@ -493,14 +472,10 @@ final class LocationIncrementalUpdateService {
 		}
 
 		$current = $this->locations_table();
-		$aliases = $this->aliases_table();
 		$candidate = $this->table_name( (string) ( $job['candidate_table'] ?? '' ) );
-		$alias_candidate = $this->table_name( (string) ( $job['candidate_alias_table'] ?? '' ) );
 		$previous = $this->table_name( (string) ( $job['previous_table'] ?? '' ) );
-		$previous_aliases = $this->table_name( (string) ( $job['previous_alias_table'] ?? '' ) );
 
 		$this->ensure_table( $candidate );
-		$this->ensure_table( $alias_candidate );
 		$validation = $this->validate_candidate( $candidate, $this->count_table( $current ) );
 		if ( ! empty( $validation['errors'] ) ) {
 			$job['validation'] = $validation;
@@ -509,7 +484,7 @@ final class LocationIncrementalUpdateService {
 		}
 
 		$this->query_or_fail(
-			"RENAME TABLE {$current} TO {$previous}, {$candidate} TO {$current}, {$aliases} TO {$previous_aliases}, {$alias_candidate} TO {$aliases}",
+			"RENAME TABLE {$current} TO {$previous}, {$candidate} TO {$current}",
 			'Unable to atomically swap location tables.'
 		);
 
@@ -522,8 +497,6 @@ final class LocationIncrementalUpdateService {
 				'applied_at' => $job['applied_at'],
 				'current_table' => $current,
 				'previous_table' => $previous,
-				'current_alias_table' => $aliases,
-				'previous_alias_table' => $previous_aliases,
 			)
 		);
 
@@ -918,29 +891,6 @@ final class LocationIncrementalUpdateService {
 		return array( 'passed' => array() === $errors, 'errors' => $errors, 'current_count' => $current_count, 'candidate_count' => $count );
 	}
 
-	/**
-	 * @param array<int,array<string,mixed>> $rows
-	 */
-	private function insert_alias_rows( string $table, array $rows ): int {
-		if ( array() === $rows ) {
-			return 0;
-		}
-		$columns = array( 'location_id', 'alias', 'alias_normalized', 'source', 'created_at' );
-		$sql = sprintf(
-			'INSERT IGNORE INTO %s (%s) VALUES %s',
-			$table,
-			implode( ', ', $columns ),
-			implode( ', ', array_fill( 0, count( $rows ), '(%d, %s, %s, %s, %s)' ) )
-		);
-		$args = array();
-		foreach ( $rows as $row ) {
-			foreach ( $columns as $column ) {
-				$args[] = $row[ $column ] ?? '';
-			}
-		}
-		$this->query_or_fail( $this->wpdb->prepare( $sql, ...$args ), 'Unable to insert candidate aliases.' );
-		return count( $rows );
-	}
 
 
 	/**
@@ -1011,9 +961,9 @@ final class LocationIncrementalUpdateService {
 
 	private function changed_samples_sql( string $stage, string $current, int $limit = 100 ): string {
 		$diff_json = $this->changed_diff_json_object( 's', 'c' );
-		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, {$diff_json} AS changes, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.country_code = 'RU' AND c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}
+		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, {$diff_json} AS changes FROM {$stage} s INNER JOIN {$current} c ON c.country_code = 'RU' AND c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}
 			UNION ALL
-			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, {$diff_json} AS changes, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}";
+			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, {$diff_json} AS changes FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}";
 		return $limit > 0 ? $sql . ' LIMIT ' . (int) $limit : $sql;
 	}
 
@@ -1217,7 +1167,6 @@ final class LocationIncrementalUpdateService {
 		return array(
 			'staging' => $prefix . 'wdc_locations_update_staging_%',
 			'candidate' => $prefix . 'wdc_locations_candidate_%',
-			'candidate_alias' => $prefix . 'wdc_location_aliases_candidate_%',
 		);
 	}
 
@@ -1226,7 +1175,6 @@ final class LocationIncrementalUpdateService {
 		$patterns = array(
 			'staging' => '/^' . $prefix . 'wdc_locations_update_staging_[a-z0-9]{8,40}$/',
 			'candidate' => '/^' . $prefix . 'wdc_locations_candidate_[a-z0-9]{8,40}$/',
-			'candidate_alias' => '/^' . $prefix . 'wdc_location_aliases_candidate_[a-z0-9]{8,40}$/',
 		);
 		foreach ( $patterns as $type => $pattern ) {
 			if ( preg_match( $pattern, $table ) ) {
@@ -1286,25 +1234,16 @@ final class LocationIncrementalUpdateService {
 		return $this->wpdb->prefix . 'wdc_locations_candidate_' . $token;
 	}
 
-	private function candidate_alias_table( string $token ): string {
-		return $this->wpdb->prefix . 'wdc_location_aliases_candidate_' . $token;
-	}
 
 	private function previous_table( string $token ): string {
 		return $this->wpdb->prefix . 'wdc_locations_previous_' . $token;
 	}
 
-	private function previous_alias_table( string $token ): string {
-		return $this->wpdb->prefix . 'wdc_location_aliases_previous_' . $token;
-	}
 
 	private function locations_table(): string {
 		return $this->wpdb->prefix . 'wdc_locations';
 	}
 
-	private function aliases_table(): string {
-		return $this->wpdb->prefix . 'wdc_location_aliases';
-	}
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
@@ -1355,7 +1294,7 @@ final class LocationIncrementalUpdateService {
 		$result = array( 'dropped' => array(), 'skipped' => array(), 'errors' => array(), 'active_job_cleared' => false, 'debug' => array( 'found' => 0, 'whitelisted' => 0, 'dropped' => 0, 'skipped' => 0, 'elapsed_ms' => 0 ) );
 		foreach ( array_keys( $this->wpdb->wdc_incremental_tables ) as $table ) {
 			if ( '' === $this->temporary_table_type( (string) $table ) ) {
-				if ( str_contains( (string) $table, 'wdc_locations_' ) || str_contains( (string) $table, 'wdc_location_aliases_' ) ) {
+				if ( str_contains( (string) $table, 'wdc_locations_' ) ) {
 					$result['skipped'][] = (string) $table;
 				}
 				continue;
@@ -1607,30 +1546,6 @@ final class LocationIncrementalUpdateService {
 		return array( 'passed' => array() === $errors, 'errors' => array_values( array_unique( $errors ) ), 'current_count' => $current_count, 'candidate_count' => $count );
 	}
 
-	/**
-	 * @param array<int,array<string,mixed>> $locations
-	 * @return array<int,array<string,mixed>>
-	 */
-	private function alias_rows_for( array $locations ): array {
-		$aliases = array();
-		$id = 0;
-		foreach ( $locations as $row ) {
-			$location = Location::from_array( $row );
-			foreach ( $this->alias_generator->generate( $location ) as $alias ) {
-				++$id;
-				$aliases[ $id ] = array(
-					'id' => $id,
-					'location_id' => (int) $row['id'],
-					'alias' => $alias,
-					'alias_normalized' => Location::normalize_search_text( $alias ),
-					'source' => 'gar_import',
-					'created_at' => $this->now(),
-				);
-			}
-		}
-
-		return $aliases;
-	}
 
 	/**
 	 * @param array<string,mixed> $job
@@ -1638,17 +1553,12 @@ final class LocationIncrementalUpdateService {
 	 */
 	private function memory_apply_candidate( array $job ): array {
 		$current = $this->locations_table();
-		$aliases = $this->aliases_table();
 		$previous = (string) $job['previous_table'];
-		$previous_aliases = (string) $job['previous_alias_table'];
 		$candidate = (string) $job['candidate_table'];
-		$alias_candidate = (string) $job['candidate_alias_table'];
 
 		$this->wpdb->wdc_incremental_tables[ $previous ] = $this->wpdb->wdc_incremental_tables[ $current ] ?? array();
-		$this->wpdb->wdc_incremental_tables[ $previous_aliases ] = $this->wpdb->wdc_incremental_tables[ $aliases ] ?? array();
 		$this->wpdb->wdc_incremental_tables[ $current ] = $this->wpdb->wdc_incremental_tables[ $candidate ] ?? array();
-		$this->wpdb->wdc_incremental_tables[ $aliases ] = $this->wpdb->wdc_incremental_tables[ $alias_candidate ] ?? array();
-		unset( $this->wpdb->wdc_incremental_tables[$candidate], $this->wpdb->wdc_incremental_tables[$alias_candidate] );
+		unset( $this->wpdb->wdc_incremental_tables[$candidate] );
 		$job['phase'] = 'applied';
 		$job['applied_at'] = $this->now();
 		return $job;

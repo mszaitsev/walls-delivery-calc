@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Locations\Import\LocationIncrementalUpdateService;
-use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
@@ -158,7 +157,7 @@ function incremental_csv( string $path ): void {
 }
 
 function incremental_service_with_db( wpdb $db ): LocationIncrementalUpdateService {
-	return new LocationIncrementalUpdateService( new LocationAliasGenerator(), $db );
+	return new LocationIncrementalUpdateService( $db );
 }
 
 function incremental_seed_db(): wpdb {
@@ -170,9 +169,7 @@ function incremental_seed_db(): wpdb {
 	);
 	$db->wdc_incremental_tables['wdc_locations'][2]['latitude'] = 55.030199;
 	$db->wdc_incremental_tables['wdc_locations'][2]['longitude'] = 82.92043;
-	$db->wdc_incremental_tables['wdc_location_aliases'] = array(
-		1 => array( 'id' => 1, 'location_id' => 1, 'alias' => 'Город A', 'alias_normalized' => 'город a', 'source' => 'gar_import', 'created_at' => '2026-05-01 00:00:00' ),
-	);
+
 
 	return $db;
 }
@@ -222,12 +219,13 @@ function automatic_fixture(): array {
 	};
 	$courier = new \WallsShop\WDC\Locations\Postcodes\RussianPostCourierCalcPostcodeFillStateService( $repository, $probe, $db );
 	$enricher = new \WallsShop\WDC\Locations\Import\LocationIncrementalCandidateEnricher( $postcodes, new \WallsShop\WDC\Locations\Coordinates\LocationCoordinatesDadataBatchUpdater( $repository, $coordinates ), $courier );
-	$service = new LocationIncrementalUpdateService( new LocationAliasGenerator(), $db, $enricher, new \WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager( null, $db ) );
+	$service = new LocationIncrementalUpdateService( $db, $enricher, new \WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager( null, $db ) );
 	return array( $db, $service, $coordinates, $probe, $enricher );
 }
 function drive( LocationIncrementalUpdateService $service, array $job, string $until = 'finished' ): array {
 	for ( $i = 0; $i < 1000 && $job['phase'] !== $until && ! in_array( $job['phase'], array( 'failed', 'waiting_dadata_limit' ), true ); ++$i ) {
 		$job = $service->step_job( $job );
+		incremental_smoke_assert( 'aliases_build' !== $job['phase'] && ! isset( $job['candidate_alias_table'] ), 'No alias stage or candidate table contract.' );
 		incremental_smoke_assert( isset( $job['stage_label'], $job['stage_processed'], $job['stage_total'], $job['overall_percent'] ), 'Every step has progress payload.' );
 	}
 	return $job;
@@ -244,7 +242,7 @@ incremental_smoke_assert( 1 === $job['new_count'] && 1 === $job['removed_count']
 $candidate = $db->wdc_incremental_tables[$job['candidate_table']];
 $by_fias = array_column( $candidate, null, 'fias_id' );
 incremental_smoke_assert( 55.030199 === $by_fias['fias-b']['latitude'] && '630999' === $by_fias['fias-b']['russianpost_courier_calc_postal_code'], 'Changed keeps enrichment.' );
-incremental_smoke_assert( '630222' === $by_fias['fias-b']['postal_code'], 'GAR source postcode changes explicitly.' );
+incremental_smoke_assert( '630002' === $by_fias['fias-b']['postal_code'], 'Changed preserves enrichment postcode despite a different GAR value.' );
 incremental_smoke_assert( $before[2]['created_at'] === $by_fias['fias-b']['created_at'], 'Changed created_at preserved.' );
 incremental_smoke_assert( 1 === count( $coordinates->calls ) && str_starts_with( $coordinates->calls[0], '630004, ' ), 'Coordinates new-only, postcode first.' );
 incremental_smoke_assert( array( '630004' ) === $probe->calls, 'Courier probes new row only.' );
@@ -268,7 +266,7 @@ foreach ( $fields->getValue( $service ) as $field ) {
 	$new_row[$field] = 'active' === $field ? 0 : 'changed';
 	incremental_smoke_assert( isset( $diff->invoke( $service, $old_row, $new_row )[$field] ), 'Source field is compared: ' . $field );
 }
-foreach ( array( 'fias_id', 'gar_object_id', 'gar_id', 'country_code', 'display_name', 'searchable_text', 'latitude', 'longitude' ) as $field ) {
+foreach ( array( 'fias_id', 'gar_object_id', 'gar_id', 'country_code', 'display_name', 'searchable_text', 'postal_code', 'latitude', 'longitude' ) as $field ) {
 	$old_row = incremental_location_row( 1, 'a', 1, 'Город' ); $new_row = $old_row; $new_row[$field] = 'different';
 	incremental_smoke_assert( array() === $diff->invoke( $service, $old_row, $new_row ), 'Not a mutable source diff: ' . $field );
 }
@@ -322,9 +320,6 @@ $result = $enricher->resolve( 'enrich_coordinates', $row );
 incremental_smoke_assert( 55.03 === $result['patch']['latitude'] && str_starts_with( $coordinates->calls[0], '630004, ' ), 'Coordinates consume enriched postcode.' );
 $result = $enricher->resolve( 'enrich_russianpost_courier', $row );
 incremental_smoke_assert( '630004' === $result['patch']['russianpost_courier_calc_postal_code'] && $before === $db->wdc_incremental_tables, 'Courier scoped resolution never bulk-writes live.' );
-$generator = new LocationAliasGenerator();
-$enriched = array_replace( $row, array( 'postal_code' => '123456', 'latitude' => 1, 'longitude' => 2, 'russianpost_courier_calc_postal_code' => '123456' ) );
-incremental_smoke_assert( $generator->generate( Location::from_array( $row ) ) === $generator->generate( Location::from_array( $enriched ) ), 'Aliases independent of enrichment.' );
 
 [$db, $service] = automatic_fixture();
 $before = $db->wdc_incremental_tables['wdc_locations'];
@@ -341,10 +336,6 @@ $job = $service->create_job( $csv, 'bounded1' ); $job['phase'] = 'candidate_seed
 $job = $service->step_job( $job );
 incremental_smoke_assert( 'candidate_seed' === $job['phase'] && 1000 === $job['seed_processed'], 'Seed capped at 1000 SQL-copy rows.' );
 $job = $service->step_job( $job );
-$db->wdc_incremental_tables[$job['candidate_alias_table']] = array();
-$job['phase'] = 'aliases_build'; $job['cursor'] = 0;
-$job = $service->step_job( $job );
-incremental_smoke_assert( 'aliases_build' === $job['phase'] && 500 === $job['aliases_processed'], 'Aliases capped at 500 locations.' );
 $db->wdc_incremental_tables[$job['staging_table']] = array();
 for ( $i = 3000; $i < 3250; ++$i ) {
 	$db->wdc_incremental_tables[$job['staging_table']][] = incremental_location_row( $i, 'new-' . $i, $i, 'Город D' );
@@ -409,16 +400,38 @@ $GLOBALS['postcode_limit'] = false;
 
 $source = file_get_contents( ABSPATH . 'src/Locations/Admin/LocationsAdminPage.php' );
 incremental_smoke_assert( ! str_contains( $source, 'Подтвердить эту страницу' ) && ! str_contains( $source, 'wdc_locations_incremental_update_prepare' ), 'Retired manual UI/routes absent.' );
+// Exact live failure: postcode is enrichment, not GAR-owned source data.
+[$db, $service, $coordinates, $probe] = automatic_fixture();
+$live = incremental_location_row( 1, 'fias-x', 1001, 'Город X', '630000' );
+$live['place_type'] = 'г';
+$live['latitude'] = 55.1; $live['longitude'] = 82.9;
+$live['russianpost_courier_calc_postal_code'] = '630099';
+$staging = array_replace( $live, array( 'postal_code' => '', 'place_type' => 'город', 'latitude' => null, 'longitude' => null ) );
+$db->wdc_incremental_tables = array( 'wdc_locations' => array( $live ) );
+$job = $service->create_job( $csv, 'ownership1' );
+$job['phase'] = 'diff';
+$db->wdc_incremental_tables[$job['staging_table']] = array( $staging );
+$calls = count( $GLOBALS['postcode_calls'] );
+$job = drive( $service, $job );
+incremental_smoke_assert( 'finished' === $job['phase'] && 1 === $job['changed_count'] && 1 === $job['changed_by_field']['place_type'], 'One source change completes normally.' );
+incremental_smoke_assert( ! array_key_exists( 'postal_code', $job['changed_by_field'] ), 'Postal key absent from changed_by_field.' );
+$expected = array_replace( $live, array( 'place_type' => 'город' ) );
+$actual = $db->wdc_incremental_tables['wdc_locations'][0];
+foreach ( array( 'postal_code', 'latitude', 'longitude', 'russianpost_courier_calc_postal_code', 'place_type' ) as $field ) {
+	incremental_smoke_assert( $actual[$field] === $expected[$field], 'Changed preserves enrichment: ' . $field );
+}
+incremental_smoke_assert( $calls === count( $GLOBALS['postcode_calls'] ) && array() === $coordinates->calls && array() === $probe->calls, 'Changed row never invokes enrichment clients.' );
+incremental_smoke_assert( array( 'wdc_locations' ) === array_keys( $db->wdc_incremental_tables ), 'Apply/cleanup create no alias tables.' );
+$sql = ( new ReflectionMethod( $service, 'changed_samples_sql' ) )->invoke( $service, 'stage', 'live' );
+incremental_smoke_assert( ! str_contains( $sql, 'postal_code' ), 'Changed SQL has no postcode comparison or payload.' );
+
 $cleanup_db = new wpdb();
 $cleanup_db->prefix = 'wp_';
 $cleanup_db->wdc_incremental_tables = array(
 	'wp_wdc_locations' => array( 1 => array( 'id' => 1 ) ),
-	'wp_wdc_location_aliases' => array( 1 => array( 'id' => 1 ) ),
 	'wp_wdc_locations_update_staging_abcd1234' => array( 1 => array( 'id' => 1 ), 2 => array( 'id' => 2 ) ),
 	'wp_wdc_locations_candidate_abcd1234' => array( 1 => array( 'id' => 1 ) ),
-	'wp_wdc_location_aliases_candidate_abcd1234' => array( 1 => array( 'id' => 1 ), 2 => array( 'id' => 2 ), 3 => array( 'id' => 3 ) ),
 	'wp_wdc_locations_previous_abcd1234' => array( 1 => array( 'id' => 1 ) ),
-	'wp_wdc_location_aliases_previous_abcd1234' => array( 1 => array( 'id' => 1 ) ),
 	'wp_wdc_locations_backup_20260602' => array( 1 => array( 'id' => 1 ) ),
 	'wp_wdc_pickup_points_russian_post_staging_abcd1234' => array( 1 => array( 'id' => 1 ) ),
 );
@@ -428,15 +441,12 @@ $temporary_names = array_map( static fn( array $row ): string => $row['table'], 
 sort( $temporary_names );
 incremental_smoke_assert(
 	array(
-		'wp_wdc_location_aliases_candidate_abcd1234',
 		'wp_wdc_locations_candidate_abcd1234',
 		'wp_wdc_locations_update_staging_abcd1234',
 	) === $temporary_names,
-	'list_temporary_tables must find only staging/candidate/candidate_alias tables.'
+	'list_temporary_tables must find only staging/candidate tables.'
 );
-incremental_smoke_assert( 2 === (int) ( $temporary_tables[2]['rows_count'] ?? 0 ) || 2 === (int) ( $temporary_tables[0]['rows_count'] ?? 0 ), 'list_temporary_tables must include rows_count.' );
-incremental_smoke_assert( ! in_array( 'wp_wdc_locations', $temporary_names, true ) && ! in_array( 'wp_wdc_location_aliases', $temporary_names, true ), 'list_temporary_tables must not include current tables.' );
-incremental_smoke_assert( ! in_array( 'wp_wdc_locations_previous_abcd1234', $temporary_names, true ) && ! in_array( 'wp_wdc_location_aliases_previous_abcd1234', $temporary_names, true ), 'list_temporary_tables must not include previous tables.' );
+incremental_smoke_assert( in_array( 2, array_column( $temporary_tables, 'rows_count' ), true ), 'list_temporary_tables must include rows_count.' );
 incremental_smoke_assert( ! in_array( 'wp_wdc_locations_backup_20260602', $temporary_names, true ), 'list_temporary_tables must not include backup tables.' );
 
 update_option( 'wdc_locations_incremental_update_job', array( 'phase' => 'failed' ) );
@@ -447,9 +457,6 @@ sort( $dropped );
 incremental_smoke_assert( $temporary_names === $dropped, 'cleanup_temporary_tables must drop only whitelisted temporary tables.' );
 incremental_smoke_assert( count( $cleanup_result['dropped'] ) > 0 && (int) ( $cleanup_result['debug']['dropped'] ?? 0 ) > 0, 'cleanup_temporary_tables must report dropped count for UI.' );
 incremental_smoke_assert( isset( $cleanup_result['debug']['found'], $cleanup_result['debug']['whitelisted'], $cleanup_result['debug']['elapsed_ms'] ), 'cleanup_temporary_tables must expose debug timing.' );
-incremental_smoke_assert( ! isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations_update_staging_abcd1234'], $cleanup_db->wdc_incremental_tables['wp_wdc_locations_candidate_abcd1234'], $cleanup_db->wdc_incremental_tables['wp_wdc_location_aliases_candidate_abcd1234'] ), 'cleanup_temporary_tables must remove staging/candidate tables.' );
-incremental_smoke_assert( isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations'], $cleanup_db->wdc_incremental_tables['wp_wdc_location_aliases'] ), 'cleanup_temporary_tables must not remove current tables.' );
-incremental_smoke_assert( isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations_previous_abcd1234'], $cleanup_db->wdc_incremental_tables['wp_wdc_location_aliases_previous_abcd1234'] ), 'cleanup_temporary_tables must not remove previous tables.' );
 incremental_smoke_assert( isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations_backup_20260602'] ), 'cleanup_temporary_tables must not remove backup tables.' );
 incremental_smoke_assert( true === $cleanup_result['active_job_cleared'] && false === get_option( 'wdc_locations_incremental_update_job', false ), 'cleanup_temporary_tables must clear failed diagnostic job state.' );
 incremental_smoke_assert( is_array( get_option( 'wdc_locations_incremental_update_last_apply', array() ) ), 'cleanup_temporary_tables must not clear last_apply metadata.' );

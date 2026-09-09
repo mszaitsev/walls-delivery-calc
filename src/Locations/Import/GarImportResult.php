@@ -15,7 +15,6 @@ final class GarImportResult {
 		public int $stage_rows = 0,
 		public int $regions_imported = 0,
 		public int $locations_imported = 0,
-		public int $aliases_imported = 0,
 		public int $skipped_rows = 0,
 		public array $errors = array(),
 		public string $started_at = '',

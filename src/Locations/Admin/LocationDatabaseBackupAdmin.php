@@ -101,7 +101,7 @@ POWERSHELL;
 		}
 		echo '<section><h2>' . esc_html__( 'Резервная копия базы населенных пунктов', 'walls-delivery-calc' ) . '</h2><p>';
 		echo esc_html( $status_error ? 'Сведения о резервной копии недоступны.' : ( empty( $status ) ? 'Резервная копия ещё не создана.' : 'Резервная копия от: ' . $status['date'] ) );
-		echo '</p><p class="description">' . esc_html__( 'Включает населённые пункты и связанные aliases. Регионы и carrier mappings не входят в эту копию.', 'walls-delivery-calc' ) . '</p>';
+		echo '</p><p class="description">' . esc_html__( 'Включает таблицу населённых пунктов. Регионы и carrier mappings не входят в эту копию.', 'walls-delivery-calc' ) . '</p>';
 		$this->form( self::CREATE, 'Создать резервную копию' );
 		$this->form( self::RESTORE, 'Восстановить из резервной копии', empty( $status ) );
 		echo '</section>';

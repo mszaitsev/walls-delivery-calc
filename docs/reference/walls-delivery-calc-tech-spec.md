@@ -931,7 +931,6 @@ interface CarrierAdapterInterface {
 
 ```text
 wdc_locations
-wdc_location_aliases
 wdc_carrier_city_map
 wdc_pickup_points_cache
 wdc_pricing_rules

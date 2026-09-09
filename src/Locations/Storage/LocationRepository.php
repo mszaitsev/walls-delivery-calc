@@ -1781,9 +1781,6 @@ final class LocationRepository {
 		return (int) $this->wpdb->get_var( "SELECT COUNT(DISTINCT region_name) FROM {$this->table_name()} WHERE active = 1 AND region_name != ''" );
 	}
 
-	public function count_aliases(): int {
-		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->alias_table_name()}" );
-	}
 
 	public function count_with_postal_code(): int {
 		if ( $this->has_test_location_rows() ) {
@@ -2396,12 +2393,11 @@ final class LocationRepository {
 	}
 
 	/**
-	 * @return array{locations_deleted:int|null, aliases_deleted:int|null, regions_deleted:int|null, delivery_codes_deleted:int|null}
+	 * @return array{locations_deleted:int|null, regions_deleted:int|null, delivery_codes_deleted:int|null}
 	 */
 	public function clear_all(): array {
 		$result = array(
 			'delivery_codes_deleted' => $this->clear_table( $this->delivery_codes_table_name() ),
-			'aliases_deleted'       => $this->clear_table( $this->alias_table_name() ),
 			'locations_deleted'     => $this->clear_table( $this->table_name() ),
 			'regions_deleted'       => $this->clear_table( $this->region_table_name() ),
 		);
@@ -2409,80 +2405,7 @@ final class LocationRepository {
 		return $result;
 	}
 
-	/**
-	 * @param array<int,string> $aliases
-	 */
-	public function save_aliases( int $location_id, array $aliases, string $source = 'generated' ): void {
-		$location_id = max( 0, $location_id );
-		if ( 0 === $location_id ) {
-			return;
-		}
 
-		$now = current_time( 'mysql' );
-		foreach ( array_values( array_unique( array_filter( array_map( 'trim', $aliases ) ) ) ) as $alias ) {
-			$this->wpdb->insert(
-				$this->alias_table_name(),
-				array(
-					'location_id'      => $location_id,
-					'alias'            => $alias,
-					'alias_normalized' => Location::normalize_search_text( $alias ),
-					'source'           => $source,
-					'created_at'       => $now,
-				),
-				array( '%d', '%s', '%s', '%s', '%s' )
-			);
-		}
-	}
-
-	/**
-	 * @param array<int,array<int,string>> $location_id_to_aliases
-	 */
-	public function bulk_save_aliases( array $location_id_to_aliases, string $source = 'generated' ): int {
-		$location_ids = array_values( array_filter( array_map( 'intval', array_keys( $location_id_to_aliases ) ) ) );
-		if ( array() === $location_ids ) {
-			return 0;
-		}
-
-		if ( property_exists( $this->wpdb, 'aliases' ) ) {
-			$count = 0;
-			foreach ( $location_id_to_aliases as $location_id => $aliases ) {
-				$this->save_aliases( (int) $location_id, $aliases, $source );
-				$count += count( array_unique( array_filter( array_map( 'trim', $aliases ) ) ) );
-			}
-
-			return $count;
-		}
-
-		$placeholders = implode( ', ', array_fill( 0, count( $location_ids ), '%d' ) );
-		$args = $location_ids;
-		array_unshift( $args, $source );
-		$result = $this->wpdb->query( $this->wpdb->prepare( "DELETE FROM {$this->alias_table_name()} WHERE source = %s AND location_id IN ({$placeholders})", ...$args ) );
-		if ( false === $result ) {
-			$this->throw_sql_error( 'Location aliases cleanup failed' );
-		}
-
-		$now = current_time( 'mysql' );
-		$rows = array();
-		foreach ( $location_id_to_aliases as $location_id => $aliases ) {
-			foreach ( array_values( array_unique( array_filter( array_map( 'trim', $aliases ) ) ) ) as $alias ) {
-				$rows[] = array(
-					'location_id'      => (int) $location_id,
-					'alias'            => $alias,
-					'alias_normalized' => Location::normalize_search_text( $alias ),
-					'source'           => $source,
-					'created_at'       => $now,
-				);
-			}
-		}
-
-		if ( array() === $rows ) {
-			return 0;
-		}
-
-		$this->bulk_insert_rows( $this->alias_table_name(), $rows, array( 'alias = VALUES(alias)' ), array( '%d', '%s', '%s', '%s', '%s' ), true );
-
-		return count( $rows );
-	}
 
 	/**
 	 * @return array<string,mixed>
@@ -3411,9 +3334,6 @@ final class LocationRepository {
 		return $this->wpdb->prefix . 'wdc_locations';
 	}
 
-	private function alias_table_name(): string {
-		return $this->wpdb->prefix . 'wdc_location_aliases';
-	}
 
 	private function region_table_name(): string {
 		return $this->wpdb->prefix . 'wdc_regions';

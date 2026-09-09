@@ -6,7 +6,6 @@ namespace WallsShop\WDC\Locations\Import;
 use RuntimeException;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
-use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
@@ -18,7 +17,6 @@ final class FiasImportManager {
 	public function __construct(
 		private PluginEnvironment $environment,
 		private LocationRepository $repository,
-		private LocationAliasGenerator $alias_generator,
 		private ActionScheduler $scheduler
 	) {
 	}
@@ -79,8 +77,7 @@ final class FiasImportManager {
 	private function flush_batch( array $locations ): int {
 		$imported = 0;
 		foreach ( $locations as $location ) {
-			$id = $this->repository->save( $location );
-			$this->repository->save_aliases( $id, $this->alias_generator->generate( $location ), 'generated' );
+			$this->repository->save( $location );
 			++$imported;
 		}
 

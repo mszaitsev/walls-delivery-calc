@@ -5,7 +5,6 @@ namespace WallsShop\WDC\Locations\Import;
 
 use RuntimeException;
 use SplFileObject;
-use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\RegionRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
@@ -62,7 +61,6 @@ final class GarPlacesCsvImporter {
 	public function __construct(
 		private LocationRepository $locations,
 		private RegionRepository $regions,
-		private LocationAliasGenerator $alias_generator,
 		?\wpdb $db = null
 	) {
 		global $wpdb;
@@ -104,7 +102,6 @@ final class GarPlacesCsvImporter {
 			'stage_rows'           => 0,
 			'processed_rows'       => 0,
 			'locations_imported'   => 0,
-			'aliases_imported'     => 0,
 			'skipped_rows'         => 0,
 			'errors'               => array(),
 			'started_at'           => current_time( 'mysql' ),
@@ -225,14 +222,6 @@ final class GarPlacesCsvImporter {
 				try {
 					$upsert = $this->locations->bulk_upsert_locations( $locations );
 					$this->result->locations_imported += (int) $upsert['count'];
-					$location_aliases = array();
-					foreach ( $locations as $location ) {
-						$id = (int) ( $upsert['ids'][ $location->gar_object_id ] ?? 0 );
-						if ( $id > 0 ) {
-							$location_aliases[ $id ] = $this->alias_generator->generate( $location );
-						}
-					}
-					$this->result->aliases_imported += $this->locations->bulk_save_aliases( $location_aliases, 'gar_import' );
 					$this->commit_transaction();
 				} catch ( RuntimeException $exception ) {
 					$this->rollback_transaction();
@@ -328,7 +317,6 @@ final class GarPlacesCsvImporter {
 		$result = $this->process_stage_chunk( (int) ( $job['stage_offset'] ?? 0 ), self::LOCATION_UPSERT_BATCH_SIZE );
 		$job['processed_rows'] += $result['processed'];
 		$job['locations_imported'] += $result['locations'];
-		$job['aliases_imported'] += $result['aliases'];
 		$job['skipped_rows'] += $result['skipped'];
 		$job['stage_offset'] = (int) $job['stage_offset'] + self::LOCATION_UPSERT_BATCH_SIZE;
 		if ( $result['processed'] < self::LOCATION_UPSERT_BATCH_SIZE ) {
@@ -341,7 +329,7 @@ final class GarPlacesCsvImporter {
 	}
 
 	/**
-	 * @return array{processed:int, locations:int, aliases:int, skipped:int}
+	 * @return array{processed:int, locations:int, skipped:int}
 	 */
 	private function process_stage_chunk( int $offset, int $limit ): array {
 		$rows = $this->wpdb->get_results(
@@ -361,27 +349,19 @@ final class GarPlacesCsvImporter {
 		}
 
 		if ( array() === $locations ) {
-			return array( 'processed' => count( $rows ), 'locations' => 0, 'aliases' => 0, 'skipped' => $skipped );
+			return array( 'processed' => count( $rows ), 'locations' => 0, 'skipped' => $skipped );
 		}
 
 		$this->begin_transaction();
 		try {
 			$upsert = $this->locations->bulk_upsert_locations( $locations );
-			$location_aliases = array();
-			foreach ( $locations as $location ) {
-				$id = (int) ( $upsert['ids'][ $location->gar_object_id ] ?? 0 );
-				if ( $id > 0 ) {
-					$location_aliases[ $id ] = $this->alias_generator->generate( $location );
-				}
-			}
-			$aliases = $this->locations->bulk_save_aliases( $location_aliases, 'gar_import' );
 			$this->commit_transaction();
 		} catch ( \Throwable $exception ) {
 			$this->rollback_transaction();
 			throw new RuntimeException( $exception->getMessage(), 0, $exception );
 		}
 
-		return array( 'processed' => count( $rows ), 'locations' => (int) $upsert['count'], 'aliases' => $aliases, 'skipped' => $skipped );
+		return array( 'processed' => count( $rows ), 'locations' => (int) $upsert['count'], 'skipped' => $skipped );
 	}
 
 	public function clear_stage(): void {

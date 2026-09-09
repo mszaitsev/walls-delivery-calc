@@ -19,7 +19,6 @@ use WallsShop\WDC\Locations\Import\LocationsSnapshotExporter;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotImporter;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
-use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 use WallsShop\WDC\Locations\Coordinates\LocationCoordinatesDadataBatchUpdater;
 use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
@@ -154,7 +153,6 @@ final class LocationsAdminPage {
 				<p><strong><?php echo esc_html__( 'Источник населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html__( 'локальная база', 'walls-delivery-calc' ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'FIAS limiter:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->limiter_label() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'GAR sync:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->gar_status_label() ); ?></span></p>
-				<p><strong><?php echo esc_html__( 'Aliases:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $show_deep_counts ? (string) $this->repository->count_aliases() : __( 'по запросу', 'walls-delivery-calc' ) ); ?></span></p>
 				<?php if ( ! $show_deep_counts ) : ?>
 					<p><a class="button" href="<?php echo esc_attr( $deep_counts_url ); ?>"><?php echo esc_html__( 'Показать подробные счетчики', 'walls-delivery-calc' ); ?></a></p>
 				<?php endif; ?>
@@ -286,7 +284,7 @@ final class LocationsAdminPage {
 
 			<div class="wdc-locations-import wdc-display-name-rebuild">
 				<h2><?php echo esc_html__( 'Обработка display_name', 'walls-delivery-calc' ); ?></h2>
-				<p class="description"><?php echo esc_html__( 'Пакетно пересобирает display_name, searchable_text и GAR aliases с учетом текущих правил отображения типов.', 'walls-delivery-calc' ); ?></p>
+				<p class="description"><?php echo esc_html__( 'Пакетно пересобирает display_name и searchable_text с учетом текущих правил отображения типов.', 'walls-delivery-calc' ); ?></p>
 				<button class="button button-primary" type="button" id="wdc-display-name-rebuild-start"><?php echo esc_html__( 'Пересобрать display_name', 'walls-delivery-calc' ); ?></button>
 				<div id="wdc-display-name-rebuild-progress" class="wdc-progress" hidden>
 					<progress value="0" max="100"></progress>
@@ -555,7 +553,7 @@ final class LocationsAdminPage {
 				const done = Number(job.processed_rows || job.rows_exported || job.imported || job.rows_read || job.processed || 0);
 				progress.value = Math.min(100, Math.round(done / Math.max(1, total) * 100));
 				const summary = box.querySelector('.wdc-progress-summary');
-				if (summary) summary.textContent = 'status: ' + (job.status || job.phase || '') + ', phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', marked_no_index: ' + (job.marked_no_index || 0) + ', skipped: ' + (job.skipped || 0) + ', failed: ' + (job.failed || 0) + ', errors: ' + (job.errors || 0) + ', consecutive_errors: ' + (job.consecutive_errors || 0) + ', priority: ' + (job.current_priority || '') + ', mode: ' + (job.resume_strategy || '') + ', skip_reason: ' + (job.last_skip_reason || '') + ', aliases: ' + (job.aliases_updated || 0);
+				if (summary) summary.textContent = 'status: ' + (job.status || job.phase || '') + ', phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', marked_no_index: ' + (job.marked_no_index || 0) + ', skipped: ' + (job.skipped || 0) + ', failed: ' + (job.failed || 0) + ', errors: ' + (job.errors || 0) + ', consecutive_errors: ' + (job.consecutive_errors || 0) + ', priority: ' + (job.current_priority || '') + ', mode: ' + (job.resume_strategy || '') + ', skip_reason: ' + (job.last_skip_reason || '');
 				text.textContent = JSON.stringify(job, null, 2);
 			}
 			function loop(action, box, delay) {
@@ -774,9 +772,8 @@ final class LocationsAdminPage {
 			}
 
 			return sprintf(
-				__( 'База населенных пунктов очищена. Удалено: населенных пунктов — %s, алиасов — %s, регионов — %s, коды доставки — %s.', 'walls-delivery-calc' ),
+				__( 'База населенных пунктов очищена. Удалено: населенных пунктов — %s, регионов — %s, коды доставки — %s.', 'walls-delivery-calc' ),
 				$this->deleted_count_label( $stats['locations_deleted'] ),
-				$this->deleted_count_label( $stats['aliases_deleted'] ),
 				$this->deleted_count_label( $stats['regions_deleted'] ),
 				$this->deleted_count_label( $stats['delivery_codes_deleted'] )
 			);
@@ -830,12 +827,11 @@ final class LocationsAdminPage {
 		}
 
 		return sprintf(
-			__( 'GAR CSV импортирован. Прочитано: %1$d, staging: %2$d, регионов: %3$d, населенных пунктов: %4$d, алиасов: %5$d, пропущено: %6$d.', 'walls-delivery-calc' ),
+			__( 'GAR CSV импортирован. Прочитано: %1$d, staging: %2$d, регионов: %3$d, населенных пунктов: %4$d, пропущено: %5$d.', 'walls-delivery-calc' ),
 			$result->rows_read,
 			$result->stage_rows,
 			$result->regions_imported,
 			$result->locations_imported,
-			$result->aliases_imported,
 			$result->skipped_rows
 		);
 	}
@@ -1073,7 +1069,6 @@ final class LocationsAdminPage {
 			'total'           => $this->repository->count_all(),
 			'processed'       => 0,
 			'updated'         => 0,
-			'aliases_updated' => 0,
 			'last_id'         => 0,
 			'phase'           => 'running',
 			'errors'          => array(),
@@ -1559,9 +1554,7 @@ final class LocationsAdminPage {
 
 		try {
 			$formatter = LocationDisplayNameFormatter::from_rules( $this->type_display_rules() );
-			$alias_generator = new LocationAliasGenerator();
 			$locations = $this->repository->find_batch_after_id( (int) ( $job['last_id'] ?? 0 ), 500 );
-			$aliases = array();
 			$updated = 0;
 			$last_id = (int) ( $job['last_id'] ?? 0 );
 			foreach ( $locations as $location ) {
@@ -1573,14 +1566,9 @@ final class LocationsAdminPage {
 				if ( $this->repository->update_display_fields( $location, $display ) ) {
 					++$updated;
 				}
-				if ( null !== $location->id && $location->id > 0 ) {
-					$aliases[ (int) $location->id ] = $alias_generator->generate( Location::from_array( array_merge( $location->to_array(), array( 'display_name' => $display ) ) ) );
-				}
 			}
-			$aliases_updated = $this->repository->bulk_save_aliases( $aliases, 'gar_import' );
 			$job['processed'] = (int) ( $job['processed'] ?? 0 ) + count( $locations );
 			$job['updated'] = (int) ( $job['updated'] ?? 0 ) + $updated;
-			$job['aliases_updated'] = (int) ( $job['aliases_updated'] ?? 0 ) + $aliases_updated;
 			$job['last_id'] = $last_id;
 			$job['current_batch'] = count( $locations );
 			if ( array() === $locations || (int) $job['processed'] >= (int) ( $job['total'] ?? 0 ) ) {
