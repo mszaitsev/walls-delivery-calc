@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.155.15
+Version: 0.155.16
+
+0.155.16 replaces manual GAR update approvals with a one-click, resumable candidate workflow. Only new RU locations receive postcode, coordinate and Russian Post enrichment; foreign locations and existing enrichment are preserved. A logical job guard serializes maintenance across AJAX steps; the validated locations/aliases pair is applied atomically. See [Locations](docs/subsystems/locations.md).
 
 0.155.15 adds an on-demand paired Locations + aliases database backup on the Locations admin page. Verified shadow copies are restored together with an atomic table swap; the backup remains available. Administrative writers share a fail-fast database lock, and unfinished import jobs prevent backup/restore. The GAR/ФИАС section offers a protected download of `src/Export-GarPlaces.ps1` and its PowerShell command. See [Locations](docs/subsystems/locations.md) for scope and operational requirements.
 

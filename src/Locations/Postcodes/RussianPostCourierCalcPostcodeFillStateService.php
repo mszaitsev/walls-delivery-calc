@@ -36,8 +36,8 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function create_job(): array {
-		$total = $this->count_pending();
+	public function create_job( ?int $scoped_total = null ): array {
+		$total = $scoped_total ?? $this->count_pending();
 		$now = current_time( 'mysql' );
 
 		return array(
@@ -83,6 +83,16 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 	 * @return array<string,mixed>
 	 */
 	public function step( array $job ): array {
+		return $this->step_location( $job );
+	}
+
+	/** Resolve a candidate row without reading a live ID or persisting to live tables. */
+	public function step_candidate_location( array $location, array $state = array() ): array {
+		$location['id'] = 0;
+		return $this->step_location( array() === $state ? $this->create_job( 1 ) : $state, $location );
+	}
+
+	private function step_location( array $job, ?array $scoped_location = null ): array {
 		if ( 'running' !== (string) ( $job['phase'] ?? '' ) ) {
 			return $job;
 		}
@@ -97,7 +107,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 		$job['actual_step_rps'] = 0.0;
 		$job['max_probes_per_step'] = self::MAX_PROBES_PER_STEP;
 		$job['max_step_seconds'] = self::MAX_STEP_SECONDS;
-		$location = is_array( $job['current_location'] ?? null ) && array() !== $job['current_location'] ? $job['current_location'] : $this->next_location( $job );
+		$location = is_array( $job['current_location'] ?? null ) && array() !== $job['current_location'] ? $job['current_location'] : ( $scoped_location ?? $this->next_location( $job ) );
 		if ( null === $location ) {
 			$job['phase'] = 'finished';
 			$job['status'] = 'finished';
@@ -177,9 +187,10 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 
 		$job['candidate_offset'] = $offset;
 		if ( '' !== $found ) {
-			$updated = $had_technical_marker
+			$job['resolved_postcode'] = $found;
+			$updated = null !== $scoped_location ? 1 : ( $had_technical_marker
 				? ( $this->locations->update_russianpost_courier_calc_postal_code_for_location_id( $location_id, $found ) ? 1 : 0 )
-				: $this->locations->update_russianpost_courier_calc_postal_code_for_postal_code( $base_postal_code, $found, true );
+				: $this->locations->update_russianpost_courier_calc_postal_code_for_postal_code( $base_postal_code, $found, true ) );
 			$job['updated'] = (int) ( $job['updated'] ?? 0 ) + ( $updated > 0 ? 1 : 0 );
 			$job['bulk_updated'] = (int) ( $job['bulk_updated'] ?? 0 ) + $updated;
 			$job['last_success_postal_code'] = $found;
@@ -188,11 +199,14 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 			++$job['failed'];
 			++$job['errors'];
 			++$job['consecutive_errors'];
-			$this->locations->update_russianpost_courier_calc_postal_code_for_location_id( $location_id, self::COURIER_POSTCODE_TECHNICAL_ERROR );
+			$job['resolved_postcode'] = self::COURIER_POSTCODE_TECHNICAL_ERROR;
+			if ( null === $scoped_location ) {
+				$this->locations->update_russianpost_courier_calc_postal_code_for_location_id( $location_id, self::COURIER_POSTCODE_TECHNICAL_ERROR );
+			}
 			$this->log_final_technical_marker( $location, $final_api_error_result );
 			$job = $this->finish_location( $job, $location_id );
 		} elseif ( $offset >= count( $candidates ) ) {
-			if ( $had_technical_marker ) {
+			if ( $had_technical_marker && null === $scoped_location ) {
 				$this->locations->clear_russianpost_courier_calc_postal_code_for_location_id( $location_id );
 			}
 			++$job['marked_no_index'];

@@ -4,7 +4,11 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.155.15
+Version: 0.155.16
+
+## GAR Update Composition
+
+The composition root injects `LocationIncrementalCandidateEnricher` and `DeliveryQuoteCacheManager` into `LocationIncrementalUpdateService`. The enricher reuses the registered `DaDataPostcodeClient`, `LocationCoordinatesDadataBatchUpdater` single-location resolver and `RussianPostCourierCalcPostcodeFillStateService` scoped step. It returns patches only; no repository table switching or duplicate HTTP client is introduced. The small option-backed `LocationMaintenanceJobGuard` centralizes the existing maintenance-state contract inside the shared write lock and backup guard.
 
 The composition root registers `LocationWriteLock`, `LocationDatabaseBackupService` and `LocationDatabaseBackupAdmin`. The backup service receives the shared lock, `LocationCountryIndexService`, `DeliveryQuoteCacheManager` and `Logger`; the admin owner receives it plus `PluginEnvironment` and `Logger`. `LocationsAdminPage` receives the admin owner and lock; `DpdGeographyImportService` receives the same lock for its locations-writing requests. No service lookup occurs inside these services. Optional trailing constructor dependencies retain existing diagnostic fixtures; production composition always supplies the lock.
 

@@ -1,6 +1,10 @@
 # Plugin Architecture
 
-Version: 0.155.15
+Version: 0.155.16
+
+## One-Click GAR Update
+
+`LocationIncrementalUpdateService` owns the automatic state machine and candidate persistence. `LocationIncrementalCandidateEnricher` resolves one NEW RU row through existing postcode, coordinate and courier services without a live repository write. `LocationsAdminPage` exposes start/status/step/resume/cancel; the dedicated admin runner polls one bounded step at a time. `LocationMaintenanceJobGuard` defines active maintenance jobs, and `LocationWriteLock` checks incremental ownership after acquiring the existing named lock. Rate sorting, checkout and shipment composition are unchanged.
 
 Locations backup composition: `LocationDatabaseBackupAdmin` owns capability/nonce checks, POST redirects, UI and fixed-path script download; `LocationDatabaseBackupService` owns paired locations/aliases discovery, copying, schema verification and atomic restore. `LocationWriteLock` is the shared fail-fast MySQL named lock for administrative Locations mutations and DPD import start/batches (which can save foreign locations). `LocationsAdminPage` defers terminating AJAX responses via `LocationAdminJsonResponse` so `finally` releases the lock before WordPress exits. Existing import algorithms and repository contracts are unchanged; no migration or global locking framework is introduced.
 

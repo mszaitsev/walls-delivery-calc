@@ -119,7 +119,7 @@ function fixture(): array {
 function old_pair( wpdb $db, array $names, string $stamp ): void { foreach ( $names as $name ) { $db->tables[$name . '_backup_' . $stamp] = $db->tables[$name]; } }
 
 [$db, $service, $lock, $names] = fixture();
-$admin = new LocationDatabaseBackupAdmin( $service, new PluginEnvironment( ABSPATH . 'walls-delivery-calc.php', ABSPATH, '/', '0.155.15' ), new Logger() );
+$admin = new LocationDatabaseBackupAdmin( $service, new PluginEnvironment( ABSPATH . 'walls-delivery-calc.php', ABSPATH, '/', '0.155.16' ), new Logger() );
 if ( in_array( '--download', $argv, true ) ) { $_GET['path'] = 'not-allowed'; $admin->download(); }
 
 check( array() === $service->status(), 'Initially no backup' );
@@ -208,7 +208,7 @@ foreach ( array( 'create', 'restore', 'download' ) as $method ) {
 }
 $_SERVER['REQUEST_METHOD'] = 'GET'; refused( fn() => $admin->create() ); refused( fn() => $admin->restore() );
 [$db, $service] = fixture();
-$admin = new LocationDatabaseBackupAdmin( $service, new PluginEnvironment( ABSPATH . 'walls-delivery-calc.php', ABSPATH, '/', '0.155.15' ), new Logger() );
+$admin = new LocationDatabaseBackupAdmin( $service, new PluginEnvironment( ABSPATH . 'walls-delivery-calc.php', ABSPATH, '/', '0.155.16' ), new Logger() );
 $_SERVER['REQUEST_METHOD'] = 'POST';
 foreach ( array( 'create' => 'created', 'restore' => 'restored' ) as $method => $notice ) {
     try { $admin->$method(); throw new LogicException( 'Expected redirect' ); } catch ( RedirectResponse $response ) {
@@ -221,10 +221,39 @@ ob_start(); $admin->render_script(); $html = ob_get_clean();
 $expected = "pwsh -ExecutionPolicy Bypass -File \"D:\\FIAS\\Export-GarPlaces.ps1\" `\n  -Archive \"D:\\FIAS\\gar_xml_full.zip\" `\n  -OutCsv \"D:\\FIAS\\out\\gar_places.csv\" `\n  -IncludeOptionalCodes";
 check( str_contains( str_replace( "\r\n", "\n", html_entity_decode( $html, ENT_QUOTES, 'UTF-8' ) ), '<pre><code>' . $expected . '</code></pre>' ), 'Exact escaped multiline command' );
 ob_start(); $admin->render(); $html = ob_get_clean(); check( str_contains( $html, 'Резервная копия базы населенных пунктов' ), 'Backup section renders' );
-$download = shell_exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __FILE__ ) . ' --download' );
+$process = proc_open( array( PHP_BINARY, __FILE__, '--download' ), array( 1 => array( 'pipe', 'wb' ), 2 => array( 'pipe', 'wb' ) ), $pipes, null, null, array( 'bypass_shell' => true ) );
+check( is_resource( $process ), 'Download child process starts' );
+$download = stream_get_contents( $pipes[1] );
+$download_error = stream_get_contents( $pipes[2] );
+fclose( $pipes[1] ); fclose( $pipes[2] );
+check( 0 === proc_close( $process ), 'Download process succeeds: ' . $download_error );
 check( $download === file_get_contents( ABSPATH . 'src/Export-GarPlaces.ps1' ), 'Download exact fixed file bytes, no HTML/user path' );
 $source = file_get_contents( ABSPATH . 'src/Locations/Admin/LocationDatabaseBackupAdmin.php' );
 check( str_contains( $source, 'Content-Disposition: attachment; filename="Export-GarPlaces.ps1"' ) && str_contains( $source, 'Content-Type: application/octet-stream' ), 'Fixed attachment headers' );
-$missing = new LocationDatabaseBackupAdmin( $service, new PluginEnvironment( '', ABSPATH . 'missing-script-directory', '/', '0.155.15' ), new Logger() );
+$missing = new LocationDatabaseBackupAdmin( $service, new PluginEnvironment( '', ABSPATH . 'missing-script-directory', '/', '0.155.16' ), new Logger() );
 refused( fn() => $missing->download() );
-echo "Location paired backup, lock and admin smoke passed.\n";
+$guard = new \WallsShop\WDC\Locations\Services\LocationMaintenanceJobGuard();
+[$db, $service] = fixture();
+$lock = new LocationWriteLock( $db );
+foreach ( array( 'staging', 'candidate_seed', 'enrich_coordinates', 'waiting_dadata_limit', 'aliases_build', 'applying', 'cleanup' ) as $phase ) {
+    update_option( $guard::UPDATE_OPTION, array( 'job_id' => 'owner', 'phase' => $phase ) );
+    refused( fn() => $service->create(), 423 );
+    refused( fn() => $service->restore(), 423 );
+    refused( fn() => $lock->run( fn() => throw new LogicException( 'Foreign writer must not execute' ) ), 423 );
+    refused( fn() => $lock->run( fn() => null, 'other-job' ), 423 );
+    check( 'own-step' === $lock->run( fn() => 'own-step', 'owner' ), 'Own incremental steps pass logical lock' );
+    check( ! $db->held, 'Logical refusal releases physical lock' );
+}
+foreach ( array( 'finished', 'failed', 'canceled' ) as $phase ) {
+    update_option( $guard::UPDATE_OPTION, array( 'job_id' => 'owner', 'phase' => $phase ) );
+    check( 'writer' === $lock->run( fn() => 'writer' ), 'Terminal job releases logical ownership' );
+}
+delete_option( $guard::UPDATE_OPTION );
+$lock->run( function () use ( $guard ) {
+    $guard->assert_no_active_jobs();
+    update_option( $guard::UPDATE_OPTION, array( 'job_id' => 'reserved', 'phase' => 'staging' ) );
+} );
+refused( fn() => $lock->run( fn() => $guard->assert_no_active_jobs() ), 423 );
+check( 'reserved' === get_option( $guard::UPDATE_OPTION )['job_id'], 'Second start cannot replace reserved job' );
+delete_option( $guard::UPDATE_OPTION );
+echo "Location paired backup, logical/physical lock and admin smoke passed.\n";

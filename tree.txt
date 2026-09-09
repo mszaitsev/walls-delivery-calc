@@ -16,6 +16,7 @@ C:.
 |   |   |   delivery-services-shop-processing.js
 |   |   |   dpd-geography-import.js
 |   |   |   locations-admin.css
+|   |   |   locations-incremental-update.js
 |   |   |   manual-delivery-services.js
 |   |   |   order-delivery-recalculation.css
 |   |   |   order-delivery-recalculation.js
@@ -761,6 +762,7 @@ C:.
 |   |   |       GarPlacesCsvImporter.php
 |   |   |       LocationImportService.php
 |   |   |       LocationIncrementalUpdateService.php
+|   |   |       LocationIncrementalCandidateEnricher.php
 |   |   |       LocationsSnapshotExporter.php
 |   |   |       LocationsSnapshotImporter.php
 |   |   |
@@ -778,6 +780,7 @@ C:.
 |   |   |       LocationAliasGenerator.php
 |   |   |       LocationCountryIndexService.php
 |   |   |       LocationDatabaseBackupService.php
+|   |   |       LocationMaintenanceJobGuard.php
 |   |   |       LocationDisplayNameFormatter.php
 |   |   |       LocationSearchService.php
 |   |   |
@@ -1174,6 +1177,7 @@ C:.
     |       run-location-delivery-codes-smoke.php
     |       run-location-display-name-smoke.php
     |       run-locations-incremental-update-smoke.php
+    |       run-locations-incremental-update-ui-smoke.js
     |       run-locations-smoke.php
     |       run-russianpost-courier-postcode-fill-smoke.php
     |

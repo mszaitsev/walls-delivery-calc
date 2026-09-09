@@ -7,6 +7,8 @@ use RuntimeException;
 use SplFileObject;
 use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
+use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
+use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -15,7 +17,7 @@ final class LocationIncrementalUpdateService {
 	private const ACTIVE_JOB_OPTION = 'wdc_locations_incremental_update_job';
 	private const CSV_BATCH_SIZE = 1000;
 	private const ALIAS_BATCH_SIZE = 500;
-	private const APPROVAL_PAGE_SIZE = 100;
+	private const SAMPLE_LIMIT = 100;
 	private const MAX_COUNT_DELTA_RATIO = 0.20;
 
 	/** @var array<int,string> */
@@ -91,16 +93,20 @@ final class LocationIncrementalUpdateService {
 	private array $diff_fields = array(
 		'region_name',
 		'region_code',
+		'region_type',
+		'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level',
 		'city_name',
 		'city_type',
+		'city_fias_id', 'city_kladr_id',
 		'settlement_name',
 		'settlement_type',
+		'place_name', 'place_type', 'place_level', 'kladr_id', 'okato', 'oktmo', 'postal_code',
 		'active',
 	);
 
 	private \wpdb $wpdb;
 
-	public function __construct( private LocationAliasGenerator $alias_generator, ?\wpdb $db = null ) {
+	public function __construct( private LocationAliasGenerator $alias_generator, ?\wpdb $db = null, private ?LocationIncrementalCandidateEnricher $enricher = null, private ?DeliveryQuoteCacheManager $delivery_cache = null ) {
 		global $wpdb;
 
 		$this->wpdb = $db ?? $wpdb;
@@ -140,7 +146,6 @@ final class LocationIncrementalUpdateService {
 			'previous_table'         => $this->previous_table( $token ),
 			'previous_alias_table'   => $this->previous_alias_table( $token ),
 			'validation'             => array(),
-			'approval'               => array(),
 			'errors'                 => array(),
 			'started_at'             => $this->now(),
 			'updated_at'             => $this->now(),
@@ -153,123 +158,330 @@ final class LocationIncrementalUpdateService {
 	 */
 	public function step_job( array $job ): array {
 		try {
-			if ( 'staging' === (string) ( $job['phase'] ?? '' ) ) {
-				return $this->step_staging_job( $job );
-			}
-
-			if ( 'diff' === (string) ( $job['phase'] ?? '' ) ) {
-				return $this->build_diff( $job );
-			}
-
-			if ( 'analysis' === (string) ( $job['phase'] ?? '' ) ) {
-				return $this->refresh_approval_view( $job );
-			}
+			$job = $this->advance_workflow( $job );
 		} catch ( \Throwable $exception ) {
+			$job['failed_stage'] = $job['phase'] ?? '';
 			$job['phase'] = 'failed';
 			$job['errors'][] = $exception->getMessage();
 		}
 
 		$job['updated_at'] = $this->now();
-		return $job;
+		return $this->progress( $job );
 	}
 
-	/**
-	 * @param array<string,mixed> $job
-	 * @return array<string,mixed>
-	 */
-	public function build_diff( array $job ): array {
-		if ( $this->is_memory_db() ) {
-			return $this->memory_build_diff( $job );
+	private function advance_workflow( array $job ): array {
+		$phase = (string) ( $job['phase'] ?? '' );
+		if ( 'staging' === $phase ) {
+			return $this->step_staging_job( $job );
 		}
-
-		$current = $this->locations_table();
-		$stage = $this->table_name( (string) ( $job['staging_table'] ?? '' ) );
-		$this->ensure_table( $stage );
-
-		$job['current_count'] = $this->count_table( $current );
-		$job['staging_count'] = $this->count_table( $stage );
-		$job['new_count'] = $this->new_count( $stage, $current );
-		$job['removed_count'] = $this->removed_count( $stage, $current );
-		$job['changed_count'] = $this->changed_count( $stage, $current );
-		$job['changed_by_field'] = $this->changed_by_field_counts( $stage, $current );
-		$job['samples'] = $this->diff_samples( $stage, $current );
-		$job['approval'] = $this->create_approval_state( $job );
-		$job['phase'] = 'analysis';
-		$job['updated_at'] = $this->now();
-
-		return $job;
-	}
-
-	/**
-	 * @param array<string,mixed> $job
-	 * @param array<string,array<int,string>> $selected
-	 * @return array<string,mixed>
-	 */
-	public function prepare_candidate( array $job, array $selected ): array {
-		if ( $this->is_memory_db() ) {
-			return $this->memory_prepare_candidate( $job, $selected );
-		}
-
-		$selected = $this->selection_for_candidate( $job, $selected );
-
-		$current = $this->locations_table();
-		$stage = $this->table_name( (string) ( $job['staging_table'] ?? '' ) );
-		$candidate = $this->table_name( (string) ( $job['candidate_table'] ?? '' ) );
-		$alias_candidate = $this->table_name( (string) ( $job['candidate_alias_table'] ?? '' ) );
-
-		$this->replace_like_table( $candidate, $current );
-		$this->query_or_fail( "INSERT INTO {$candidate} SELECT * FROM {$current}", 'Unable to seed candidate locations table.' );
-
-		$this->apply_new_rows( $stage, $candidate, $selected['new'] ?? array() );
-		$this->apply_removed_rows( $candidate, $selected['removed'] ?? array() );
-		$this->apply_changed_rows( $stage, $candidate, $selected['changed'] ?? array() );
-
-		$validation = $this->validate_candidate( $candidate, $this->count_table( $current ) );
-		$job['validation'] = $validation;
-		$job['candidate_count'] = $this->count_table( $candidate );
-		$job['candidate_aliases'] = $this->rebuild_aliases( $candidate, $alias_candidate );
-		$job['phase'] = empty( $validation['errors'] ) ? 'candidate_ready' : 'candidate_failed';
-		$job['updated_at'] = $this->now();
-
-		return $job;
-	}
-
-	/**
-	 * @param array<string,mixed> $job
-	 * @param array<int,string> $checked_keys
-	 * @return array<string,mixed>
-	 */
-	public function approve_current_page( array $job, array $checked_keys ): array {
-		if ( empty( $job['approval'] ) || ! is_array( $job['approval'] ) ) {
-			$job['phase'] = 'failed';
-			$job['errors'][] = 'Approval state is unavailable.';
+		if ( 'diff' === $phase ) {
+			$index = (int) ( $job['diff_cursor'] ?? 0 );
+			$stage = $this->table_name( $job['staging_table'] );
+			$current = $this->locations_table();
+			$counts = array( 'current_count', 'staging_count', 'new_count', 'removed_count', 'changed_count' );
+			if ( $this->is_memory_db() ) {
+				$all = $this->memory_build_diff( $job );
+				if ( $index < 5 ) { $job[$counts[$index]] = $all[$counts[$index]]; }
+				else { $field = $this->diff_fields[$index - 5]; $job['changed_by_field'][$field] = $all['changed_by_field'][$field] ?? 0; }
+			} elseif ( $index < 5 ) {
+				$job[$counts[$index]] = match ( $index ) { 0 => $this->count_table( $current ), 1 => $this->count_table( $stage ), 2 => $this->new_count( $stage, $current ), 3 => $this->removed_count( $stage, $current ), default => $this->changed_count( $stage, $current ) };
+			} else {
+				$field = $this->diff_fields[$index - 5];
+				$condition = $this->field_changed_condition( $field, 's', 'c' );
+				$job['changed_by_field'][$field] = $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.country_code = 'RU' AND c.fias_id = s.fias_id WHERE c.country_code = 'RU' AND {$this->has_fias_condition('s')} AND {$condition}" )
+					+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition('s')} AND {$this->empty_fias_condition('c')} AND s.gar_object_id > 0 AND {$condition}" );
+			}
+			$job['diff_cursor'] = $index + 1;
+			if ( $job['diff_cursor'] < 5 + count( $this->diff_fields ) ) { return $job; }
+			$job['new_total'] = $job['new_count'];
+			$job['cursor'] = 0;
+			$job['phase'] = 'candidate_seed';
 			return $job;
 		}
-
-		$type = $this->approval_type_from_phase( (string) ( $job['phase'] ?? '' ) );
-		if ( '' === $type ) {
+		if ( in_array( $phase, array( 'finished', 'failed', 'canceled', 'waiting_dadata_limit', 'waiting_cache_clear' ), true ) ) {
 			return $job;
 		}
+		$candidate = $this->table_name( (string) $job['candidate_table'] );
+		$aliases = $this->table_name( (string) $job['candidate_alias_table'] );
+		$cursor = (int) ( $job['cursor'] ?? 0 );
+		if ( 'candidate_seed' === $phase ) {
+			if ( empty( $job['seed_initialized'] ) ) {
+				$this->create_working_table( $candidate, $this->locations_table() );
+				$job['seed_initialized'] = true;
+			}
+			$rows = $this->rows_after( $this->locations_table(), $cursor, self::CSV_BATCH_SIZE );
+			if ( array() !== $rows ) {
+				$end = (int) end( $rows )['id'];
+				if ( $this->is_memory_db() ) {
+					$this->wpdb->wdc_incremental_tables[$candidate] = array_merge( $this->wpdb->wdc_incremental_tables[$candidate], $rows );
+				} else {
+					$this->query_or_fail( "INSERT INTO {$candidate} SELECT source.* FROM {$this->locations_table()} source WHERE source.id > {$cursor} AND source.id <= {$end} AND NOT EXISTS (SELECT 1 FROM {$candidate} seeded WHERE seeded.id = source.id)", 'Candidate seed failed.' );
+				}
+				$job['cursor'] = $end;
+				$job['seed_processed'] = (int) ( $job['seed_processed'] ?? 0 ) + count( $rows );
+			}
+			if ( count( $rows ) < self::CSV_BATCH_SIZE ) {
+				$job['phase'] = 'candidate_changes'; $job['change_type'] = 'removed'; $job['cursor'] = 0;
+			}
+			return $job;
+		}
+		if ( 'candidate_changes' === $phase ) {
+			$type = (string) $job['change_type'];
+			$rows = $this->workflow_diff_rows( $job, $type, $cursor, 100 );
+			$keys = array_column( $rows, 'key' );
+			if ( $this->is_memory_db() ) {
+				$this->apply_memory_batch( $job, $type, $keys );
+			} elseif ( 'removed' === $type ) {
+				$this->apply_removed_rows( $candidate, $keys );
+			} elseif ( 'new' === $type ) {
+				$this->apply_new_rows( $job['staging_table'], $candidate, $keys );
+			} else {
+				$this->apply_changed_rows( $job['staging_table'], $candidate, $keys );
+			}
+			$job['cursor'] += count( $rows );
+			if ( count( $rows ) < 100 ) {
+				$job['cursor'] = 0;
+				$job['change_type'] = 'removed' === $type ? 'new' : 'changed';
+				if ( 'changed' === $type ) { $job['phase'] = 'candidate_derived'; $job['change_type'] = 'new'; }
+			}
+			return $job;
+		}
+		if ( 'candidate_derived' === $phase ) {
+			$type = (string) $job['change_type'];
+			$rows = $this->workflow_diff_rows( $job, $type, $cursor, 100 );
+			$rules = get_option( 'wdc_location_type_display_rules', array() );
+			$formatter = LocationDisplayNameFormatter::from_rules( is_array( $rules ) ? $rules : array() );
+			foreach ( $rows as $diff ) {
+				$row = $this->candidate_row( $candidate, $diff['key'] );
+				$row['display_name'] = $formatter->format_location( Location::from_array( $row ) );
+				$this->patch_candidate( $candidate, $row, array( 'display_name' => $row['display_name'], 'searchable_text' => Location::from_array( $row )->get_searchable_text(), 'updated_at' => $this->now() ) );
+			}
+			$job['cursor'] += count( $rows );
+			if ( count( $rows ) < 100 ) {
+				$job['cursor'] = 0; $job['change_type'] = 'changed';
+				if ( 'changed' === $type ) { $job['phase'] = 'enrich_postcodes'; }
+			}
+			return $job;
+		}
+		if ( str_starts_with( $phase, 'enrich_' ) ) {
+			if ( null === $this->enricher ) { throw new RuntimeException( 'Candidate enrichment service is unavailable.' ); }
+			$rows = $this->workflow_diff_rows( $job, 'new', $cursor, 1 );
+			if ( array() === $rows ) {
+				$job['cursor'] = 0;
+				$job['phase'] = match ( $phase ) { 'enrich_postcodes' => 'enrich_coordinates', 'enrich_coordinates' => 'enrich_russianpost_courier', default => 'candidate_validate' };
+				return $job;
+			}
+			$row = $this->candidate_row( $candidate, $rows[0]['key'] );
+			$result = $this->enricher->resolve( $phase, $row, $job['enrichment_state'] ?? array() );
+			if ( $result['pause'] ) {
+				$job['resume_phase'] = $phase; $job['phase'] = 'waiting_dadata_limit';
+				return $job;
+			}
+			$this->patch_candidate( $candidate, $row, $result['patch'] );
+			$job['enrichment_state'] = $result['state'];
+			if ( $result['done'] ) {
+				$prefix = match ( $phase ) { 'enrich_postcodes' => 'postcode', 'enrich_coordinates' => 'coordinates', default => 'russianpost' };
+				foreach ( array( 'processed', $result['outcome'] ) as $counter ) {
+					$key = $prefix . '_' . $counter; $job[$key] = (int) ( $job[$key] ?? 0 ) + 1;
+				}
+				$job['cursor']++;
+			}
+			$job['last_diagnostic'] = $result['message'];
+			return $job;
+		}
+		if ( 'candidate_validate' === $phase ) {
+			$job['validation'] = $this->is_memory_db() ? $this->memory_validate_candidate( $this->wpdb->wdc_incremental_tables[$candidate], $job['current_count'] ) : $this->validate_candidate( $candidate, $job['current_count'] );
+			$job['candidate_count'] = $job['validation']['candidate_count'];
+			if ( $job['candidate_count'] !== $job['current_count'] - $job['removed_count'] + $job['new_count'] ) {
+				throw new RuntimeException( 'Candidate row count does not match the source diff.' );
+			}
+			if ( ! $job['validation']['passed'] ) { throw new RuntimeException( implode( ' ', $job['validation']['errors'] ) ); }
+			$this->create_working_table( $aliases, $this->aliases_table() );
+			$job['phase'] = 'aliases_build'; $job['cursor'] = 0;
+			return $job;
+		}
+		if ( 'aliases_build' === $phase ) {
+			$rows = $this->rows_after( $candidate, $cursor, self::ALIAS_BATCH_SIZE );
+			$batch = $this->alias_rows_for( $rows );
+			if ( $this->is_memory_db() ) {
+				$this->wpdb->wdc_incremental_tables[$aliases] = array_merge( $this->wpdb->wdc_incremental_tables[$aliases], $batch );
+			} else { $this->insert_alias_rows( $aliases, $batch ); }
+			$job['candidate_aliases'] += count( $batch );
+			if ( array() !== $rows ) { $job['cursor'] = (int) end( $rows )['id']; }
+			$job['aliases_processed'] = (int) ( $job['aliases_processed'] ?? 0 ) + count( $rows );
+			if ( count( $rows ) < self::ALIAS_BATCH_SIZE ) { $job['phase'] = 'ready_to_apply'; }
+			return $job;
+		}
+		if ( 'ready_to_apply' === $phase ) { $job['phase'] = 'applying'; return $job; }
+		if ( 'applying' === $phase ) {
+			if ( null === $this->delivery_cache ) { throw new RuntimeException( 'Delivery cache service is unavailable.' ); }
+			// Recover an interrupted response after the paired atomic rename.
+			if ( $this->swap_completed( $job ) ) {
+				$job['phase'] = 'applied';
+				$job['applied_at'] = $job['applied_at'] ?? $this->now();
+			} else {
+				$job = $this->apply_candidate( $job );
+			}
+			if ( 'applied' !== $job['phase'] ) { throw new RuntimeException( 'Candidate apply validation failed.' ); }
+			$job['phase'] = 'cache_invalidate';
+			$this->update_option( self::ACTIVE_JOB_OPTION, $job );
+			return $this->advance_workflow( $job );
+		}
+		if ( 'cache_invalidate' === $phase ) {
+			try {
+				if ( empty( $job['country_index_invalidated'] ) ) {
+					LocationCountryIndexService::mark_option_stale();
+					$job['country_index_invalidated'] = true;
+				}
+				$this->delivery_cache->clear_all_delivery_cache();
+				$job['cache_invalidated'] = true;
+				$job['phase'] = 'cleanup';
+			} catch ( \Throwable $error ) {
+				$this->delivery_cache->bump_delivery_rates_cache_version();
+				( new \WallsShop\WDC\Infrastructure\Logging\Logger() )->error( 'Locations applied; cache invalidation requires retry.', array( 'error' => $error->getMessage() ) );
+				$job['phase'] = 'waiting_cache_clear';
+				$job['resume_phase'] = 'cache_invalidate';
+				$job['last_diagnostic'] = 'База применена. Требуется повторить очистку кеша.';
+			}
+			return $job;
+		}
+		if ( 'cleanup' === $phase ) {
+			$this->cleanup_job( $job ); $job['phase'] = 'finished'; $job['finished_at'] = $this->now(); return $job;
+		}
+		throw new RuntimeException( 'Unsupported update phase; cancel the old job and start a new update.' );
+	}
 
-		$approval = $job['approval'];
-		$checked = array_flip( $this->sanitize_keys( $checked_keys ) );
-		$rows = is_array( $approval['current_rows'] ?? null ) ? $approval['current_rows'] : array();
-		foreach ( $rows as $row ) {
-			$key = (string) ( $row['key'] ?? '' );
-			if ( '' === $key ) {
+	public function resume_job( array $job ): array {
+		if ( in_array( $job['phase'] ?? '', array( 'waiting_dadata_limit', 'waiting_cache_clear' ), true ) ) { $job['phase'] = $job['resume_phase']; }
+		return $this->progress( $job );
+	}
+
+	public function cancel_job( array $job ): array {
+		if ( ! empty( $job['applied_at'] ) || $this->swap_completed( $job ) ) { throw new RuntimeException( 'The database has already been applied; cancellation is unavailable.' ); }
+		$this->cleanup_job( $job ); $job['phase'] = 'canceled'; return $this->progress( $job );
+	}
+
+	private function cleanup_job( array $job ): void {
+		$token = $this->token( (string) $job['job_id'] );
+		foreach ( array( $this->staging_table( $token ), $this->candidate_table( $token ), $this->candidate_alias_table( $token ), $this->previous_table( $token ), $this->previous_alias_table( $token ) ) as $table ) {
+			if ( $this->is_memory_db() ) { unset( $this->wpdb->wdc_incremental_tables[$table] ); }
+			else { $this->query_or_fail( "DROP TABLE IF EXISTS {$table}", 'Unable to clean update tables.' ); }
+		}
+	}
+
+	private function swap_completed( array $job ): bool {
+		return $this->table_exists( $job['previous_table'] )
+			&& $this->table_exists( $job['previous_alias_table'] )
+			&& ! $this->table_exists( $job['candidate_table'] )
+			&& ! $this->table_exists( $job['candidate_alias_table'] )
+			&& $this->table_exists( $this->locations_table() )
+			&& $this->table_exists( $this->aliases_table() );
+	}
+
+	private function table_exists( string $table ): bool {
+		if ( $this->is_memory_db() ) { return isset( $this->wpdb->wdc_incremental_tables[$table] ); }
+		$name = $this->wpdb->get_var( $this->wpdb->prepare( 'SHOW TABLES LIKE %s', $this->wpdb->esc_like( $this->table_name( $table ) ) ) );
+		if ( '' !== $this->wpdb->last_error ) { throw new RuntimeException( $this->wpdb->last_error ); }
+		return $name === $table;
+	}
+
+	private function create_working_table( string $target, string $source ): void {
+		if ( $this->is_memory_db() ) { $this->wpdb->wdc_incremental_tables[$target] = array(); }
+		else { $this->replace_like_table( $target, $source ); }
+	}
+
+	private function rows_after( string $table, int $cursor, int $limit ): array {
+		if ( $this->is_memory_db() ) {
+			$rows = array_values( array_filter( $this->wpdb->wdc_incremental_tables[$table] ?? array(), fn( array $row ): bool => (int) $row['id'] > $cursor ) );
+			usort( $rows, fn( array $a, array $b ): int => $a['id'] <=> $b['id'] );
+			return array_slice( $rows, 0, $limit );
+		}
+		return $this->sample_rows( "SELECT * FROM {$table} WHERE id > {$cursor} ORDER BY id ASC LIMIT {$limit}" );
+	}
+
+	private function workflow_diff_rows( array $job, string $type, int $offset, int $limit ): array {
+		if ( $this->is_memory_db() ) {
+			$diff = $this->memory_diff( $this->wpdb->wdc_incremental_tables[$this->locations_table()], $this->wpdb->wdc_incremental_tables[$job['staging_table']] );
+			$rows = $diff[$type]; usort( $rows, fn( array $a, array $b ): int => strcmp( $a['key'], $b['key'] ) );
+			return array_slice( $rows, $offset, $limit );
+		}
+		return match ( $type ) {
+			'new' => $this->list_new_rows( $job['staging_table'], $this->locations_table(), $offset, $limit ),
+			'removed' => $this->list_removed_rows( $job['staging_table'], $this->locations_table(), $offset, $limit ),
+			default => $this->list_changed_rows( $job['staging_table'], $this->locations_table(), $offset, $limit ),
+		};
+	}
+
+	private function candidate_row( string $table, string $key ): array {
+		if ( $this->is_memory_db() ) {
+			foreach ( $this->wpdb->wdc_incremental_tables[$table] as $row ) { if ( $this->memory_key( $row ) === $key && 'RU' === $row['country_code'] ) { return $row; } }
+		} else {
+			$rows = $this->sample_rows( "SELECT * FROM {$table} WHERE country_code = 'RU' AND " . $this->key_in_condition( '', array( $key ) ) . ' LIMIT 1' );
+			if ( isset( $rows[0] ) ) { return $rows[0]; }
+		}
+		throw new RuntimeException( 'Candidate identity is missing.' );
+	}
+
+	private function patch_candidate( string $table, array $row, array $patch ): void {
+		if ( array() === $patch ) { return; }
+		if ( $this->is_memory_db() ) {
+			foreach ( $this->wpdb->wdc_incremental_tables[$table] as &$stored ) { if ( $stored['id'] === $row['id'] ) { $stored = array_replace( $stored, $patch ); } }
+		} elseif ( false === $this->wpdb->update( $table, $patch, array( 'id' => $row['id'] ) ) ) { throw new RuntimeException( 'Candidate update failed.' ); }
+	}
+
+	private function apply_memory_batch( array $job, string $type, array $keys ): void {
+		$table = $job['candidate_table'];
+		foreach ( $keys as $key ) {
+			if ( 'removed' === $type ) {
+				$this->wpdb->wdc_incremental_tables[$table] = array_values( array_filter( $this->wpdb->wdc_incremental_tables[$table], fn( array $r ): bool => 'RU' !== $r['country_code'] || $this->memory_key( $r ) !== $key ) );
 				continue;
 			}
-			$bucket = isset( $checked[ $key ] ) ? 'approved' : 'rejected';
-			$approval[ $type ][ $bucket ][] = $key;
-			$approval[ $type ][ $bucket ] = array_values( array_unique( $approval[ $type ][ $bucket ] ) );
+			$source = $this->candidate_row( $job['staging_table'], $key );
+			if ( 'new' === $type ) { $source['id'] = $this->memory_next_id( $this->wpdb->wdc_incremental_tables[$table] ); $this->wpdb->wdc_incremental_tables[$table][] = $source; }
+			else { $this->patch_candidate( $table, $this->candidate_row( $table, $key ), array_intersect_key( $source, array_flip( $this->diff_fields ) ) ); }
 		}
+	}
 
-		$approval[ $type ]['offset'] = min( (int) ( $approval[ $type ]['total'] ?? 0 ), (int) ( $approval[ $type ]['offset'] ?? 0 ) + (int) ( $approval['page_size'] ?? self::APPROVAL_PAGE_SIZE ) );
-		$job['approval'] = $approval;
-		$job = $this->refresh_approval_view( $job );
-		$job['updated_at'] = $this->now();
+	public function progress( array $job ): array {
+		$labels = array(
+			'staging' => 'Загрузка нового GAR', 'diff' => 'Анализ изменений',
+			'candidate_seed' => 'Подготовка новой базы', 'candidate_changes' => 'Применение изменений',
+			'candidate_derived' => 'Подготовка названий', 'enrich_postcodes' => 'Получение почтовых индексов',
+			'enrich_coordinates' => 'Получение координат', 'enrich_russianpost_courier' => 'Подбор индексов курьерской Почты',
+			'candidate_validate' => 'Проверка новой базы', 'aliases_build' => 'Создание поисковых алиасов',
+			'ready_to_apply' => 'Новая база готова', 'applying' => 'Применение новой базы',
+			'cache_invalidate' => 'Очистка кеша доставки', 'cleanup' => 'Очистка временных данных', 'finished' => 'Готово',
+		);
+		$phase = (string) ( $job['phase'] ?? 'staging' );
+		$job['failed_stage_label'] = $labels[$job['failed_stage'] ?? ''] ?? '';
+		$job['stage_label'] = $labels[$phase] ?? match ( $phase ) {
+			'waiting_dadata_limit' => 'Лимит DaData исчерпан. Обновление приостановлено до продолжения.',
+			'waiting_cache_clear' => 'База применена. Требуется повторить очистку кеша.',
+			'canceled' => 'Обновление отменено', default => 'Обновление остановлено',
+		};
+		$counts = match ( $phase ) {
+			'staging' => array( $job['rows_read'] ?? 0, $job['rows_total_estimated'] ?? 0 ),
+			'diff' => array( $job['diff_cursor'] ?? 0, 5 + count( $this->diff_fields ) ),
+			'candidate_seed' => array( $job['seed_processed'] ?? 0, $job['current_count'] ?? 0 ),
+			'candidate_changes', 'candidate_derived' => array( $job['cursor'] ?? 0, $job[($job['change_type'] ?? 'new') . '_count'] ?? 0 ),
+			'enrich_postcodes', 'enrich_coordinates', 'enrich_russianpost_courier' => array( $job['cursor'] ?? 0, $job['new_count'] ?? 0 ),
+			'aliases_build' => array( $job['aliases_processed'] ?? 0, $job['candidate_count'] ?? 0 ),
+			default => array( 0, 0 ),
+		};
+		$job['stage_processed'] = (int) $counts[0];
+		$job['stage_total'] = max( $job['stage_processed'], (int) $counts[1] );
+		$index = array_search( $phase, array_keys( $labels ), true );
+		$fraction = $job['stage_total'] > 0 ? min( 1, $job['stage_processed'] / $job['stage_total'] ) : 0;
+		$percent = false === $index ? (int) ( $job['overall_percent'] ?? 0 ) : (int) floor( 100 * ( $index + $fraction ) / count( $labels ) );
+		$job['overall_percent'] = 'finished' === $phase ? 100 : max( $percent, (int) ( $job['overall_percent'] ?? 0 ) );
+		foreach ( array( 'postcode', 'coordinates', 'russianpost' ) as $prefix ) {
+			foreach ( array( 'processed', 'updated', 'skipped', 'no_index', 'errors' ) as $counter ) {
+				$job[$prefix . '_' . $counter] = (int) ( $job[$prefix . '_' . $counter] ?? 0 );
+			}
+		}
 		return $job;
 	}
+
 
 	/**
 	 * @param array<string,mixed> $job
@@ -314,7 +526,6 @@ final class LocationIncrementalUpdateService {
 				'previous_alias_table' => $previous_aliases,
 			)
 		);
-		LocationCountryIndexService::mark_option_stale();
 
 		return $job;
 	}
@@ -611,20 +822,21 @@ final class LocationIncrementalUpdateService {
 		}
 
 		$columns = $include_id ? array_merge( array( 'id' ), $this->location_columns ) : $this->location_columns;
-		$formats = array_map( fn( string $column ): string => $this->format_for_column( $column ), $columns );
-		$row_placeholder = '(' . implode( ', ', $formats ) . ')';
-		$sql = sprintf(
-			'INSERT INTO %s (%s) VALUES %s',
-			$table,
-			implode( ', ', $columns ),
-			implode( ', ', array_fill( 0, count( $rows ), $row_placeholder ) )
-		);
 		$args = array();
+		$values = array();
 		foreach ( $rows as $row ) {
+			$formats = array();
 			foreach ( $columns as $column ) {
+				if ( in_array( $column, array( 'latitude', 'longitude' ), true ) && null === ( $row[$column] ?? null ) ) {
+					$formats[] = 'NULL';
+					continue;
+				}
+				$formats[] = $this->format_for_column( $column );
 				$args[] = $row[ $column ] ?? null;
 			}
+			$values[] = '(' . implode( ', ', $formats ) . ')';
 		}
+		$sql = 'INSERT INTO ' . $table . ' (' . implode( ', ', $columns ) . ') VALUES ' . implode( ', ', $values );
 
 		$this->query_or_fail( $this->wpdb->prepare( $sql, ...$args ), 'Unable to insert location rows.' );
 		return count( $rows );
@@ -645,7 +857,7 @@ final class LocationIncrementalUpdateService {
 		if ( array() === $keys ) {
 			return;
 		}
-		$this->query_or_fail( "DELETE FROM {$candidate} WHERE {$this->key_in_condition( '', $keys )}", 'Unable to remove selected locations.' );
+		$this->query_or_fail( "DELETE FROM {$candidate} WHERE country_code = 'RU' AND {$this->key_in_condition( '', $keys )}", 'Unable to remove selected locations.' );
 	}
 
 	private function apply_changed_rows( string $stage, string $candidate, array $keys ): void {
@@ -663,7 +875,7 @@ final class LocationIncrementalUpdateService {
 		$parsed = $this->parse_keys( $keys );
 		if ( array() !== $parsed['fias'] ) {
 			$this->query_or_fail(
-				"UPDATE {$candidate} c INNER JOIN {$stage} s ON c.fias_id = s.fias_id SET " . implode( ', ', $assignments ) . ' WHERE ' . $this->fias_in_condition( 's', $parsed['fias'] ),
+				"UPDATE {$candidate} c INNER JOIN {$stage} s ON c.country_code = 'RU' AND c.fias_id = s.fias_id SET " . implode( ', ', $assignments ) . ' WHERE ' . $this->fias_in_condition( 's', $parsed['fias'] ),
 				'Unable to apply selected changed locations by fias_id.'
 			);
 		}
@@ -673,126 +885,6 @@ final class LocationIncrementalUpdateService {
 				'Unable to apply selected changed locations by gar_id.'
 			);
 		}
-	}
-
-	/**
-	 * @param array<string,mixed> $job
-	 * @return array<string,mixed>
-	 */
-	private function create_approval_state( array $job ): array {
-		$approval = array(
-			'page_size' => self::APPROVAL_PAGE_SIZE,
-			'current_type' => 'new',
-			'current_page' => 1,
-			'current_rows' => array(),
-			'stats' => array(),
-		);
-		foreach ( array( 'new', 'removed', 'changed' ) as $type ) {
-			$approval[ $type ] = array(
-				'approved' => array(),
-				'rejected' => array(),
-				'offset' => 0,
-				'total' => (int) ( $job[ $type . '_count' ] ?? 0 ),
-			);
-		}
-
-		return $approval;
-	}
-
-	/**
-	 * @param array<string,mixed> $job
-	 * @return array<string,mixed>
-	 */
-	private function refresh_approval_view( array $job ): array {
-		$approval = is_array( $job['approval'] ?? null ) ? $job['approval'] : array();
-		$page_size = max( 1, (int) ( $approval['page_size'] ?? self::APPROVAL_PAGE_SIZE ) );
-		$current = '';
-		foreach ( array( 'new', 'removed', 'changed' ) as $type ) {
-			$total = (int) ( $approval[ $type ]['total'] ?? 0 );
-			$offset = (int) ( $approval[ $type ]['offset'] ?? 0 );
-			if ( $offset < $total ) {
-				$current = $type;
-				break;
-			}
-		}
-
-		if ( '' === $current ) {
-			$approval['current_type'] = '';
-			$approval['current_page'] = 0;
-			$approval['current_rows'] = array();
-			$job['phase'] = 'approval_complete';
-		} else {
-			$offset = (int) ( $approval[ $current ]['offset'] ?? 0 );
-			$approval['current_type'] = $current;
-			$approval['current_page'] = (int) floor( $offset / $page_size ) + 1;
-			$approval['current_rows'] = $this->list_approval_rows( $job, $current, $offset, $page_size );
-			$job['phase'] = 'approving_' . $current;
-		}
-
-		$stats = array();
-		foreach ( array( 'new', 'removed', 'changed' ) as $type ) {
-			$total = (int) ( $approval[ $type ]['total'] ?? 0 );
-			$approved = count( is_array( $approval[ $type ]['approved'] ?? null ) ? $approval[ $type ]['approved'] : array() );
-			$rejected = count( is_array( $approval[ $type ]['rejected'] ?? null ) ? $approval[ $type ]['rejected'] : array() );
-			$offset = (int) ( $approval[ $type ]['offset'] ?? 0 );
-			$stats[ $type ] = array(
-				'total' => $total,
-				'approved' => $approved,
-				'rejected' => $rejected,
-				'processed' => min( $total, $offset ),
-				'pages' => (int) ceil( $total / $page_size ),
-			);
-		}
-		$approval['stats'] = $stats;
-		$job['approval'] = $approval;
-
-		return $job;
-	}
-
-	/**
-	 * @param array<string,mixed> $job
-	 * @return array<int,array<string,mixed>>
-	 */
-	private function list_approval_rows( array $job, string $type, int $offset, int $limit ): array {
-		if ( $this->is_memory_db() ) {
-			return $this->memory_list_approval_rows( $job, $type, $offset, $limit );
-		}
-
-		$current = $this->locations_table();
-		$stage = $this->table_name( (string) ( $job['staging_table'] ?? '' ) );
-		return match ( $type ) {
-			'new' => $this->list_new_rows( $stage, $current, $offset, $limit ),
-			'removed' => $this->list_removed_rows( $stage, $current, $offset, $limit ),
-			'changed' => $this->list_changed_rows( $stage, $current, $offset, $limit ),
-			default => array(),
-		};
-	}
-
-	private function approval_type_from_phase( string $phase ): string {
-		return match ( $phase ) {
-			'approving_new' => 'new',
-			'approving_removed' => 'removed',
-			'approving_changed' => 'changed',
-			default => '',
-		};
-	}
-
-	/**
-	 * @param array<string,mixed> $job
-	 * @param array<string,array<int,string>> $selected
-	 * @return array<string,array<int,string>>
-	 */
-	private function selection_for_candidate( array $job, array $selected ): array {
-		if ( empty( $job['approval'] ) || ! is_array( $job['approval'] ) ) {
-			return $selected;
-		}
-
-		$approval = $job['approval'];
-		return array(
-			'new' => $this->sanitize_keys( is_array( $approval['new']['approved'] ?? null ) ? $approval['new']['approved'] : array() ),
-			'removed' => $this->sanitize_keys( is_array( $approval['removed']['approved'] ?? null ) ? $approval['removed']['approved'] : array() ),
-			'changed' => $this->sanitize_keys( is_array( $approval['changed']['approved'] ?? null ) ? $approval['changed']['approved'] : array() ),
-		);
 	}
 
 	/**
@@ -819,41 +911,11 @@ final class LocationIncrementalUpdateService {
 		if ( $this->count_rows( "SELECT COUNT(*) FROM {$candidate} WHERE active = 1 AND (display_name IS NULL OR display_name = '')" ) > 0 ) {
 			$errors[] = 'Candidate contains active rows with empty display_name.';
 		}
-		if ( $this->count_rows( "SELECT COUNT(*) FROM {$candidate} WHERE fias_id IS NULL OR fias_id = ''" ) > 0 ) {
+		if ( $this->count_rows( "SELECT COUNT(*) FROM {$candidate} WHERE country_code = 'RU' AND (fias_id IS NULL OR fias_id = '')" ) > 0 ) {
 			$errors[] = 'Candidate contains rows with empty fias_id.';
 		}
 
 		return array( 'passed' => array() === $errors, 'errors' => $errors, 'current_count' => $current_count, 'candidate_count' => $count );
-	}
-
-	private function rebuild_aliases( string $candidate, string $alias_candidate ): int {
-		$this->replace_like_table( $alias_candidate, $this->aliases_table() );
-		$total = 0;
-		$last_id = 0;
-		do {
-			$rows = $this->wpdb->get_results(
-				$this->wpdb->prepare( "SELECT * FROM {$candidate} WHERE id > %d ORDER BY id ASC LIMIT %d", $last_id, self::ALIAS_BATCH_SIZE ),
-				ARRAY_A
-			);
-			$rows = is_array( $rows ) ? $rows : array();
-			$alias_rows = array();
-			foreach ( $rows as $row ) {
-				$last_id = max( $last_id, (int) ( $row['id'] ?? 0 ) );
-				$location = Location::from_array( $row );
-				foreach ( $this->alias_generator->generate( $location ) as $alias ) {
-					$alias_rows[] = array(
-						'location_id' => (int) $row['id'],
-						'alias' => $alias,
-						'alias_normalized' => Location::normalize_search_text( $alias ),
-						'source' => 'gar_import',
-						'created_at' => $this->now(),
-					);
-				}
-			}
-			$total += $this->insert_alias_rows( $alias_candidate, $alias_rows );
-		} while ( count( $rows ) === self::ALIAS_BATCH_SIZE );
-
-		return $total;
 	}
 
 	/**
@@ -880,27 +942,18 @@ final class LocationIncrementalUpdateService {
 		return count( $rows );
 	}
 
-	/**
-	 * @return array<string,array<int,array<string,mixed>>>
-	 */
-	private function diff_samples( string $stage, string $current, int $limit = 100 ): array {
-		return array(
-			'new' => $this->list_new_rows( $stage, $current, 0, $limit ),
-			'removed' => $this->list_removed_rows( $stage, $current, 0, $limit ),
-			'changed' => $this->list_changed_rows( $stage, $current, 0, $limit ),
-		);
-	}
 
 	/**
 	 * @return array<int,array<string,mixed>>
 	 */
 	private function sample_rows( string $sql ): array {
 		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
-		return is_array( $rows ) ? $rows : array();
+		if ( ! is_array( $rows ) || '' !== $this->wpdb->last_error ) { throw new RuntimeException( 'Unable to read update rows: ' . $this->wpdb->last_error ); }
+		return $rows;
 	}
 
 	private function new_count( string $stage, string $current ): int {
-		return $this->count_rows( "SELECT COUNT(*) FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.fias_id = s.fias_id)" )
+		return $this->count_rows( "SELECT COUNT(*) FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.country_code = 'RU' AND c.fias_id = s.fias_id)" )
 			+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id = s.gar_object_id)" );
 	}
 
@@ -910,23 +963,10 @@ final class LocationIncrementalUpdateService {
 	}
 
 	private function changed_count( string $stage, string $current ): int {
-		return $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}" )
+		return $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.country_code = 'RU' AND c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}" )
 			+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}" );
 	}
 
-	/**
-	 * @return array<string,int>
-	 */
-	private function changed_by_field_counts( string $stage, string $current ): array {
-		$result = array();
-		foreach ( $this->diff_fields as $field ) {
-			$field_condition = $this->field_changed_condition( $field, 's', 'c' );
-			$result[ $field ] = $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$field_condition}" )
-				+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$field_condition}" );
-		}
-
-		return $result;
-	}
 
 	/**
 	 * @return array<int,array<string,mixed>>
@@ -956,7 +996,7 @@ final class LocationIncrementalUpdateService {
 	}
 
 	private function new_samples_sql( string $stage, string $current, int $limit = 100 ): string {
-		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.fias_id = s.fias_id)
+		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.country_code = 'RU' AND c.fias_id = s.fias_id)
 			UNION ALL
 			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id = s.gar_object_id)";
 		return $limit > 0 ? $sql . ' LIMIT ' . (int) $limit : $sql;
@@ -971,18 +1011,18 @@ final class LocationIncrementalUpdateService {
 
 	private function changed_samples_sql( string $stage, string $current, int $limit = 100 ): string {
 		$diff_json = $this->changed_diff_json_object( 's', 'c' );
-		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, {$diff_json} AS changes, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}
+		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, {$diff_json} AS changes, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.country_code = 'RU' AND c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}
 			UNION ALL
 			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, {$diff_json} AS changes, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}";
 		return $limit > 0 ? $sql . ' LIMIT ' . (int) $limit : $sql;
 	}
 
 	private function has_fias_condition( string $alias ): string {
-		return "{$alias}.fias_id IS NOT NULL AND {$alias}.fias_id != ''";
+		return "{$alias}.country_code = 'RU' AND {$alias}.fias_id IS NOT NULL AND {$alias}.fias_id != ''";
 	}
 
 	private function empty_fias_condition( string $alias ): string {
-		return "({$alias}.fias_id IS NULL OR {$alias}.fias_id = '')";
+		return "({$alias}.country_code = 'RU' AND ({$alias}.fias_id IS NULL OR {$alias}.fias_id = ''))";
 	}
 
 	private function changed_condition( string $stage_alias, string $current_alias ): string {
@@ -1033,7 +1073,7 @@ final class LocationIncrementalUpdateService {
 			$parts[] = $prefix . 'fias_id IN (' . implode( ', ', array_fill( 0, count( $fias ), '%s' ) ) . ')';
 		}
 		if ( array() !== $gar ) {
-			$parts[] = '(' . $prefix . 'fias_id = \'\' AND ' . $prefix . 'gar_object_id IN (' . implode( ', ', array_fill( 0, count( $gar ), '%d' ) ) . '))';
+			$parts[] = '((' . $prefix . 'fias_id IS NULL OR ' . $prefix . 'fias_id = \'\') AND ' . $prefix . 'gar_object_id IN (' . implode( ', ', array_fill( 0, count( $gar ), '%d' ) ) . '))';
 		}
 		if ( array() === $parts ) {
 			return '1 = 0';
@@ -1111,7 +1151,9 @@ final class LocationIncrementalUpdateService {
 	}
 
 	private function count_rows( string $sql ): int {
-		return (int) $this->wpdb->get_var( $sql );
+		$value = $this->wpdb->get_var( $sql );
+		if ( null === $value || '' !== $this->wpdb->last_error ) { throw new RuntimeException( 'Unable to count update rows: ' . $this->wpdb->last_error ); }
+		return (int) $value;
 	}
 
 	/**
@@ -1396,8 +1438,7 @@ final class LocationIncrementalUpdateService {
 		$job['removed_count'] = count( $diff['removed'] );
 		$job['changed_count'] = count( $diff['changed'] );
 		$job['changed_by_field'] = $this->memory_changed_by_field_counts( $diff['changed'] );
-		$job['samples'] = array_map( fn( array $rows ): array => array_slice( $rows, 0, self::APPROVAL_PAGE_SIZE ), $diff );
-		$job['approval'] = $this->create_approval_state( $job );
+		$job['samples'] = array_map( fn( array $rows ): array => array_slice( $rows, 0, self::SAMPLE_LIMIT ), $diff );
 		$job['phase'] = 'analysis';
 		return $job;
 	}
@@ -1408,6 +1449,7 @@ final class LocationIncrementalUpdateService {
 	 * @return array<string,array<int,array<string,mixed>>>
 	 */
 	private function memory_diff( array $current, array $stage ): array {
+		$current = array_filter( $current, fn( array $row ): bool => 'RU' === ( $row['country_code'] ?? '' ) );
 		$current_by_key = $this->memory_index_by_key( $current );
 		$stage_by_key = $this->memory_index_by_key( $stage );
 		$new = array();
@@ -1514,73 +1556,6 @@ final class LocationIncrementalUpdateService {
 	}
 
 	/**
-	 * @param array<string,mixed> $job
-	 * @return array<int,array<string,mixed>>
-	 */
-	private function memory_list_approval_rows( array $job, string $type, int $offset, int $limit ): array {
-		$current = $this->wpdb->wdc_incremental_tables[ $this->locations_table() ] ?? array();
-		$stage = $this->wpdb->wdc_incremental_tables[ (string) ( $job['staging_table'] ?? '' ) ] ?? array();
-		$diff = $this->memory_diff( $current, $stage );
-		$rows = array_values( $diff[ $type ] ?? array() );
-		usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $a['key'] ?? '' ), (string) ( $b['key'] ?? '' ) ) );
-		return array_slice( $rows, max( 0, $offset ), max( 1, $limit ) );
-	}
-
-	/**
-	 * @param array<string,mixed> $job
-	 * @param array<string,array<int,string>> $selected
-	 * @return array<string,mixed>
-	 */
-	private function memory_prepare_candidate( array $job, array $selected ): array {
-		$selected = $this->selection_for_candidate( $job, $selected );
-		$current_table = $this->locations_table();
-		$current = $this->wpdb->wdc_incremental_tables[ $current_table ] ?? array();
-		$stage = $this->wpdb->wdc_incremental_tables[ (string) $job['staging_table'] ] ?? array();
-		$candidate_table = (string) $job['candidate_table'];
-		$aliases_table = (string) $job['candidate_alias_table'];
-		$candidate = $current;
-		$candidate_by_key = $this->memory_index_by_key( $candidate );
-		$stage_by_key = $this->memory_index_by_key( $stage );
-
-		foreach ( $this->sanitize_keys( $selected['new'] ?? array() ) as $key ) {
-			if ( isset( $stage_by_key[ $key ] ) && ! isset( $candidate_by_key[ $key ] ) ) {
-				$row = $stage_by_key[ $key ];
-				$row['id'] = $this->memory_next_id( $candidate );
-				$candidate[ (int) $row['id'] ] = $row;
-				$candidate_by_key[ $key ] = $row;
-			}
-		}
-		foreach ( $this->sanitize_keys( $selected['removed'] ?? array() ) as $key ) {
-			foreach ( $candidate as $id => $row ) {
-				if ( $this->memory_key( $row ) === $key ) {
-					unset( $candidate[ $id ] );
-				}
-			}
-		}
-		foreach ( $this->sanitize_keys( $selected['changed'] ?? array() ) as $key ) {
-			foreach ( $candidate as $id => $row ) {
-				if ( $this->memory_key( $row ) === $key && isset( $stage_by_key[ $key ] ) ) {
-					$next = $row;
-					foreach ( $this->diff_fields as $field ) {
-						$next[ $field ] = $stage_by_key[ $key ][ $field ] ?? $next[ $field ] ?? null;
-					}
-					$next['id'] = $id;
-					$candidate[ $id ] = $next;
-				}
-			}
-		}
-
-		$this->wpdb->wdc_incremental_tables[ $candidate_table ] = $candidate;
-		$validation = $this->memory_validate_candidate( $candidate, count( $current ) );
-		$this->wpdb->wdc_incremental_tables[ $aliases_table ] = $this->memory_aliases_for( $candidate );
-		$job['validation'] = $validation;
-		$job['candidate_count'] = count( $candidate );
-		$job['candidate_aliases'] = count( $this->wpdb->wdc_incremental_tables[ $aliases_table ] );
-		$job['phase'] = empty( $validation['errors'] ) ? 'candidate_ready' : 'candidate_failed';
-		return $job;
-	}
-
-	/**
 	 * @param array<int,array<string,mixed>> $rows
 	 */
 	private function memory_next_id( array $rows ): int {
@@ -1602,9 +1577,9 @@ final class LocationIncrementalUpdateService {
 		$has_ru = false;
 		foreach ( $candidate as $row ) {
 			$fias = trim( (string) ( $row['fias_id'] ?? '' ) );
-			if ( '' === $fias ) {
+			if ( '' === $fias && 'RU' === ( $row['country_code'] ?? '' ) ) {
 				$errors[] = 'Candidate contains rows with empty fias_id.';
-			} elseif ( isset( $fias_seen[ $fias ] ) ) {
+			} elseif ( '' !== $fias && isset( $fias_seen[ $fias ] ) ) {
 				$errors[] = 'Candidate contains duplicate fias_id values.';
 			}
 			$fias_seen[ $fias ] = true;
@@ -1636,7 +1611,7 @@ final class LocationIncrementalUpdateService {
 	 * @param array<int,array<string,mixed>> $locations
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function memory_aliases_for( array $locations ): array {
+	private function alias_rows_for( array $locations ): array {
 		$aliases = array();
 		$id = 0;
 		foreach ( $locations as $row ) {
@@ -1673,6 +1648,7 @@ final class LocationIncrementalUpdateService {
 		$this->wpdb->wdc_incremental_tables[ $previous_aliases ] = $this->wpdb->wdc_incremental_tables[ $aliases ] ?? array();
 		$this->wpdb->wdc_incremental_tables[ $current ] = $this->wpdb->wdc_incremental_tables[ $candidate ] ?? array();
 		$this->wpdb->wdc_incremental_tables[ $aliases ] = $this->wpdb->wdc_incremental_tables[ $alias_candidate ] ?? array();
+		unset( $this->wpdb->wdc_incremental_tables[$candidate], $this->wpdb->wdc_incremental_tables[$alias_candidate] );
 		$job['phase'] = 'applied';
 		$job['applied_at'] = $this->now();
 		return $job;

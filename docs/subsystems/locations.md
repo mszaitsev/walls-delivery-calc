@@ -1,6 +1,24 @@
 # Locations And Pickup
 
-Version: 0.155.15
+Version: 0.155.16
+
+## One-Click Full GAR Update
+
+The **Обновление базы населенных пунктов** section starts with **Загрузить и применить новый GAR CSV** and one confirmation. The browser runs start/status/step/resume/cancel requests; approval pages and manual prepare/apply routes are removed. Each response includes a human stage label, processed/total counts, approximate overall progress and audit/enrichment counters.
+
+Phases: `staging → diff → candidate_seed → candidate_changes → candidate_derived → enrich_postcodes → enrich_coordinates → enrich_russianpost_courier → candidate_validate → aliases_build → ready_to_apply → applying → cache_invalidate → cleanup → finished`. All differences are automatically approved. CSV and seed steps handle at most 1000 rows; source/derived steps 100; alias steps 500; an API step handles one NEW location, retaining the existing bounded Russian Post probe cursor/retry policy. SQL diff counts are spread over steps. Network latency still depends on existing client timeouts.
+
+Source diff includes `region_name, region_code, region_type, district_name, district_type, district_fias_id, district_kladr_id, district_gar_object_id, district_level, city_name, city_type, city_fias_id, city_kladr_id, settlement_name, settlement_type, place_name, place_type, place_level, kladr_id, okato, oktmo, postal_code, active`. Existing FIAS-first / empty-FIAS GAR fallback identity is retained; `fias_id, gar_object_id, gar_id, country_code` are not mutable source updates. Display/search representations are rebuilt before enrichment.
+
+The candidate starts from live rows, including AM/BY/KZ/KG. Removed/changed comparisons are RU-scoped; foreign empty FIAS is valid. Changed rows preserve created_at, coordinates and courier postcode. GAR source postcode changes are applied deliberately without re-enriching the changed row or clearing its old courier postcode.
+
+Only NEW identities are paged from the diff for enrichment: DaData postcode first (skip a valid GAR postcode; successful no-index uses `999999999`), then the existing postcode + display-name coordinate query, then scoped Russian Post courier probing. Candidate IDs are never used as live pickup-mapping IDs; FIAS and base postcode remain available. No API patch is written to live before apply. Ordinary row errors/skips are counted; coordinates are not mandatory for apply. Daily token exhaustion enters `waiting_dadata_limit` with the same cursor and requires **Продолжить обновление**. It remains logically busy while waiting.
+
+The option `wdc_locations_incremental_update_job` is the logical owner. Start checks all known unfinished maintenance jobs and reserves its job_id inside `GET_LOCK`. Each mutating AJAX request takes the same lock; only matching incremental step/resume/cancel requests bypass the active incremental guard. Full GAR/snapshot import, manual display/postcode/coordinate/courier maintenance, DPD canonical geography writes, clear actions and backup/restore are refused until finished/failed/canceled. Read-only search/export/status remain available. This is cooperative administrative exclusion; external SQL/CLI and runtime coordinate writers must be quiesced operationally.
+
+Validation retains the 20% count-delta refusal, exact expected diff count, nonempty/active-RU/display-name checks, duplicate FIAS/active GAR checks and RU-only mandatory FIAS. Aliases depend on names/types, not enrichment. One four-mapping RENAME switches locations and aliases together. Only after success are country indexes marked stale and delivery caches cleared through the same manager used by backup restore. An interrupted apply can recognize the already-swapped pair; cache failure enters resumable `waiting_cache_clear` and bumps the delivery cache version defensively.
+
+Successful cleanup drops only this job's staging, candidate and previous swap tables; backup snapshots remain untouched. Before apply, cancellation drops job-owned temporary tables and releases ownership without changing live. Fatal pre-apply validation/SQL failure releases ownership but retains diagnostic tables for explicit cleanup. Cancellation after a completed swap is refused.
 
 ## Administrative Database Backup
 

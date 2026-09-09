@@ -13,12 +13,6 @@ defined( 'ABSPATH' ) || exit;
 
 final class LocationDatabaseBackupService {
 	private const TABLES = array( 'wdc_locations', 'wdc_location_aliases' );
-	private const JOBS = array(
-		'wdc_gar_import_job', 'wdc_locations_incremental_update_job', 'wdc_locations_snapshot_import_job',
-		'wdc_locations_display_name_rebuild_job', 'wdc_dadata_postcode_fill_job',
-		'wdc_dadata_coordinates_fill_job', 'wdc_russianpost_courier_calc_postcode_fill_job',
-		'wdc_dpd_geography_import_state',
-	);
 	private \wpdb $db;
 
 	public function __construct(
@@ -139,19 +133,7 @@ final class LocationDatabaseBackupService {
 	}
 
 	private function assert_no_active_job(): void {
-		if ( function_exists( 'wp_cache_delete' ) ) {
-			wp_cache_delete( 'alloptions', 'options' );
-		}
-		foreach ( self::JOBS as $key ) {
-			if ( function_exists( 'wp_cache_delete' ) ) {
-				wp_cache_delete( $key, 'options' );
-				wp_cache_delete( 'notoptions', 'options' );
-			}
-			$job = get_option( $key, array() );
-			if ( is_array( $job ) && array() !== $job && ! in_array( (string) ( $job['phase'] ?? $job['status'] ?? '' ), array( 'idle', 'finished', 'completed', 'applied', 'failed', 'cancelled' ), true ) ) {
-				throw new RuntimeException( 'Завершите или отмените текущую задачу базы населённых пунктов перед резервным копированием или восстановлением.', 423 );
-			}
-		}
+		( new LocationMaintenanceJobGuard() )->assert_no_active_jobs();
 	}
 
 	/** @return array<int,string> */

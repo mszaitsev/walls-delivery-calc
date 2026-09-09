@@ -118,7 +118,7 @@ final class LocationCoordinatesDadataBatchUpdater {
 	 * @param array<string,mixed> $location
 	 * @return array{status:string,lat:?float,lng:?float,reason:string,message:string}
 	 */
-	private function coordinates_for_location( array $location ): array {
+	public function coordinates_for_location( array $location ): array {
 		$query = $this->query_for_location( $location );
 		if ( '' === $query ) {
 			return $this->skipped_result( 'empty_query', 'Location display_name is empty.' );

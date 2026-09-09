@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.15
+Version: 0.155.16
+
+0.155.16 introduces the one-click GAR update, NEW-only candidate enrichment, bounded stages, resumable DaData limits and exclusive maintenance ownership. See [Locations](subsystems/locations.md).
 
 0.155.15 adds a single paired locations/aliases backup, verified atomic restore, shared administrative write locking, and a protected GAR export-script download. See [Locations](subsystems/locations.md) for snapshot scope, failure handling and the exact command.
 
