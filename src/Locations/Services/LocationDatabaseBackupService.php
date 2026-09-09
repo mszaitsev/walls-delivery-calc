@@ -12,13 +12,7 @@ use WallsShop\WDC\Locations\Storage\LocationWriteLock;
 defined( 'ABSPATH' ) || exit;
 
 final class LocationDatabaseBackupService {
-	private const TABLES = array( 'wdc_locations', 'wdc_location_aliases' );
-	private const JOBS = array(
-		'wdc_gar_import_job', 'wdc_locations_incremental_update_job', 'wdc_locations_snapshot_import_job',
-		'wdc_locations_display_name_rebuild_job', 'wdc_dadata_postcode_fill_job',
-		'wdc_dadata_coordinates_fill_job', 'wdc_russianpost_courier_calc_postcode_fill_job',
-		'wdc_dpd_geography_import_state',
-	);
+	private const TABLES = array( 'wdc_locations' );
 	private \wpdb $db;
 
 	public function __construct(
@@ -52,8 +46,8 @@ final class LocationDatabaseBackupService {
 		}
 		$result = array();
 		foreach ( $sets as $stamp => $pair ) {
-			if ( isset( $pair[ self::TABLES[0] ], $pair[ self::TABLES[1] ] ) ) {
-				$result[ $stamp ] = array( $pair[ self::TABLES[0] ], $pair[ self::TABLES[1] ] );
+			if ( isset( $pair[ self::TABLES[0] ] ) ) {
+				$result[ $stamp ] = array( $pair[ self::TABLES[0] ] );
 			}
 		}
 		krsort( $result, SORT_STRING );
@@ -84,7 +78,7 @@ final class LocationDatabaseBackupService {
 				foreach ( $live as $index => $table ) {
 					$this->copy( $table, $temp[ $index ], $created );
 				}
-				$this->rename( array( $temp[0] => $backup[0], $temp[1] => $backup[1] ) );
+				$this->rename( array( $temp[0] => $backup[0] ) );
 			} catch ( \Throwable $error ) {
 				$this->cleanup( $created );
 				throw $error;
@@ -121,7 +115,7 @@ final class LocationDatabaseBackupService {
 				foreach ( $backup as $index => $table ) {
 					$this->copy( $table, $temp[ $index ], $created );
 				}
-				$this->rename( array( $live[0] => $old[0], $temp[0] => $live[0], $live[1] => $old[1], $temp[1] => $live[1] ) );
+				$this->rename( array( $live[0] => $old[0], $temp[0] => $live[0] ) );
 			} catch ( \Throwable $error ) {
 				$this->cleanup( $created );
 				throw $error;
@@ -139,19 +133,7 @@ final class LocationDatabaseBackupService {
 	}
 
 	private function assert_no_active_job(): void {
-		if ( function_exists( 'wp_cache_delete' ) ) {
-			wp_cache_delete( 'alloptions', 'options' );
-		}
-		foreach ( self::JOBS as $key ) {
-			if ( function_exists( 'wp_cache_delete' ) ) {
-				wp_cache_delete( $key, 'options' );
-				wp_cache_delete( 'notoptions', 'options' );
-			}
-			$job = get_option( $key, array() );
-			if ( is_array( $job ) && array() !== $job && ! in_array( (string) ( $job['phase'] ?? $job['status'] ?? '' ), array( 'idle', 'finished', 'completed', 'applied', 'failed', 'cancelled' ), true ) ) {
-				throw new RuntimeException( 'Завершите или отмените текущую задачу базы населённых пунктов перед резервным копированием или восстановлением.', 423 );
-			}
-		}
+		( new LocationMaintenanceJobGuard() )->assert_no_active_jobs();
 	}
 
 	/** @return array<int,string> */
@@ -161,7 +143,7 @@ final class LocationDatabaseBackupService {
 
 	private function identifier( string $name ): string {
 		$prefix = preg_quote( $this->db->prefix, '/' );
-		if ( strlen( $name ) > 64 || ! preg_match( '/^[a-zA-Z0-9_]+$/D', $name ) || ! preg_match( '/^' . $prefix . '(?:wdc_locations|wdc_location_aliases)(?:_(?:backup|backup_tmp|restore_tmp|restore_old)_\d{8}_\d{6})?$/D', $name ) ) {
+		if ( strlen( $name ) > 64 || ! preg_match( '/^[a-zA-Z0-9_]+$/D', $name ) || ! preg_match( '/^' . $prefix . 'wdc_locations(?:_(?:backup|backup_tmp|restore_tmp|restore_old)_\d{8}_\d{6})?$/D', $name ) ) {
 			throw new RuntimeException( 'Недопустимое внутреннее имя таблицы.' );
 		}
 		return '`' . $name . '`';

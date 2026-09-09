@@ -243,7 +243,7 @@ $step_payload = json_decode( (string) ob_get_clean(), true );
 $job = $step_payload['data'] ?? array();
 display_smoke_assert( 'finished' === ( $job['phase'] ?? '' ), 'Display_name rebuild job must finish for one-row fixture.' );
 display_smoke_assert( 1 === (int) ( $job['updated'] ?? 0 ), 'Display_name rebuild must update rows.' );
-display_smoke_assert( (int) ( $job['aliases_updated'] ?? 0 ) > 0, 'Display_name rebuild must update aliases.' );
+display_smoke_assert( ! isset( $job['aliases_updated'] ), 'Display rebuild no longer owns aliases.' );
 $rebuilt_row = reset( $wpdb->locations );
 display_smoke_assert( is_array( $rebuilt_row ) && 'Новосибирская обл, Новосибирский р-н, село Гусиный Брод' === ( $rebuilt_row['display_name'] ?? '' ), 'Display_name rebuild must update display_name, got: ' . ( is_array( $rebuilt_row ) ? (string) ( $rebuilt_row['display_name'] ?? '' ) : 'no row' ) );
 display_smoke_assert( is_array( $rebuilt_row ) && str_contains( (string) ( $rebuilt_row['searchable_text'] ?? '' ), 'гусиный брод' ), 'Display_name rebuild must update searchable_text.' );

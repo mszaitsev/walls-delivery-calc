@@ -1,8 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.155.15
+0.155.16 correction: postal_code is enrichment-owned, never a GAR changed field. The retired location alias index is no longer generated, exported or used by runtime. Search uses searchable_text and canonical hierarchy fields. Backup/restore and incremental apply swap locations only. Migration 0064 drops only the canonical live alias table; pending migrations run even at unchanged plugin version. Legacy alias backup/temporary tables are retained inert. Finish or cancel an older update before deployment and start a fresh GAR analysis; do not resume its pre-correction diff.
 
-0.155.15 adds an on-demand paired Locations + aliases database backup on the Locations admin page. Verified shadow copies are restored together with an atomic table swap; the backup remains available. Administrative writers share a fail-fast database lock, and unfinished import jobs prevent backup/restore. The GAR/ФИАС section offers a protected download of `src/Export-GarPlaces.ps1` and its PowerShell command. See [Locations](docs/subsystems/locations.md) for scope and operational requirements.
+Version: 0.155.16
+
+0.155.16 replaces manual GAR update approvals with a one-click, resumable candidate workflow. Only new RU locations receive postcode, coordinate and Russian Post enrichment; foreign locations and existing enrichment are preserved. A logical job guard serializes maintenance across AJAX steps; the validated locations table is applied atomically. See [Locations](docs/subsystems/locations.md).
+
+0.155.15 adds an on-demand locations-only database backup on the Locations admin page. Verified shadow copies are restored with an atomic table swap; the backup remains available. Administrative writers share a fail-fast database lock, and unfinished import jobs prevent backup/restore. The GAR/ФИАС section offers a protected download of `src/Export-GarPlaces.ps1` and its PowerShell command. See [Locations](docs/subsystems/locations.md) for scope and operational requirements.
 
 The platform setting `checkout_sort_selector_enabled` defaults to true, including upgrades with a missing key. When enabled, customers can use the checkout sorting selector; when disabled, no selector markup is rendered and `checkout_sort_mode` from admin is authoritative, ignoring posted/customer modes. Checkout synchronizes the session to the forced mode so re-enabling starts from the last admin-synchronized value. Actual effective-mode transitions, whether customer-driven or forced by admin, reset tariffs and WDC method choices once; stable-mode refreshes preserve manual tariff/method selections. Runtime/selection smokes cover checkbox persistence, visibility, stale POST/session, forced sorting and re-enabling.
 

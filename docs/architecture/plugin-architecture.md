@@ -1,8 +1,14 @@
 # Plugin Architecture
 
-Version: 0.155.15
+0.155.16 correction: postal_code is enrichment-owned, never a GAR changed field. The retired location alias index is no longer generated, exported or used by runtime. Search uses searchable_text and canonical hierarchy fields. Backup/restore and incremental apply swap locations only. Migration 0064 drops only the canonical live alias table; pending migrations run even at unchanged plugin version. Legacy alias backup/temporary tables are retained inert. Finish or cancel an older update before deployment and start a fresh GAR analysis; do not resume its pre-correction diff.
 
-Locations backup composition: `LocationDatabaseBackupAdmin` owns capability/nonce checks, POST redirects, UI and fixed-path script download; `LocationDatabaseBackupService` owns paired locations/aliases discovery, copying, schema verification and atomic restore. `LocationWriteLock` is the shared fail-fast MySQL named lock for administrative Locations mutations and DPD import start/batches (which can save foreign locations). `LocationsAdminPage` defers terminating AJAX responses via `LocationAdminJsonResponse` so `finally` releases the lock before WordPress exits. Existing import algorithms and repository contracts are unchanged; no migration or global locking framework is introduced.
+Version: 0.155.16
+
+## One-Click GAR Update
+
+`LocationIncrementalUpdateService` owns the automatic state machine and candidate persistence. `LocationIncrementalCandidateEnricher` resolves one NEW RU row through existing postcode, coordinate and courier services without a live repository write. `LocationsAdminPage` exposes start/status/step/resume/cancel; the dedicated admin runner polls one bounded step at a time. `LocationMaintenanceJobGuard` defines active maintenance jobs, and `LocationWriteLock` checks incremental ownership after acquiring the existing named lock. Rate sorting, checkout and shipment composition are unchanged.
+
+Locations backup composition: `LocationDatabaseBackupAdmin` owns capability/nonce checks, POST redirects, UI and fixed-path script download; `LocationDatabaseBackupService` owns locations-only discovery, copying, schema verification and atomic restore. `LocationWriteLock` is the shared fail-fast MySQL named lock for administrative Locations mutations and DPD import start/batches (which can save foreign locations). `LocationMaintenanceJobGuard` protects the unfinished incremental-update lifecycle between requests. `LocationsAdminPage` defers terminating AJAX responses via `LocationAdminJsonResponse` so `finally` releases the database lock before WordPress exits.
 
 0.155.13 replaces the checkout address modal with an inline autocomplete attached to `billing_address_1`. It is enabled only for a canonical RU WDC location with a FIAS identity; manual, unresolved and non-RU destinations keep a plain editable address. `AddressSuggestionAjax` verifies the checkout nonce and active DB location, then uses the dedicated `address_inline` DaData request with a fixed city boundary (street through house, maximum 8 results). It never retries without that boundary. Suggestions cannot change city, region, postcode or WDC location metadata. Manual address text is always allowed.
 

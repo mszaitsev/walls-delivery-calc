@@ -14,7 +14,6 @@ final class LocationsSnapshotExporter {
 	private array $tables = array(
 		'wdc_regions',
 		'wdc_locations',
-		'wdc_location_aliases',
 		'wdc_location_delivery_codes',
 	);
 

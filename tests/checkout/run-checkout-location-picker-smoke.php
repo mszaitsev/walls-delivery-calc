@@ -547,4 +547,14 @@ $persister->persist(
 );
 checkout_location_picker_assert( ! isset( $unsupported_order->meta['_wdc_platform_location_fias_id'] ), 'Unsupported country order does not save stale local location meta.' );
 
+$canonical_db = new wpdb();
+$canonical_repository = new LocationRepository( $canonical_db );
+$canonical_location = checkout_location_picker_location( array( 'gar_object_id' => 660001, 'fias_id' => 'ekaterinburg', 'region_code' => '66', 'region_name' => 'Свердловская', 'region_type' => 'обл', 'place_name' => 'Екатеринбург', 'city_name' => 'Екатеринбург', 'place_type' => 'г', 'display_name' => 'г. Екатеринбург' ) );
+$canonical_repository->save( $canonical_location );
+checkout_location_picker_assert( str_contains( $canonical_location->get_searchable_text(), 'екатеринбург' ), 'Canonical searchable text contains the place name.' );
+$canonical_search = new CheckoutLocationSearch( new LocationSearchService( $canonical_repository ) );
+foreach ( array( 'Екатеринбург', 'Екате' ) as $query ) {
+	$found = $canonical_search->search( $query );
+	checkout_location_picker_assert( 1 === count( $found ) && 'Екатеринбург' === $found[0]->place_name, 'Canonical exact/prefix search works without an alias index: ' . $query );
+}
 echo "Checkout location picker smoke test passed.\n";

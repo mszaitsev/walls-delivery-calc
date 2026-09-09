@@ -16,6 +16,7 @@ C:.
 |   |   |   delivery-services-shop-processing.js
 |   |   |   dpd-geography-import.js
 |   |   |   locations-admin.css
+|   |   |   locations-incremental-update.js
 |   |   |   manual-delivery-services.js
 |   |   |   order-delivery-recalculation.css
 |   |   |   order-delivery-recalculation.js
@@ -144,6 +145,7 @@ C:.
 |           0061_make_manual_delivery_geography_country_aware.php
 |           0062_create_manual_delivery_weight_ranges.php
 |           0063_create_manual_delivery_pickup_points.php
+|           0064_drop_location_aliases.php
 |
 +---docs
 |   |   README.md
@@ -761,6 +763,7 @@ C:.
 |   |   |       GarPlacesCsvImporter.php
 |   |   |       LocationImportService.php
 |   |   |       LocationIncrementalUpdateService.php
+|   |   |       LocationIncrementalCandidateEnricher.php
 |   |   |       LocationsSnapshotExporter.php
 |   |   |       LocationsSnapshotImporter.php
 |   |   |
@@ -775,9 +778,9 @@ C:.
 |   |   +---Services
 |   |   |       GarChangesService.php
 |   |   |       KeyboardLayoutTransformer.php
-|   |   |       LocationAliasGenerator.php
 |   |   |       LocationCountryIndexService.php
 |   |   |       LocationDatabaseBackupService.php
+|   |   |       LocationMaintenanceJobGuard.php
 |   |   |       LocationDisplayNameFormatter.php
 |   |   |       LocationSearchService.php
 |   |   |
@@ -1170,10 +1173,12 @@ C:.
     +---locations
     |       run-dadata-postcode-fill-smoke.php
     |       run-gar-import-smoke.php
+    |       run-location-alias-removal-migration-smoke.php
     |       run-location-database-backup-smoke.php
     |       run-location-delivery-codes-smoke.php
     |       run-location-display-name-smoke.php
     |       run-locations-incremental-update-smoke.php
+    |       run-locations-incremental-update-ui-smoke.js
     |       run-locations-smoke.php
     |       run-russianpost-courier-postcode-fill-smoke.php
     |

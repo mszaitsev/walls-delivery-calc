@@ -28,7 +28,11 @@ final class MigrationManager {
 	}
 
 	public function is_current(): bool {
-		return $this->installed_version() === $this->code_version;
+		if ( $this->installed_version() !== $this->code_version ) {
+			return false;
+		}
+		$files = glob( $this->migrations_path . DIRECTORY_SEPARATOR . '*.php' );
+		return is_array( $files ) && array() === array_diff( array_map( 'basename', $files ), $this->applied_migrations() );
 	}
 
 	public function run(): void {

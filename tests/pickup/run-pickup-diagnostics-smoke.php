@@ -419,12 +419,9 @@ $fias_import_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/
 $snapshot_exporter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationsSnapshotExporter.php' );
 $snapshot_importer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationsSnapshotImporter.php' );
 pickup_diagnostics_assert(
-	str_contains( $location_repository_source, 'bulk_save_aliases' )
-	&& str_contains( $gar_import_source, 'bulk_save_aliases' )
-	&& str_contains( $fias_import_source, 'save_aliases' )
-	&& str_contains( $snapshot_exporter_source, "'wdc_location_aliases'" )
-	&& str_contains( $snapshot_importer_source, "'wdc_location_aliases'" ),
-	'audit must document actual wdc_location_aliases usage by imports, repository, and snapshots.'
+	! str_contains( $location_repository_source . $gar_import_source . $fias_import_source . $snapshot_exporter_source . $snapshot_importer_source, 'wdc_location_aliases' )
+	&& str_contains( $location_repository_source, 'searchable_text' ),
+	'Canonical search/import/snapshot contracts must not depend on the retired alias table.'
 );
 
 echo "Pickup diagnostics smoke test passed.\n";

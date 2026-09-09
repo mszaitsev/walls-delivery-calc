@@ -947,15 +947,11 @@ $rp_clear_payload = json_decode( (string) ob_get_clean(), true );
 locations_smoke_assert( is_array( $rp_clear_payload ) && ! empty( $rp_clear_payload['success'] ) && '' === (string) $rp_wpdb->rows[ $rp_city_id ]['russianpost_courier_calc_postal_code'] && '' === (string) $rp_wpdb->rows[ $rp_settlement_id ]['russianpost_courier_calc_postal_code'], 'Russian Post courier postcode clear all must clear filled values and return success.' );
 
 locations_smoke_assert( method_exists( $repository, 'clear_all' ), 'LocationRepository must expose clear_all method.' );
-$repository->save_aliases( 1, array( 'Alias one', 'Alias two' ) );
-locations_smoke_assert( $repository->count_aliases() > 0, 'Test fixture must contain aliases before clear_all.' );
 $wpdb->queries = array();
 $clear_stats = $repository->clear_all();
-locations_smoke_assert( is_array( $clear_stats ) && isset( $clear_stats['locations_deleted'], $clear_stats['aliases_deleted'] ), 'clear_all must return deletion statistics.' );
+locations_smoke_assert( is_array( $clear_stats ) && isset( $clear_stats['locations_deleted'] ), 'clear_all must return deletion statistics.' );
 locations_smoke_assert( $clear_stats['locations_deleted'] >= 1, 'clear_all must count deleted locations.' );
-locations_smoke_assert( $clear_stats['aliases_deleted'] >= 2, 'clear_all must count deleted aliases.' );
 locations_smoke_assert( 0 === $repository->count_all(), 'clear_all must remove local locations.' );
-locations_smoke_assert( 0 === $repository->count_aliases(), 'clear_all must remove local aliases.' );
 locations_smoke_assert( array() === $country_index->rebuild(), 'LocationCountryIndex rebuild returns empty list after clear_all.' );
 unset( $GLOBALS['wdc_locations_smoke_options'][ LocationCountryIndexService::OPTION ] );
 $empty_wpdb = new wpdb();
@@ -971,29 +967,23 @@ locations_smoke_assert( 1 === $empty_wpdb->country_counts_calls, 'Empty cached c
 $empty_index->mark_stale();
 locations_smoke_assert( array() === $empty_index->countries(), 'Marked stale empty country index rebuilds and still returns empty list.' );
 locations_smoke_assert( 2 === $empty_wpdb->country_counts_calls, 'mark_stale allows the next countries() call to rebuild once.' );
-$alias_clear_index = -1;
 $location_clear_index = -1;
 foreach ( $wpdb->queries as $index => $query ) {
-	if ( str_contains( $query, 'wdc_location_aliases' ) && ( str_starts_with( $query, 'TRUNCATE TABLE' ) || str_starts_with( $query, 'DELETE FROM' ) ) && -1 === $alias_clear_index ) {
-		$alias_clear_index = $index;
-	}
 	if ( str_contains( $query, 'wdc_locations' ) && ( str_starts_with( $query, 'TRUNCATE TABLE' ) || str_starts_with( $query, 'DELETE FROM' ) ) && -1 === $location_clear_index ) {
 		$location_clear_index = $index;
 	}
 }
-locations_smoke_assert( -1 !== $alias_clear_index && -1 !== $location_clear_index && $alias_clear_index < $location_clear_index, 'clear_all must clear aliases before locations.' );
 
 $missing_wpdb = new wpdb();
 $missing_wpdb->missing_tables = array( 'wdc_locations', 'wdc_location_aliases' );
 $missing_stats = ( new LocationRepository( $missing_wpdb ) )->clear_all();
-locations_smoke_assert( null === $missing_stats['locations_deleted'] && null === $missing_stats['aliases_deleted'], 'clear_all must not fatal when tables are missing.' );
+locations_smoke_assert( null === $missing_stats['locations_deleted'], 'clear_all must not fatal when tables are missing.' );
 
 $admin_wpdb = new wpdb();
 $admin_repository = new LocationRepository( $admin_wpdb );
 $admin_importer = new LocationImportService( $admin_repository );
 $admin_search = new LocationSearchService( $admin_repository );
 $admin_importer->import_from_json_file( dirname( __DIR__ ) . '/fixtures/demo/locations-demo.json' );
-$admin_repository->save_aliases( 1, array( 'Admin alias' ) );
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_POST = array(
 	'wdc_locations_nonce' => 'test-nonce',
@@ -1008,7 +998,7 @@ ob_start();
 ) )->render_page();
 $clear_admin_html = (string) ob_get_clean();
 locations_smoke_assert( str_contains( $clear_admin_html, 'База населенных пунктов очищена.' ), 'Admin clear action must render success notice.' );
-locations_smoke_assert( 0 === $admin_repository->count_all() && 0 === $admin_repository->count_aliases(), 'Admin clear action must delete locations and aliases.' );
+locations_smoke_assert( 0 === $admin_repository->count_all(), 'Admin clear action must delete locations and aliases.' );
 
 $locations_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Admin/LocationsAdminPage.php' );
 locations_smoke_assert( str_contains( $locations_admin_source, 'wp_verify_nonce' ) && str_contains( $locations_admin_source, 'current_user_can( AdminMenu::CAPABILITY' ), 'Admin clear action must require nonce and capability.' );
