@@ -291,6 +291,8 @@ foreach ( $fields->getValue( $service ) as $field ) {
 	incremental_smoke_assert( str_contains( $sql, 'c.' . $field . ' = s.' . $field ), 'SQL changed source assignment: ' . $field );
 }
 incremental_smoke_assert( str_contains( $sql, "c.country_code = 'RU'" ) && ! str_contains( $sql, 'c.latitude =' ) && ! str_contains( $sql, 'c.russianpost_courier_calc_postal_code =' ), 'Production SQL preserves foreign/enrichment fields.' );
+incremental_smoke_assert( ! str_contains( $sql, 'c.postal_code =' ), 'Changed UPDATE never overwrites enrichment postcode.' );
+incremental_smoke_assert( ! str_contains( file_get_contents( __DIR__ . '/../../src/Locations/Import/LocationIncrementalUpdateService.php' ), 'aliases_build' ), 'Retired alias stage is absent from workflow and progress counters.' );
 ( new ReflectionMethod( $service, 'apply_removed_rows' ) )->invoke( $service, 'candidate', array( 'g:1001' ) );
 $sql = end( $db->sql );
 incremental_smoke_assert( str_contains( $sql, "country_code = 'RU'" ) && str_contains( $sql, 'fias_id IS NULL' ), 'Removal SQL is RU-only and handles NULL fallback FIAS.' );

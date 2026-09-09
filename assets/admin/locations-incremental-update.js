@@ -34,7 +34,8 @@
         progress.max = 100;
         progress.value = Number(job.overall_percent || 0);
         summary.textContent = (job.phase === 'finished' ? 'Обновление базы успешно завершено.' : (job.stage_label || '')) +
-            '\n' + Number(job.stage_processed || 0) + ' / ' + Number(job.stage_total || 0) +
+            (job.phase !== 'finished' && Number(job.stage_total || 0) > 0 ?
+                '\n' + Number(job.stage_processed || 0) + ' / ' + Number(job.stage_total) : '') +
             '\nБыло: ' + Number(job.current_count || 0) + '; Стало: ' + Number(job.candidate_count || 0) +
             '; Добавлено: ' + Number(job.new_count || 0) + '; Удалено: ' + Number(job.removed_count || 0) + '; Изменено: ' + Number(job.changed_count || 0);
         const lines = [];

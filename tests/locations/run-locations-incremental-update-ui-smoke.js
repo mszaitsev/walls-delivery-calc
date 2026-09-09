@@ -49,15 +49,20 @@ async function tick(reply) {
     assert.equal(timers.size, 1);
     await tick(state('enrich_coordinates'));
     assert.match(summary.textContent, /Получение координат/);
+    assert.match(summary.textContent, /\n1 \/ 2\n/);
     assert.equal(progress.value, 60);
-    await tick(state('waiting_dadata_limit'));
+    await tick({...state('waiting_dadata_limit'), stage_processed: 0, stage_total: 0});
+    assert.doesNotMatch(summary.textContent, /0 \/ 0/);
     assert.equal(timers.size, 0, 'Limit stops polling');
     assert.equal(ids['wdc-incremental-update-resume'].hidden, false);
     replies.push(state('enrich_coordinates'));
     ids['wdc-incremental-update-resume'].handlers.click(); await settle();
-    await tick({...state('finished'), overall_percent: 100, applied_at: 'now'});
+    await tick({...state('finished'), stage_processed: 0, stage_total: 0, overall_percent: 100, applied_at: 'now',
+        current_count: 10, candidate_count: 12, new_count: 3, removed_count: 1, changed_count: 2});
     assert.equal(timers.size, 0);
-    assert.match(summary.textContent, /успешно завершено/);
+    assert.equal(summary.textContent, 'Обновление базы успешно завершено.\nБыло: 10; Стало: 12; Добавлено: 3; Удалено: 1; Изменено: 2');
+    assert.doesNotMatch(summary.textContent, /0 \/ 0/);
+    assert.equal(progress.value, 100);
     assert.equal(ids['wdc-incremental-update-cancel'].hidden, true);
     assert.deepEqual(requests, ['status', 'start', 'step', 'step', 'resume', 'step']);
     replies.push(state('staging'));

@@ -444,7 +444,6 @@ final class LocationIncrementalUpdateService {
 			'candidate_seed' => array( $job['seed_processed'] ?? 0, $job['current_count'] ?? 0 ),
 			'candidate_changes', 'candidate_derived' => array( $job['cursor'] ?? 0, $job[($job['change_type'] ?? 'new') . '_count'] ?? 0 ),
 			'enrich_postcodes', 'enrich_coordinates', 'enrich_russianpost_courier' => array( $job['cursor'] ?? 0, $job['new_count'] ?? 0 ),
-			'aliases_build' => array( $job['aliases_processed'] ?? 0, $job['candidate_count'] ?? 0 ),
 			default => array( 0, 0 ),
 		};
 		$job['stage_processed'] = (int) $counts[0];
