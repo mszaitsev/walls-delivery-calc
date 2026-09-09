@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.155.14
+Version: 0.155.15
+
+Locations backup composition: `LocationDatabaseBackupAdmin` owns capability/nonce checks, POST redirects, UI and fixed-path script download; `LocationDatabaseBackupService` owns paired locations/aliases discovery, copying, schema verification and atomic restore. `LocationWriteLock` is the shared fail-fast MySQL named lock for administrative Locations mutations and DPD import start/batches (which can save foreign locations). `LocationsAdminPage` defers terminating AJAX responses via `LocationAdminJsonResponse` so `finally` releases the lock before WordPress exits. Existing import algorithms and repository contracts are unchanged; no migration or global locking framework is introduced.
 
 0.155.13 replaces the checkout address modal with an inline autocomplete attached to `billing_address_1`. It is enabled only for a canonical RU WDC location with a FIAS identity; manual, unresolved and non-RU destinations keep a plain editable address. `AddressSuggestionAjax` verifies the checkout nonce and active DB location, then uses the dedicated `address_inline` DaData request with a fixed city boundary (street through house, maximum 8 results). It never retries without that boundary. Suggestions cannot change city, region, postcode or WDC location metadata. Manual address text is always allowed.
 

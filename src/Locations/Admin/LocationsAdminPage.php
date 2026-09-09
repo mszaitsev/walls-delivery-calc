@@ -25,6 +25,7 @@ use WallsShop\WDC\Locations\Coordinates\LocationCoordinatesDadataBatchUpdater;
 use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
 use WallsShop\WDC\Locations\Postcodes\RussianPostCourierCalcPostcodeFillStateService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\Storage\LocationWriteLock;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -43,6 +44,7 @@ final class LocationsAdminPage {
 	private const DADATA_COORDINATES_JOB_OPTION = 'wdc_dadata_coordinates_fill_job';
 	private const RUSSIANPOST_COURIER_CALC_POSTCODE_JOB_OPTION = 'wdc_russianpost_courier_calc_postcode_fill_job';
 	private const DADATA_POSTCODE_MARKER = '999999999';
+	private bool $defer_json = false;
 
 	public function __construct(
 		private PluginEnvironment $environment,
@@ -61,48 +63,51 @@ final class LocationsAdminPage {
 		private ?LocationCoordinatesDadataBatchUpdater $coordinates_updater = null,
 		private ?LocationCountryIndexService $country_index = null,
 		private ?LocationIncrementalUpdateService $incremental_update = null,
-		private ?RussianPostCourierCalcPostcodeFillStateService $russianpost_courier_calc_postcode_fill = null
+		private ?RussianPostCourierCalcPostcodeFillStateService $russianpost_courier_calc_postcode_fill = null,
+		private ?LocationWriteLock $write_lock = null,
+		private ?LocationDatabaseBackupAdmin $backup_admin = null
 	) {
 	}
 
 	public function register(): void {
+		$this->backup_admin?->register();
 		add_action( 'admin_menu', array( $this, 'add_menu_page' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
-		add_action( 'wp_ajax_wdc_gar_import_start', array( $this, 'ajax_gar_import_start' ) );
-		add_action( 'wp_ajax_wdc_gar_import_step', array( $this, 'ajax_gar_import_step' ) );
+		$this->register_write_action( 'wp_ajax_wdc_gar_import_start', 'ajax_gar_import_start' );
+		$this->register_write_action( 'wp_ajax_wdc_gar_import_step', 'ajax_gar_import_step' );
 		add_action( 'wp_ajax_wdc_gar_import_status', array( $this, 'ajax_gar_import_status' ) );
-		add_action( 'wp_ajax_wdc_gar_import_cancel', array( $this, 'ajax_gar_import_cancel' ) );
-		add_action( 'wp_ajax_wdc_locations_incremental_update_start', array( $this, 'ajax_incremental_update_start' ) );
-		add_action( 'wp_ajax_wdc_locations_incremental_update_step', array( $this, 'ajax_incremental_update_step' ) );
-		add_action( 'wp_ajax_wdc_locations_incremental_update_approve_page', array( $this, 'ajax_incremental_update_approve_page' ) );
-		add_action( 'wp_ajax_wdc_locations_incremental_update_prepare', array( $this, 'ajax_incremental_update_prepare' ) );
-		add_action( 'wp_ajax_wdc_locations_incremental_update_apply', array( $this, 'ajax_incremental_update_apply' ) );
+		$this->register_write_action( 'wp_ajax_wdc_gar_import_cancel', 'ajax_gar_import_cancel' );
+		$this->register_write_action( 'wp_ajax_wdc_locations_incremental_update_start', 'ajax_incremental_update_start' );
+		$this->register_write_action( 'wp_ajax_wdc_locations_incremental_update_step', 'ajax_incremental_update_step' );
+		$this->register_write_action( 'wp_ajax_wdc_locations_incremental_update_approve_page', 'ajax_incremental_update_approve_page' );
+		$this->register_write_action( 'wp_ajax_wdc_locations_incremental_update_prepare', 'ajax_incremental_update_prepare' );
+		$this->register_write_action( 'wp_ajax_wdc_locations_incremental_update_apply', 'ajax_incremental_update_apply' );
 		add_action( 'wp_ajax_wdc_locations_incremental_update_cleanup_list', array( $this, 'ajax_incremental_update_cleanup_list' ) );
-		add_action( 'wp_ajax_wdc_locations_incremental_update_cleanup_drop', array( $this, 'ajax_incremental_update_cleanup_drop' ) );
+		$this->register_write_action( 'wp_ajax_wdc_locations_incremental_update_cleanup_drop', 'ajax_incremental_update_cleanup_drop' );
 		add_action( 'wp_ajax_wdc_locations_snapshot_export_start', array( $this, 'ajax_snapshot_export_start' ) );
 		add_action( 'wp_ajax_wdc_locations_snapshot_export_step', array( $this, 'ajax_snapshot_export_step' ) );
-		add_action( 'wp_ajax_wdc_locations_snapshot_import_start', array( $this, 'ajax_snapshot_import_start' ) );
-		add_action( 'wp_ajax_wdc_locations_snapshot_import_step', array( $this, 'ajax_snapshot_import_step' ) );
+		$this->register_write_action( 'wp_ajax_wdc_locations_snapshot_import_start', 'ajax_snapshot_import_start' );
+		$this->register_write_action( 'wp_ajax_wdc_locations_snapshot_import_step', 'ajax_snapshot_import_step' );
 		add_action( 'wp_ajax_wdc_location_details', array( $this, 'ajax_location_details' ) );
-		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_start', array( $this, 'ajax_display_name_rebuild_start' ) );
-		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_step', array( $this, 'ajax_display_name_rebuild_step' ) );
+		$this->register_write_action( 'wp_ajax_wdc_locations_display_name_rebuild_start', 'ajax_display_name_rebuild_start' );
+		$this->register_write_action( 'wp_ajax_wdc_locations_display_name_rebuild_step', 'ajax_display_name_rebuild_step' );
 		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_status', array( $this, 'ajax_display_name_rebuild_status' ) );
-		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_cancel', array( $this, 'ajax_display_name_rebuild_cancel' ) );
-		add_action( 'wp_ajax_wdc_dadata_postcode_fill_start', array( $this, 'ajax_dadata_postcode_fill_start' ) );
-		add_action( 'wp_ajax_wdc_dadata_postcode_fill_step', array( $this, 'ajax_dadata_postcode_fill_step' ) );
+		$this->register_write_action( 'wp_ajax_wdc_locations_display_name_rebuild_cancel', 'ajax_display_name_rebuild_cancel' );
+		$this->register_write_action( 'wp_ajax_wdc_dadata_postcode_fill_start', 'ajax_dadata_postcode_fill_start' );
+		$this->register_write_action( 'wp_ajax_wdc_dadata_postcode_fill_step', 'ajax_dadata_postcode_fill_step' );
 		add_action( 'wp_ajax_wdc_dadata_postcode_fill_status', array( $this, 'ajax_dadata_postcode_fill_status' ) );
-		add_action( 'wp_ajax_wdc_dadata_postcode_fill_cancel', array( $this, 'ajax_dadata_postcode_fill_cancel' ) );
-		add_action( 'wp_ajax_wdc_dadata_postcode_clear_markers', array( $this, 'ajax_dadata_postcode_clear_markers' ) );
-		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_start', array( $this, 'ajax_dadata_coordinates_fill_start' ) );
-		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_step', array( $this, 'ajax_dadata_coordinates_fill_step' ) );
+		$this->register_write_action( 'wp_ajax_wdc_dadata_postcode_fill_cancel', 'ajax_dadata_postcode_fill_cancel' );
+		$this->register_write_action( 'wp_ajax_wdc_dadata_postcode_clear_markers', 'ajax_dadata_postcode_clear_markers' );
+		$this->register_write_action( 'wp_ajax_wdc_dadata_coordinates_fill_start', 'ajax_dadata_coordinates_fill_start' );
+		$this->register_write_action( 'wp_ajax_wdc_dadata_coordinates_fill_step', 'ajax_dadata_coordinates_fill_step' );
 		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_status', array( $this, 'ajax_dadata_coordinates_fill_status' ) );
-		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_cancel', array( $this, 'ajax_dadata_coordinates_fill_cancel' ) );
-		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_reset', array( $this, 'ajax_dadata_coordinates_fill_reset' ) );
-		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_start', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_start' ) );
-		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_step', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_step' ) );
+		$this->register_write_action( 'wp_ajax_wdc_dadata_coordinates_fill_cancel', 'ajax_dadata_coordinates_fill_cancel' );
+		$this->register_write_action( 'wp_ajax_wdc_dadata_coordinates_fill_reset', 'ajax_dadata_coordinates_fill_reset' );
+		$this->register_write_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_start', 'ajax_russianpost_courier_calc_postcode_fill_start' );
+		$this->register_write_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_step', 'ajax_russianpost_courier_calc_postcode_fill_step' );
 		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_status', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_status' ) );
-		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_reset', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_reset' ) );
-		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_clear_all', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_clear_all' ) );
+		$this->register_write_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_reset', 'ajax_russianpost_courier_calc_postcode_fill_reset' );
+		$this->register_write_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_clear_all', 'ajax_russianpost_courier_calc_postcode_fill_clear_all' );
 	}
 
 	public function add_menu_page(): void {
@@ -209,9 +214,11 @@ final class LocationsAdminPage {
 				</div>
 			</div>
 
+			<?php $this->backup_admin?->render(); ?>
 			<form id="wdc-gar-import-form" class="wdc-locations-import" method="post" enctype="multipart/form-data">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<h2><?php echo esc_html__( 'Импорт GAR/ФИАС CSV', 'walls-delivery-calc' ); ?></h2>
+				<?php $this->backup_admin?->render_script(); ?>
 				<label>
 					<span><?php echo esc_html__( 'Файл gar_places.csv', 'walls-delivery-calc' ); ?></span>
 					<input type="file" name="wdc_gar_places_csv" accept=".csv,text/csv">
@@ -835,6 +842,28 @@ final class LocationsAdminPage {
 		<?php
 	}
 
+	private function register_write_action( string $hook, string $method ): void {
+		add_action( $hook, function () use ( $method ): void {
+			$this->guard_ajax();
+			if ( null === $this->write_lock ) {
+				$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Locations write lock is unavailable.' ) ), false );
+				return;
+			}
+			try {
+				$this->defer_json = true;
+				try {
+					$this->write_lock->run( fn() => $this->$method() );
+				} finally {
+					$this->defer_json = false;
+				}
+			} catch ( LocationAdminJsonResponse $response ) {
+				$this->send_json( $response->data, $response->success );
+			} catch ( RuntimeException $error ) {
+				$this->send_json( array( 'phase' => 'failed', 'errors' => array( $error->getMessage() ) ), false );
+			}
+		} );
+	}
+
 	private function handle_post(): string {
 		if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) || ! isset( $_POST[ self::NONCE_NAME ] ) ) {
 			return '';
@@ -848,7 +877,16 @@ final class LocationsAdminPage {
 		if ( ! in_array( $action, array( 'import_gar_csv', 'clear_all', 'export_snapshot', 'import_snapshot', 'save_type_rules' ), true ) ) {
 			return '';
 		}
+		try {
+			return 'export_snapshot' !== $action && null !== $this->write_lock
+				? $this->write_lock->run( fn(): string => $this->handle_authorized_post( $action ) )
+				: $this->handle_authorized_post( $action );
+		} catch ( RuntimeException $error ) {
+			return $error->getMessage();
+		}
+	}
 
+	private function handle_authorized_post( string $action ): string {
 		if ( 'save_type_rules' === $action ) {
 			$rules = $this->sanitize_type_rules( $_POST['type_rules'] ?? array() );
 			$this->update_option( self::DISPLAY_RULES_OPTION, $rules );
@@ -1752,6 +1790,9 @@ final class LocationsAdminPage {
 	 * @param array<string,mixed> $data
 	 */
 	private function send_json( array $data, bool $success = true ): void {
+		if ( $this->defer_json ) {
+			throw new LocationAdminJsonResponse( $data, $success );
+		}
 		if ( function_exists( 'wp_send_json_success' ) ) {
 			$success ? wp_send_json_success( $data ) : wp_send_json_error( $data );
 			return;

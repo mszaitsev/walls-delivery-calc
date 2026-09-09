@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.155.14
+Version: 0.155.15
+
+0.155.15 adds a single paired locations/aliases backup, verified atomic restore, shared administrative write locking, and a protected GAR export-script download. See [Locations](subsystems/locations.md) for snapshot scope, failure handling and the exact command.
 
 0.155.14 unifies both RateSorter stages on final checkout price and delivery days. "По цене": non-zero price ASC, zero LAST, then min days and max days ASC. "По сроку": min days ASC, max days ASC, then the same non-zero-first price order. Null bounds independently sort after known bounds; title, tariff key, rate ID and input index break exact ties. Rates are sorted within each method first; methods are then compared by their active rate. Grouping is unchanged and JavaScript does not sort rates.
 

@@ -7,6 +7,7 @@ use Throwable;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\Storage\LocationWriteLock;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -27,7 +28,8 @@ final class DpdGeographyImportService {
 		private LocationRepository $locations,
 		private LocationDeliveryCodeRepository $delivery_codes,
 		private ?DpdSettings $settings = null,
-		private ?DpdGeographyImportLockService $lock = null
+		private ?DpdGeographyImportLockService $lock = null,
+		private ?LocationWriteLock $locations_write_lock = null
 	) {
 		$this->lock ??= new DpdGeographyImportLockService();
 	}
@@ -112,6 +114,10 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	public function step( string $job_id = '', int $limit = self::DEFAULT_STEP_LIMIT, ?int $expected_byte_offset = null ): array {
+		return $this->with_locations_write_lock( fn(): array => $this->step_with_import_lock( $job_id, $limit, $expected_byte_offset ), true );
+	}
+
+	private function step_with_import_lock( string $job_id, int $limit, ?int $expected_byte_offset ): array {
 		$state = $this->state->current();
 		if ( $this->legacy_runner_protocol( $state ) ) {
 			return $this->legacy_runner_response();
@@ -769,6 +775,23 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	private function run_locked_start( string $source, callable $callback ): array {
+		return $this->with_locations_write_lock( fn(): array => $this->start_with_import_lock( $source, $callback ) );
+	}
+
+	private function with_locations_write_lock( callable $callback, bool $step = false ): array {
+		try {
+			return null !== $this->locations_write_lock ? $this->locations_write_lock->run( $callback ) : $callback();
+		} catch ( \RuntimeException $error ) {
+			if ( 409 !== $error->getCode() ) {
+				throw $error;
+			}
+			$state = $step ? $this->with_step_control( $this->state->public_state(), 'busy' ) : $this->with_operation_control( $this->state->public_state(), 'busy' );
+			$state['last_message'] = $error->getMessage();
+			return $state;
+		}
+	}
+
+	private function start_with_import_lock( string $source, callable $callback ): array {
 		$token = $this->lock?->acquire( 'dpd-geography-start', self::START_LOCK_TTL_SECONDS );
 		if ( null === $token ) {
 			$state = $this->with_operation_control( $this->state->public_state(), 'busy' );
