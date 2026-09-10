@@ -46,7 +46,16 @@ final class PekCheckoutQuoteContextResolver {
 		if ( ! $this->countries->supports_calculation_direction( $this->countries->sender_country(), $receiver_country ) || $receiver_country !== strtoupper( trim( $location->country_code ) ) ) {
 			throw new PekApiException( 'ПЭК не поддерживает выбранное направление.', array( 'error_code' => 'pek_checkout_country_not_supported', 'failure_stage' => 'checkout_context', 'country_code' => $receiver_country, 'direction_supported' => false ) );
 		}
-		$mapping = $this->location_resolver->resolve( $location_id );
+		$mapping_error = array();
+		try {
+			$mapping = $this->location_resolver->resolve( $location_id );
+		} catch ( PekApiException $exception ) {
+			$mapping_error = $this->pickup_options_error_from_exception( $exception );
+			$mapping = $this->canonical_location_mapping( $location );
+		} catch ( \RuntimeException ) {
+			$mapping_error = $this->mode_options_error( 'pek_checkout_location_resolution_failed', 'location_resolution' );
+			$mapping = $this->canonical_location_mapping( $location );
+		}
 		$fingerprint = $this->destination_fingerprint( $location, $mapping );
 		$query = $this->pickup_query( $request, $location, $mapping, $fingerprint );
 		$selection = $this->trusted_selection( $request, $fingerprint );
@@ -55,16 +64,30 @@ final class PekCheckoutQuoteContextResolver {
 		$pickup_preliminary_options = array();
 		$pickup_error = array();
 		$pickup_preliminary_error = array();
-		try {
-			$pickup_preliminary_options = $this->preliminary_pickup_options( $planned, $query, $mapping, $fingerprint );
-		} catch ( PekApiException $exception ) {
-			$pickup_preliminary_error = $this->pickup_options_error_from_exception( $exception );
+		if ( array() !== $mapping_error ) {
+			$pickup_preliminary_error = $mapping_error;
+		} else {
+			try {
+				$pickup_preliminary_options = $this->preliminary_pickup_options( $planned, $query, $mapping, $fingerprint );
+			} catch ( PekApiException $exception ) {
+				$pickup_preliminary_error = $this->pickup_options_error_from_exception( $exception );
+			} catch ( \RuntimeException ) {
+				$pickup_preliminary_error = $this->mode_options_error( 'pek_checkout_pickup_provider_failed', 'destination_terminal_provider' );
+			}
 		}
 		if ( is_array( $selection ) && '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
 			$pickup_options = $this->selected_pickup_options( $planned, $selection );
 		} else {
 			$pickup_options = $pickup_preliminary_options;
 			$pickup_error = $pickup_preliminary_error;
+		}
+
+		$courier_options = array();
+		$courier_error = array();
+		try {
+			$courier_options = $this->courier_options( $request, $location, $mapping, $planned );
+		} catch ( PekApiException $exception ) {
+			$courier_error = $this->mode_options_error_from_exception( $exception, 'courier' );
 		}
 
 		return array(
@@ -82,7 +105,25 @@ final class PekCheckoutQuoteContextResolver {
 			'pickup_options_error' => $pickup_error,
 			'pickup_preliminary_options' => $pickup_preliminary_options,
 			'pickup_preliminary_options_error' => $pickup_preliminary_error,
-			'courier_options' => $this->courier_options( $request, $location, $mapping, $planned ),
+			'courier_options' => $courier_options,
+			'courier_options_error' => $courier_error,
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function canonical_location_mapping( Location $location ): array {
+		return array(
+			'location_id' => (int) $location->id,
+			'country_code' => strtoupper( trim( $location->country_code ) ),
+			'address_fingerprint' => $this->location_resolver->fingerprint( $location ),
+			'resolution_method' => 'canonical_fallback',
+			'normalized_address' => $this->address_builder->build( $location ),
+			'latitude' => $location->has_coordinates() ? $location->latitude : null,
+			'longitude' => $location->has_coordinates() ? $location->longitude : null,
+			'precision' => '',
+			'mapping_state' => 'unavailable',
+			'cache_hit' => false,
+			'stale_fallback' => false,
 		);
 	}
 
@@ -451,6 +492,25 @@ final class PekCheckoutQuoteContextResolver {
 		}
 
 		return $this->safe_pickup_diagnostic( $error );
+	}
+
+	/** @return array<string,mixed> */
+	private function mode_options_error_from_exception( PekApiException $exception, string $mode ): array {
+		$context = $exception->context();
+
+		return $this->mode_options_error(
+			$this->safe_token( (string) ( $context['error_code'] ?? 'pek_checkout_' . $mode . '_options_missing' ) ),
+			$this->safe_token( (string) ( $context['failure_stage'] ?? 'checkout_context' ) )
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function mode_options_error( string $error_code, string $failure_stage ): array {
+		return array(
+			'success' => false,
+			'error_code' => $this->safe_token( $error_code ),
+			'failure_stage' => $this->safe_token( $failure_stage ),
+		);
 	}
 
 	/** @return array<string,mixed> */

@@ -147,12 +147,12 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 		if ( PekQuoteOptions::MODE_PICKUP === $mode ) {
 			return $this->calculate_pickup_mode( $request, $context );
 		}
-		$options = $mode === PekQuoteOptions::MODE_PICKUP
-			? ( $context['pickup_options']['options'] ?? null )
-			: ( $context['courier_options']['options'] ?? null );
+		$options_key = $mode . '_options';
+		$error_key = $options_key . '_error';
+		$options = $context[ $options_key ]['options'] ?? null;
 		if ( ! $options instanceof PekQuoteOptions ) {
-			$error = $mode === PekQuoteOptions::MODE_PICKUP && is_array( $context['pickup_options_error'] ?? null )
-				? $context['pickup_options_error']
+			$error = is_array( $context[ $error_key ] ?? null ) && array() !== $context[ $error_key ]
+				? $context[ $error_key ]
 				: array( 'success' => false, 'error_code' => 'pek_checkout_' . $mode . '_options_missing' );
 			return array( 'rate' => null, 'diagnostic' => $error );
 		}
