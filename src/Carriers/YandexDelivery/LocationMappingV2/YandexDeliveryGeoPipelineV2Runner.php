@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderRunner
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -30,7 +31,8 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		private YandexGeoV2RegionEnrichmentRunner $region_enrichment_runner,
 		private YandexRegionMappingV2Repository $region_mapping_repository,
 		private YandexLocationMappingV2Runner $location_mapping_runner,
-		private YandexLocationMappingV2Repository $location_mapping_repository
+		private YandexLocationMappingV2Repository $location_mapping_repository,
+		private TimezoneService $timezone
 	) {
 	}
 
@@ -374,7 +376,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		$settings = function_exists( 'get_option' ) ? get_option( self::SCHEDULE_OPTION, array() ) : array();
 		$days = is_array( $settings['days'] ?? null ) ? array_values( array_map( 'intval', $settings['days'] ) ) : array();
 		$days = array_values( array_filter( array_unique( $days ), static fn( int $day ): bool => $day >= 1 && $day <= 7 ) );
-		$time = preg_match( '/^\d{2}:\d{2}$/', (string) ( $settings['time'] ?? '' ) ) ? (string) $settings['time'] : '03:00';
+		$time = preg_match( '/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/', (string) ( $settings['time'] ?? '' ) ) ? (string) $settings['time'] : '03:00';
 		return array(
 			'enabled' => ! empty( $settings['enabled'] ),
 			'days' => $days,
@@ -386,7 +388,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 	/** @param array<int,int|string> $days */
 	public function save_schedule_settings( bool $enabled, array $days, string $time ): array {
 		$days = array_values( array_filter( array_unique( array_map( 'intval', $days ) ), static fn( int $day ): bool => $day >= 1 && $day <= 7 ) );
-		$time = preg_match( '/^\d{2}:\d{2}$/', $time ) ? $time : '03:00';
+		$time = preg_match( '/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/', $time ) ? $time : '03:00';
 		$settings = array( 'enabled' => $enabled && array() !== $days, 'days' => $days, 'time' => $time );
 		if ( function_exists( 'update_option' ) ) {
 			update_option( self::SCHEDULE_OPTION, $settings, false );
@@ -401,8 +403,15 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		if ( empty( $settings['enabled'] ) || ! function_exists( 'wp_schedule_single_event' ) ) {
 			return;
 		}
-		if ( function_exists( 'wp_next_scheduled' ) && wp_next_scheduled( self::SCHEDULE_HOOK ) ) {
-			return;
+		if ( function_exists( 'wp_next_scheduled' ) ) {
+			$scheduled = wp_next_scheduled( self::SCHEDULE_HOOK );
+			if ( $scheduled ) {
+				$local = ( new \DateTimeImmutable( '@' . (int) $scheduled ) )->setTimezone( $this->timezone->timezone() );
+				if ( $settings['time'] === $local->format( 'H:i' ) && in_array( (int) $local->format( 'N' ), $settings['days'], true ) ) {
+					return;
+				}
+				$this->clear_scheduled_start();
+			}
 		}
 		$timestamp = $this->next_schedule_timestamp( $settings );
 		if ( $timestamp > 0 ) {
@@ -421,8 +430,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		if ( empty( $settings['enabled'] ) || array() === $settings['days'] ) {
 			return 0;
 		}
-		$timezone = $this->schedule_timezone();
-		$now = new \DateTimeImmutable( 'now', $timezone );
+		$now = $this->timezone->now();
 		[$hour, $minute] = array_map( 'intval', explode( ':', $settings['time'] ) );
 		for ( $offset = 0; $offset < 14; ++$offset ) {
 			$candidate = $now->modify( '+' . $offset . ' days' )->setTime( $hour, $minute, 0 );
@@ -441,11 +449,13 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		if ( ! $timestamp ) {
 			return '';
 		}
-		return ( new \DateTimeImmutable( '@' . (int) $timestamp ) )->setTimezone( $this->schedule_timezone() )->format( 'Y-m-d H:i' ) . ' MSK';
+		return $this->timezone->format_timestamp( (int) $timestamp );
 	}
 
-	private function schedule_timezone(): \DateTimeZone {
-		return new \DateTimeZone( 'Europe/Moscow' );
+	public function next_run_timestamp(): ?int {
+		$timestamp = function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( self::SCHEDULE_HOOK ) : false;
+
+		return $timestamp ? (int) $timestamp : null;
 	}
 	private function stage_label( string $stage ): string {
 		return match ( $stage ) {

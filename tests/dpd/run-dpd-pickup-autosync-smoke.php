@@ -17,6 +17,7 @@ use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointAutoSync;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportService;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
@@ -149,7 +150,7 @@ function dpd_pickup_autosync_build(): array {
 	$soap = new DpdPickupAutoSyncFakeSoapClient();
 	$repository = new DpdPickupPointRepository( $GLOBALS['wpdb'] );
 	$importer = new DpdPickupPointImportService( new DpdApiClient( $settings, $soap ), new DpdPickupPointNormalizer(), $repository, $settings );
-	$scheduler = new DpdPickupPointAutoSync( $settings, $importer );
+	$scheduler = new DpdPickupPointAutoSync( $settings, $importer, null, new TimezoneService() );
 
 	return array( $settings, $soap, $repository, $importer, $scheduler );
 }
@@ -163,10 +164,12 @@ dpd_pickup_autosync_assert( '09:00' === $settings->sanitize_pickup_autosync_time
 dpd_pickup_autosync_assert( '09:15' === $settings->sanitize_pickup_autosync_time( '09:15' ), '09:15 must be accepted.' );
 dpd_pickup_autosync_assert( '' === $settings->sanitize_pickup_autosync_time( '09:10' ), '09:10 must be rejected.' );
 dpd_pickup_autosync_assert( '' === $settings->sanitize_pickup_autosync_time( 'abc' ), 'abc must be rejected.' );
-$msk_date = new DateTimeImmutable( '2026-06-22 00:00:00', new DateTimeZone( 'UTC' ) );
-dpd_pickup_autosync_assert( '2026-06-22 06:00' === gmdate( 'Y-m-d H:i', $scheduler->msk_time_to_utc_timestamp( '09:00', $msk_date ) ), '09:00 MSK must become 06:00 UTC.' );
-dpd_pickup_autosync_assert( '2026-06-21 21:15' === gmdate( 'Y-m-d H:i', $scheduler->msk_time_to_utc_timestamp( '00:15', $msk_date ) ), '00:15 MSK must become previous day 21:15 UTC.' );
-dpd_pickup_autosync_assert( '2026-06-22 20:45' === gmdate( 'Y-m-d H:i', $scheduler->msk_time_to_utc_timestamp( '23:45', $msk_date ) ), '23:45 MSK must become 20:45 UTC.' );
+$before = new DateTimeImmutable( '2026-06-22 08:00:00', new DateTimeZone( 'Asia/Novosibirsk' ) );
+$after = new DateTimeImmutable( '2026-06-22 10:00:00', new DateTimeZone( 'Asia/Novosibirsk' ) );
+dpd_pickup_autosync_assert( '2026-06-22 02:00' === gmdate( 'Y-m-d H:i', $scheduler->local_time_to_timestamp( '09:00', $before ) ), '09:00 Novosibirsk must become 02:00 UTC on the same local day.' );
+dpd_pickup_autosync_assert( '2026-06-23 02:00' === gmdate( 'Y-m-d H:i', $scheduler->local_time_to_timestamp( '09:00', $after ) ), 'A passed 09:00 slot must schedule tomorrow in Novosibirsk.' );
+dpd_pickup_autosync_assert( '2026-06-21 17:30' === gmdate( 'Y-m-d H:i', $scheduler->local_time_to_timestamp( '00:30', new DateTimeImmutable( '2026-06-21 23:30:00', new DateTimeZone( 'Asia/Novosibirsk' ) ) ) ), '00:30 Novosibirsk must cross the UTC/local date boundary correctly.' );
+dpd_pickup_autosync_assert( '2026-06-22 16:30' === gmdate( 'Y-m-d H:i', $scheduler->local_time_to_timestamp( '23:30', $before ) ), '23:30 Novosibirsk must convert to 16:30 UTC.' );
 
 $scheduler->reschedule();
 $scheduler->run_cron( '09:00' );

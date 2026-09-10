@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Core;
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Admin\AdminNotices;
+use WallsShop\WDC\Admin\ScheduledTaskCatalog;
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Calendar\Admin\CalendarAdminPage;
 use WallsShop\WDC\Calendar\Services\CalendarScheduler;
@@ -546,7 +547,7 @@ final class Plugin {
 		$this->container->register( OzonDeliveryPickupParser::class, fn(): OzonDeliveryPickupParser => new OzonDeliveryPickupParser( $this->container->get( OzonDeliveryPickupScheduleFormatter::class ) ) );
 		$this->container->register( OzonDeliveryPickupImportLock::class, fn(): OzonDeliveryPickupImportLock => new OzonDeliveryPickupImportLock() );
 		$this->container->register( OzonDeliveryPickupImportService::class, fn(): OzonDeliveryPickupImportService => new OzonDeliveryPickupImportService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryPickupParser::class ), $this->container->get( OzonDeliveryPickupRepository::class ) ) );
-		$this->container->register( OzonDeliveryPickupScheduler::class, fn(): OzonDeliveryPickupScheduler => new OzonDeliveryPickupScheduler( $this->container->get( ActionScheduler::class ), $this->container->get( OzonDeliveryPickupImportService::class ), $this->container->get( OzonDeliveryPickupImportLock::class ), $this->container->get( OzonDeliverySettings::class ) ) );
+		$this->container->register( OzonDeliveryPickupScheduler::class, fn(): OzonDeliveryPickupScheduler => new OzonDeliveryPickupScheduler( $this->container->get( ActionScheduler::class ), $this->container->get( OzonDeliveryPickupImportService::class ), $this->container->get( OzonDeliveryPickupImportLock::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( TimezoneService::class ) ) );
 		$this->container->register( OzonDeliveryCourierAddressMapper::class, fn(): OzonDeliveryCourierAddressMapper => new OzonDeliveryCourierAddressMapper() );
 		$this->container->register( OzonDeliveryCourierLocationResolver::class, fn(): OzonDeliveryCourierLocationResolver => new OzonDeliveryCourierLocationResolver( $this->container->get( LocationRepository::class ), $this->container->get( OzonDeliveryPickupRepository::class ) ) );
 		$this->container->register( OzonDeliveryQuoteRequestBuilder::class, fn(): OzonDeliveryQuoteRequestBuilder => new OzonDeliveryQuoteRequestBuilder( $this->container->get( OzonDeliverySettings::class ), $this->container->get( RussianPhoneNormalizer::class ), $this->container->get( OzonDeliveryCourierAddressMapper::class ), $this->container->get( OzonDeliveryCourierLocationResolver::class ) ) );
@@ -668,7 +669,7 @@ final class Plugin {
 		$this->container->register( YandexGeoV2RegionEnrichmentRunner::class, fn(): YandexGeoV2RegionEnrichmentRunner => new YandexGeoV2RegionEnrichmentRunner( $this->container->get( YandexGeoV2RegionEnrichmentService::class ), $this->container->get( YandexDeliveryGeoV2Repository::class ) ) );
 		$this->container->register( YandexLocationMapperV2Service::class, fn(): YandexLocationMapperV2Service => new YandexLocationMapperV2Service( $this->container->get( YandexLocationMappingV2Repository::class ), null, null, $this->container->get( YandexRegionMappingV2Repository::class ), $this->container->get( YandexLocationManualOverrideV2Repository::class ) ) );
 		$this->container->register( YandexLocationMappingV2Runner::class, fn(): YandexLocationMappingV2Runner => new YandexLocationMappingV2Runner( $this->container->get( YandexLocationMapperV2Service::class ), $this->container->get( YandexLocationMappingV2Repository::class ) ) );
-		$this->container->register( YandexDeliveryGeoPipelineV2Runner::class, fn(): YandexDeliveryGeoPipelineV2Runner => new YandexDeliveryGeoPipelineV2Runner( $this->container->get( YandexDeliveryPickupPointV2RunnerService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( YandexDeliveryGeoV2BuilderRunnerService::class ), $this->container->get( YandexDeliveryGeoV2Repository::class ), $this->container->get( YandexGeoV2RegionEnrichmentRunner::class ), $this->container->get( YandexRegionMappingV2Repository::class ), $this->container->get( YandexLocationMappingV2Runner::class ), $this->container->get( YandexLocationMappingV2Repository::class ) ) );
+		$this->container->register( YandexDeliveryGeoPipelineV2Runner::class, fn(): YandexDeliveryGeoPipelineV2Runner => new YandexDeliveryGeoPipelineV2Runner( $this->container->get( YandexDeliveryPickupPointV2RunnerService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( YandexDeliveryGeoV2BuilderRunnerService::class ), $this->container->get( YandexDeliveryGeoV2Repository::class ), $this->container->get( YandexGeoV2RegionEnrichmentRunner::class ), $this->container->get( YandexRegionMappingV2Repository::class ), $this->container->get( YandexLocationMappingV2Runner::class ), $this->container->get( YandexLocationMappingV2Repository::class ), $this->container->get( TimezoneService::class ) ) );
 		$this->container->register( DpdSoapClientInterface::class, fn(): DpdSoapClientInterface => new DpdSoapClient( $this->container->get( DpdSettings::class )->request_timeout() ) );
 		$this->container->register( DpdApiClient::class, fn(): DpdApiClient => new DpdApiClient( $this->container->get( DpdSettings::class ), $this->container->get( DpdSoapClientInterface::class ) ) );
 		$this->container->register( DpdDuplicateCityResolver::class, fn(): DpdDuplicateCityResolver => new DpdDuplicateCityResolver() );
@@ -686,7 +687,7 @@ final class Plugin {
 		$this->container->register( DpdPickupPointRepository::class, fn(): DpdPickupPointRepository => new DpdPickupPointRepository() );
 		$this->container->register( DpdPickupPointNormalizer::class, fn(): DpdPickupPointNormalizer => new DpdPickupPointNormalizer() );
 		$this->container->register( DpdPickupPointImportService::class, fn(): DpdPickupPointImportService => new DpdPickupPointImportService( $this->container->get( DpdApiClient::class ), $this->container->get( DpdPickupPointNormalizer::class ), $this->container->get( DpdPickupPointRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( Logger::class ) ) );
-		$this->container->register( DpdPickupPointAutoSync::class, fn(): DpdPickupPointAutoSync => new DpdPickupPointAutoSync( $this->container->get( DpdSettings::class ), $this->container->get( DpdPickupPointImportService::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( DpdPickupPointAutoSync::class, fn(): DpdPickupPointAutoSync => new DpdPickupPointAutoSync( $this->container->get( DpdSettings::class ), $this->container->get( DpdPickupPointImportService::class ), $this->container->get( Logger::class ), $this->container->get( TimezoneService::class ) ) );
 		$this->container->register( DpdPickupPointService::class, fn(): DpdPickupPointService => new DpdPickupPointService( $this->container->get( DpdPickupPointRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ) ) );
 		$this->container->register( PackagingBuilderConfig::class, fn(): PackagingBuilderConfig => PackagingBuilderConfig::defaults() );
 		$this->container->register( PackagingBuilder::class, fn(): PackagingBuilder => new PackagingBuilder( $this->container->get( PackagingBuilderConfig::class ), $this->container->get( PackagingWeightCalculator::class ) ) );
@@ -1029,9 +1030,11 @@ final class Plugin {
 			fn(): AdminMenu => new AdminMenu(
 				$this->environment,
 				$this->container->get( DeliveryQuoteCacheManager::class ),
-				$this->container->get( ShipmentCostAnalyticsAdminSection::class )
+				$this->container->get( ShipmentCostAnalyticsAdminSection::class ),
+				$this->container->get( ScheduledTaskCatalog::class )
 			)
 		);
+		$this->container->register( ScheduledTaskCatalog::class, fn(): ScheduledTaskCatalog => new ScheduledTaskCatalog( $this->container->get( ActionScheduler::class ), $this->container->get( TimezoneService::class ), $this->container->get( SettingsRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryPickupScheduler::class ), $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ) ) );
 		$this->container->register(
 			CalendarAdminPage::class,
 			fn(): CalendarAdminPage => new CalendarAdminPage(

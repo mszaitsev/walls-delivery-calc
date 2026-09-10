@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Admin;
 
 use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
@@ -155,8 +156,8 @@ final class ShipmentStatusesAdminPage {
 		</form>
 		<table class="widefat striped" style="max-width: 760px;">
 			<tbody>
-				<?php $this->row( __( 'Последний запуск', 'walls-delivery-calc' ), (string) ( $stats['started_at'] ?? '' ) ); ?>
-				<?php $this->row( __( 'Последнее завершение', 'walls-delivery-calc' ), (string) ( $stats['finished_at'] ?? '' ) ); ?>
+				<?php $this->row( __( 'Последний запуск', 'walls-delivery-calc' ), TimezoneService::format_site_datetime( (string) ( $stats['started_at'] ?? '' ) ) ); ?>
+				<?php $this->row( __( 'Последнее завершение', 'walls-delivery-calc' ), TimezoneService::format_site_datetime( (string) ( $stats['finished_at'] ?? '' ) ) ); ?>
 				<?php $this->row( __( 'Тип запуска', 'walls-delivery-calc' ), (string) ( $stats['trigger_type'] ?? '' ) ); ?>
 				<?php $this->row( __( 'Длительность', 'walls-delivery-calc' ), (string) ( (int) ( $stats['duration_ms'] ?? 0 ) ) . ' ms' ); ?>
 				<?php $this->row( __( 'Заказов найдено', 'walls-delivery-calc' ), (string) (int) ( $stats['orders_scanned'] ?? 0 ) ); ?>

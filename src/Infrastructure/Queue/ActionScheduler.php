@@ -62,6 +62,19 @@ final class ActionScheduler {
 		return (bool) as_has_scheduled_action( $hook, $args, $group );
 	}
 
+	/**
+	 * @param array<int|string, mixed> $args
+	 */
+	public function next_scheduled( string $hook, array $args = array(), string $group = 'walls-delivery-calc' ): ?int {
+		if ( ! function_exists( 'as_next_scheduled_action' ) ) {
+			return null;
+		}
+
+		$timestamp = as_next_scheduled_action( $hook, $args, $group );
+
+		return is_numeric( $timestamp ) && (int) $timestamp > 0 ? (int) $timestamp : null;
+	}
+
 	private function available( string $method ): bool {
 		$available = function_exists( 'as_schedule_single_action' )
 			&& function_exists( 'as_schedule_recurring_action' )

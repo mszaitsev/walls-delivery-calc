@@ -10,6 +10,7 @@ use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Shipments\Pek\PekSenderCounterpartService;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -277,7 +278,8 @@ final class PekAdminPage {
 		}
 		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
 		foreach ( array( 'warehouseId' => 'Warehouse ID', 'source' => 'Источник выбора', 'branchName' => 'Филиал', 'divisionName' => 'Отделение', 'departmentType' => 'Тип', 'address' => 'Адрес', 'branchTimezone' => 'Часовой пояс филиала', 'checked_at' => 'Проверено' ) as $key => $label ) {
-			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( (string) ( $snapshot[ $key ] ?? '' ) ) . '</td></tr>';
+			$value = 'checked_at' === $key ? TimezoneService::format_site_datetime( (string) ( $snapshot[ $key ] ?? '' ) ) : (string) ( $snapshot[ $key ] ?? '' );
+			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( $value ) . '</td></tr>';
 		}
 		echo '</tbody></table>';
 	}
@@ -293,6 +295,9 @@ final class PekAdminPage {
 			$value = $snapshot[ $key ] ?? '';
 			if ( is_bool( $value ) ) {
 				$value = $value ? 'yes' : 'no';
+			}
+			if ( 'checked_at' === $key ) {
+				$value = TimezoneService::format_site_datetime( (string) $value );
 			}
 			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( (string) $value ) . '</td></tr>';
 		}
@@ -534,6 +539,9 @@ final class PekAdminPage {
 
 	/** @param array<string,mixed> $report */
 	private function destination_report_value( mixed $value, string $key = '', array $report = array() ): string {
+		if ( 'checked_at' === $key ) {
+			return TimezoneService::format_site_datetime( (string) $value );
+		}
 		if ( 'success' === $key ) {
 			return true === $value ? 'Успешно' : 'Ошибка';
 		}

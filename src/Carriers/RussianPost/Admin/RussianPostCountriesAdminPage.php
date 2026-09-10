@@ -7,6 +7,7 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMapping;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -81,7 +82,7 @@ final class RussianPostCountriesAdminPage {
 			'Ручное включение' => (int) ( $stats['manual_enabled'] ?? 0 ),
 			'Ручное отключение' => (int) ( $stats['manual_disabled'] ?? 0 ),
 			'Пропущено/не сопоставлено' => (int) ( $stats['skipped'] ?? 0 ),
-			'Дата последней проверки' => (string) ( $stats['last_checked_at'] ?? '' ),
+			'Дата последней проверки' => TimezoneService::format_site_datetime( (string) ( $stats['last_checked_at'] ?? '' ) ),
 		);
 		echo '<table class="widefat striped" style="max-width: 860px;"><tbody>';
 		foreach ( $rows as $label => $value ) {
@@ -273,7 +274,7 @@ final class RussianPostCountriesAdminPage {
 			echo '<td>' . esc_html( $item->manual_mode ) . '</td>';
 			echo '<td>' . esc_html( $this->yes_no( $item->effective_enabled ) ) . '</td>';
 			echo '<td>' . esc_html( $item->manual_comment ) . '</td>';
-			echo '<td>' . esc_html( (string) $item->last_checked_at ) . '</td>';
+			echo '<td>' . esc_html( TimezoneService::format_site_datetime( (string) $item->last_checked_at ) ) . '</td>';
 			echo '<td>' . $this->action_form( $item->wc_country_code ) . '</td>';
 			echo '</tr>';
 		}

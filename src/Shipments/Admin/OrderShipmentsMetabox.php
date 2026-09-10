@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Admin;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
@@ -326,7 +327,7 @@ final class OrderShipmentsMetabox {
 				<p data-wdc-actual-cost-input-wrap <?php echo $has_created && ! $has_actual_cost ? '' : 'hidden'; ?>><input type="text" inputmode="decimal" data-wdc-actual-cost-input placeholder="<?php echo esc_attr__( 'Фактическая стоимость, ₽', 'walls-delivery-calc' ); ?>"> <button type="button" class="button" data-wdc-save-actual-cost <?php echo $has_created && ! $has_actual_cost ? '' : 'hidden'; ?>><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></p>
 				<p><button type="button" class="button-link" data-wdc-clear-actual-cost <?php echo $has_created && $has_actual_cost ? '' : 'hidden'; ?>><?php echo esc_html__( 'Очистить фактическую стоимость', 'walls-delivery-calc' ); ?></button></p>
 			</div>
-			<p data-wdc-updated-row <?php echo '' === (string) ( $shipment['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-updated-at><?php echo esc_html( (string) ( $shipment['updated_at'] ?? '' ) ); ?></span></p>
+			<p data-wdc-updated-row <?php echo '' === (string) ( $shipment['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-updated-at><?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $shipment['updated_at'] ?? '' ) ) ); ?></span></p>
 			<?php $this->render_status_block( $status_payload ); ?>
 			<span data-wdc-backlog-order-id hidden><?php echo esc_html( $backlog_order_id ); ?></span>
 			<?php if ( array() !== $error && ! $has_created ) : ?><div class="notice notice-error inline"><p><?php echo esc_html( (string) ( $error['error_message'] ?? '' ) ); ?></p></div><?php endif; ?>
@@ -659,8 +660,8 @@ final class OrderShipmentsMetabox {
 			<p><strong><?php echo esc_html__( 'Последняя операция', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-operation><?php echo esc_html( $this->operation_summary( $status ) ); ?></span></p>
 			<p data-wdc-planned-delivery-row <?php echo '' === (string) ( $status['planned_delivery_date'] ?? $status['cdek_planned_delivery_date'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Плановая дата доставки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-planned-delivery-date><?php echo esc_html( (string) ( $status['planned_delivery_date'] ?? $status['cdek_planned_delivery_date'] ?? '' ) ); ?></span></p>
 			<p data-wdc-dpd-places-row <?php echo '' === (string) ( $status['dpd_places_summary'] ?? '' ) ? 'hidden' : ''; ?>><strong data-wdc-dpd-places-label><?php echo esc_html( (string) ( $status['dpd_places_label'] ?? __( 'Грузоместа DPD', 'walls-delivery-calc' ) ) ); ?></strong>: <span data-wdc-dpd-places-summary><?php echo esc_html( (string) ( $status['dpd_places_summary'] ?? '' ) ); ?></span></p>
-			<p data-wdc-status-updated-row <?php echo '' === (string) ( $status['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-updated><?php echo esc_html( (string) ( $status['updated_at'] ?? '' ) ); ?></span></p>
-			<p><strong><?php echo esc_html__( 'Проверено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-checked><?php echo esc_html( (string) ( $status['tracking_checked_at'] ?? '' ) ?: '-' ); ?></span></p>
+			<p data-wdc-status-updated-row <?php echo '' === (string) ( $status['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-updated><?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $status['updated_at'] ?? '' ) ) ); ?></span></p>
+			<p><strong><?php echo esc_html__( 'Проверено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-checked><?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $status['tracking_checked_at'] ?? '' ) ) ?: '-' ); ?></span></p>
 			<div class="wdc-shipment-polling-indicator" data-wdc-shipment-polling-indicator data-wdc-cdek-polling-indicator hidden><span class="wdc-shipment-inline-spinner" aria-hidden="true"></span><span><?php echo esc_html__( 'Проверяем регистрацию отправления…', 'walls-delivery-calc' ); ?></span></div>
 		</div>
 		<?php

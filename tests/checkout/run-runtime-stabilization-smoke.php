@@ -1221,7 +1221,7 @@ $version_before_variation_update = $quote_cache_manager->delivery_rates_cache_ve
 $quote_cache_manager->invalidate_after_product_update( 456 );
 runtime_smoke_assert( $version_before_variation_update !== $quote_cache_manager->delivery_rates_cache_version() && null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'Variation update must use the same carrier-neutral invalidation boundary and clear runtime quote cache.' );
 
-$admin_menu = new AdminMenu( runtime_smoke_environment(), $quote_cache_manager, runtime_smoke_shipment_cost_analytics_section() );
+$admin_menu = new AdminMenu( runtime_smoke_environment(), $quote_cache_manager, runtime_smoke_shipment_cost_analytics_section(), $container->get( \WallsShop\WDC\Admin\ScheduledTaskCatalog::class ) );
 $_SERVER['REQUEST_METHOD'] = 'GET';
 $_POST = array();
 ob_start();
@@ -1229,6 +1229,7 @@ $admin_menu->render_page();
 $overview_html = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $overview_html, 'wdc_overview_action' ) && str_contains( $overview_html, 'clear_delivery_quote_cache' ) && str_contains( $overview_html, 'Очистить кеш тарифов доставки' ), 'Overview page must render delivery quote cache clear button.' );
 runtime_smoke_assert( str_contains( $overview_html, 'Версия плагина' ) && str_contains( $overview_html, 'Версия PHP' ) && str_contains( $overview_html, 'Версия WooCommerce' ) && str_contains( $overview_html, 'Статус HPOS' ) && str_contains( $overview_html, 'Статус Action Scheduler' ), 'Overview page must keep the platform information block.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Запланированные задачи' ) && str_contains( $overview_html, 'Время указано по Новосибирску (GMT+7).' ) && str_contains( $overview_html, 'Обновление ПВЗ DPD' ), 'Overview page must render the read-only WDC scheduled task catalog after existing content.' );
 runtime_smoke_assert( ! str_contains( $overview_html, 'Флаги функций' ) && ! str_contains( $overview_html, '<h2>Требования</h2>' ), 'Overview page must not render legacy flags or requirements sections.' );
 
 $GLOBALS['wpdb']->options['_transient_wdc_rp_domestic_admin'] = 'admin-cache';

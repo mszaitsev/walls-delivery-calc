@@ -13,6 +13,7 @@ use WallsShop\WDC\Carriers\JetLogistic\JetLogisticCredentials;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -381,7 +382,8 @@ final class JetLogisticGeographyAdminPage {
 			echo '<ul>';
 			foreach ( $details as $key => $value ) {
 				if ( is_scalar( $value ) ) {
-					echo '<li>' . esc_html( $this->notice_detail_label( (string) $key ) . ': ' . (string) $value ) . '</li>';
+					$display_value = 'checked_at' === $key ? TimezoneService::format_site_datetime( (string) $value ) : (string) $value;
+					echo '<li>' . esc_html( $this->notice_detail_label( (string) $key ) . ': ' . $display_value ) . '</li>';
 				}
 			}
 			echo '</ul>';

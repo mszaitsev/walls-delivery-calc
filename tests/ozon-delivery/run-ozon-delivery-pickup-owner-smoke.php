@@ -16,9 +16,16 @@ namespace WallsShop\WDC\Infrastructure\Queue {
 		public array $unscheduled = array();
 
 		public function has_scheduled( string $hook, array $args = array(), string $group = '' ): bool { return false; }
+		public function next_scheduled( string $hook, array $args = array(), string $group = '' ): ?int { return null; }
 		public function schedule_recurring( int $timestamp, int $interval, string $hook, array $args = array(), string $group = '' ): ?int { return 1; }
 		public function schedule_single( int $timestamp, string $hook, array $args = array(), string $group = '' ): ?int { $this->single[] = array( 'hook' => $hook, 'args' => $args, 'group' => $group ); return 1; }
 		public function unschedule( string $hook, array $args = array(), string $group = '' ): void { $this->unscheduled[] = array( 'hook' => $hook, 'args' => $args, 'group' => $group ); }
+	}
+}
+
+namespace WallsShop\WDC\Calendar\Services {
+	final class TimezoneService {
+		public function next_local_time_timestamp( string $time, ?\DateTimeImmutable $now = null ): int { return 1; }
 	}
 }
 
@@ -70,6 +77,7 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup {
 
 	use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 	use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
+	use WallsShop\WDC\Calendar\Services\TimezoneService;
 
 	function oz_owner_assert( bool $condition, string $message ): void {
 		if ( ! $condition ) {
@@ -80,7 +88,7 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup {
 	$scheduler_adapter = new ActionScheduler();
 	$importer = new OzonDeliveryPickupImportService();
 	$lock = new OzonDeliveryPickupImportLock();
-	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings() );
+	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings(), new TimezoneService() );
 	oz_owner_assert( $scheduler->start_manual() && 'OWNER-A' === $importer->started_owner && 1 === count( $scheduler_adapter->single ) && $scheduler_adapter->single[0]['args'][1] === 'OWNER-A', 'Normal start must store the acquired lock owner on the generation and scheduled step args.' );
 
 	$scheduler_adapter = new ActionScheduler();
@@ -88,7 +96,7 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup {
 	$importer->building = array( 'id' => 11, 'job_id' => 'JOB-A', 'lock_owner' => 'OWNER-A' );
 	$lock = new OzonDeliveryPickupImportLock();
 	$lock->owned = 'OWNER-A';
-	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings() );
+	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings(), new TimezoneService() );
 	oz_owner_assert( $scheduler->stop_manual() && 11 === $importer->cancelled_id && array( 'JOB-A', 'OWNER-A' ) === $scheduler_adapter->unscheduled[0]['args'] && array( 'OWNER-A' ) === $lock->released, 'Normal stop must cancel, unschedule exact job/owner args, and release matching owner.' );
 
 	$scheduler_adapter = new ActionScheduler();
@@ -96,7 +104,7 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup {
 	$importer->building = array( 'id' => 12, 'job_id' => 'JOB-OLD', 'lock_owner' => 'OWNER-A' );
 	$lock = new OzonDeliveryPickupImportLock();
 	$lock->owned = 'OWNER-B';
-	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings() );
+	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings(), new TimezoneService() );
 	oz_owner_assert( $scheduler->stop_manual() && array( 'JOB-OLD', 'OWNER-A' ) === $scheduler_adapter->unscheduled[0]['args'] && array() === $lock->released && 'OWNER-B' === $lock->owned, 'Stop must not release a newer/mismatched lock owner.' );
 
 	$scheduler_adapter = new ActionScheduler();
@@ -104,7 +112,7 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup {
 	$importer->building = array( 'id' => 13, 'job_id' => 'JOB-MISSING', 'lock_owner' => 'OWNER-A' );
 	$lock = new OzonDeliveryPickupImportLock();
 	$lock->owned = null;
-	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings() );
+	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings(), new TimezoneService() );
 	oz_owner_assert( $scheduler->stop_manual() && array( 'JOB-MISSING', 'OWNER-A' ) === $scheduler_adapter->unscheduled[0]['args'] && array() === $lock->released, 'Stop must cancel and unschedule even when the lock has already disappeared.' );
 
 	$scheduler_adapter = new ActionScheduler();
@@ -112,13 +120,13 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup {
 	$importer->step_result = array( 'complete' => true, 'failed' => false );
 	$lock = new OzonDeliveryPickupImportLock();
 	$lock->owned = 'OWNER-B';
-	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings() );
+	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, $importer, $lock, new OzonDeliverySettings(), new TimezoneService() );
 	$scheduler->run_step( 'JOB-A', 'OWNER-A' );
 	oz_owner_assert( array() === $scheduler_adapter->single && array() === $lock->released && 'OWNER-B' === $lock->owned, 'Stale complete step must not schedule more work or release a newer owner.' );
 
 	$lock->next_owner = 'OWNER-C';
 	$lock->owned = 'OWNER-C';
-	$scheduler = new OzonDeliveryPickupScheduler( new ActionScheduler(), $importer, $lock, new OzonDeliverySettings() );
+	$scheduler = new OzonDeliveryPickupScheduler( new ActionScheduler(), $importer, $lock, new OzonDeliverySettings(), new TimezoneService() );
 	oz_owner_assert( $scheduler->start_manual() && 'OWNER-C' === $importer->started_owner, 'A new import must be able to start with a fresh owner after stop.' );
 
 	echo "Ozon Delivery pickup owner smoke passed.\n";

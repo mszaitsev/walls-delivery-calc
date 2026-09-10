@@ -21,7 +21,8 @@ final class AdminMenu {
 	public function __construct(
 		PluginEnvironment $environment,
 		private DeliveryQuoteCacheManager $quote_cache_manager,
-		private ShipmentCostAnalyticsAdminSection $shipment_cost_analytics
+		private ShipmentCostAnalyticsAdminSection $shipment_cost_analytics,
+		private ScheduledTaskCatalog $scheduled_tasks
 	) {
 		$this->environment = $environment;
 	}
@@ -81,6 +82,16 @@ final class AdminMenu {
 				<button class="button button-secondary" type="submit"><?php echo esc_html__( 'Очистить кеш тарифов доставки', 'walls-delivery-calc' ); ?></button>
 			</form>
 			<?php $this->shipment_cost_analytics->render(); ?>
+			<h2><?php echo esc_html__( 'Запланированные задачи', 'walls-delivery-calc' ); ?></h2>
+			<p><?php echo esc_html__( 'Время указано по Новосибирску (GMT+7).', 'walls-delivery-calc' ); ?></p>
+			<table class="widefat striped" style="max-width: 960px;">
+				<thead><tr><th><?php echo esc_html__( 'Задача', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Расписание', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Следующий запуск', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Статус', 'walls-delivery-calc' ); ?></th></tr></thead>
+				<tbody>
+					<?php foreach ( $this->scheduled_tasks->tasks() as $task ) : ?>
+						<tr><td><?php echo esc_html( $task['label'] ); ?></td><td><?php echo esc_html( $task['schedule'] ); ?></td><td><?php echo esc_html( $task['next_run'] ); ?></td><td><?php echo esc_html( $task['status'] ); ?></td></tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
 		</div>
 		<?php
 	}
