@@ -420,6 +420,47 @@ function pek_checkout_kz_request(): QuoteRequest {
 	);
 }
 
+function pek_checkout_tavricheskoe_location_rows(): array {
+	return array(
+		array(
+			'id' => 550001,
+			'country_code' => 'RU',
+			'region_name' => 'Омская область',
+			'region_type' => 'обл',
+			'city_name' => '',
+			'city_type' => '',
+			'place_name' => 'Таврическое',
+			'place_type' => 'рп',
+			'display_name' => 'Омская область, рп Таврическое',
+			'latitude' => 54.58508,
+			'longitude' => 73.6395,
+			'active' => 1,
+			'fias_id' => 'tavricheskoe-fias',
+			'gar_object_id' => 550001,
+			'region_code' => '55',
+		),
+	);
+}
+
+function pek_checkout_tavricheskoe_zone_response(): array {
+	return array(
+		array(
+			'zoneId' => 'omsk-region-zone',
+			'zoneName' => 'Омская область',
+			'branchUID' => 'omsk-branch',
+			'branchTitle' => 'Омск',
+			'warehousePoint' => array( 'latitude' => 54.98848, 'longitude' => 73.32424 ),
+		),
+	);
+}
+
+function pek_checkout_tavricheskoe_request(): QuoteRequest {
+	return pek_checkout_request(
+		array( 'selected_location_id' => 550001 ),
+		new Address( country_code: 'RU', region_name: 'Омская область', settlement: 'рабочий посёлок Таврическое', normalized: true )
+	);
+}
+
 function pek_checkout_last_empty_log_context(): array {
 	$entries = array_reverse( $GLOBALS['pek_checkout_wc_logger']->entries ?? array() );
 	foreach ( $entries as $entry ) {
@@ -894,6 +935,29 @@ list( $empty_200_carrier ) = pek_checkout_boot(
 $empty_200_quote = $empty_200_carrier->quote( pek_checkout_request() );
 $empty_200_diag = is_array( $empty_200_quote->raw_reference['modes']['pickup'] ?? null ) ? $empty_200_quote->raw_reference['modes']['pickup'] : array();
 pek_checkout_assert( 'pek_checkout_pickup_points_missing' === (string) ( $empty_200_diag['error_code'] ?? '' ) && '/branches/nearestdepartments/' === (string) ( $empty_200_diag['endpoint'] ?? '' ) && 200 === (int) ( $empty_200_diag['http_status'] ?? 0 ), 'PEK terminal HTTP 200 empty list must remain a no-terminals diagnostic, not an API access failure.' );
+
+$GLOBALS['pek_checkout_location_rows'] = pek_checkout_tavricheskoe_location_rows();
+list( $tavricheskoe_carrier, $tavricheskoe_http ) = pek_checkout_boot_real_pek_provider(
+	array( pek_checkout_tavricheskoe_zone_response(), pek_checkout_nearest_empty_response(), pek_checkout_calc_response( 1850.00, 3 ) )
+);
+$tavricheskoe_quote = $tavricheskoe_carrier->quote( pek_checkout_tavricheskoe_request() );
+$tavricheskoe_payloads = pek_checkout_calc_payloads( $tavricheskoe_http );
+$tavricheskoe_payload = $tavricheskoe_payloads[0] ?? array();
+pek_checkout_assert( $tavricheskoe_quote->success && 1 === count( $tavricheskoe_quote->rates ) && PekSettings::COURIER_RATE_ID === $tavricheskoe_quote->rates[0]->rate_id, 'Tavricheskoe with no destination terminal must return exactly the PEK courier rate.' );
+pek_checkout_assert( 1 === pek_checkout_endpoint_count( $tavricheskoe_http, 'nearestdepartments' ) && 1 === pek_checkout_endpoint_count( $tavricheskoe_http, 'calculateprice' ), 'Tavricheskoe must attempt pickup discovery once and courier calculator once.' );
+pek_checkout_assert( true === ( $tavricheskoe_payload['isDelivery'] ?? null ) && ! isset( $tavricheskoe_payload['receiverWarehouseId'] ) && str_contains( (string) ( $tavricheskoe_payload['delivery']['address'] ?? '' ), 'Таврическое' ) && isset( $tavricheskoe_payload['delivery']['coordinates'] ), 'Tavricheskoe courier request must use delivery address/coordinates without receiverWarehouseId.' );
+pek_checkout_assert( array() === pek_checkout_last_empty_log_context(), 'A successful Tavricheskoe courier quote must not log an overall empty PEK quote.' );
+
+$GLOBALS['pek_checkout_location_rows'] = pek_checkout_tavricheskoe_location_rows();
+list( $mapping_failure_carrier, $mapping_failure_http ) = pek_checkout_boot_real_pek_provider(
+	array( array( 'status' => 500, 'body' => array( 'message' => 'fake findzone failure' ) ), pek_checkout_calc_response( 1900.00, 3 ) )
+);
+$mapping_failure_quote = $mapping_failure_carrier->quote( pek_checkout_tavricheskoe_request() );
+$mapping_failure_payloads = pek_checkout_calc_payloads( $mapping_failure_http );
+pek_checkout_assert( $mapping_failure_quote->success && 1 === count( $mapping_failure_quote->rates ) && PekSettings::COURIER_RATE_ID === $mapping_failure_quote->rates[0]->rate_id, 'A findzone failure must remain pickup-local when canonical courier destination is available.' );
+pek_checkout_assert( 1 === pek_checkout_endpoint_count( $mapping_failure_http, 'findzone') && 0 === pek_checkout_endpoint_count( $mapping_failure_http, 'nearestdepartments' ) && 1 === count( $mapping_failure_payloads ), 'Findzone failure must not be retried through pickup discovery and must still call courier calculator once.' );
+pek_checkout_assert( true === ( $mapping_failure_payloads[0]['isDelivery'] ?? null ) && ! isset( $mapping_failure_payloads[0]['receiverWarehouseId'] ), 'Courier fallback after findzone failure must not depend on a receiver warehouse.' );
+unset( $GLOBALS['pek_checkout_location_rows'] );
 
 list( $full_address_carrier, $full_address_http ) = pek_checkout_boot(
 	array( pek_checkout_zone_response(), pek_checkout_calc_response( 1000.00 ), pek_checkout_calc_response( 2000.00 ) ),

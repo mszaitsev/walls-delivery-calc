@@ -920,6 +920,65 @@ function wdc_recalc_pek_kz_location_row(): array {
 	);
 }
 
+function wdc_recalc_pek_tavricheskoe_location_row(): array {
+	return wdc_recalc_location_row(
+		550001,
+		array(
+			'fias_id' => 'tavricheskoe-fias',
+			'city_fias_id' => '',
+			'gar_id' => '550001',
+			'gar_object_id' => 550001,
+			'country_code' => 'RU',
+			'region_name' => 'Омская область',
+			'region_type' => 'обл',
+			'region_code' => '55',
+			'city_name' => '',
+			'city_type' => '',
+			'place_name' => 'Таврическое',
+			'place_type' => 'рп',
+			'settlement_name' => 'Таврическое',
+			'settlement_type' => 'рп',
+			'display_name' => 'Омская область, рп Таврическое',
+			'postal_code' => '646800',
+			'latitude' => 54.58508,
+			'longitude' => 73.6395,
+		)
+	);
+}
+
+function wdc_recalc_pek_tavricheskoe_order(): WdcRecalcOrder {
+	$order = new WdcRecalcOrder(
+		550001,
+		array(
+			new WdcRecalcOrderItem( new WdcRecalcProduct( 'SKU-TAV', 'Товар Таврическое', 0.5, 10, 20, 30 ), 2, 5000, 'Товар Таврическое' ),
+		)
+	);
+	$order->set_shipping_country( 'RU' );
+	$order->set_shipping_state( 'Омская область' );
+	$order->set_shipping_city( 'рабочий посёлок Таврическое' );
+	$order->set_shipping_postcode( '646800' );
+	$order->set_shipping_address_1( '' );
+	$order->set_shipping_address_2( '' );
+	$order->meta['_wdc_platform_location_id'] = 550001;
+	$order->meta['_wdc_platform_city_display_name'] = 'Омская область, рп Таврическое';
+	$order->meta['_wdc_platform_city_postcode'] = '646800';
+	$order->meta['_wdc_delivery_calculation_data'] = array(
+		'destination' => array(
+			'country_code' => 'RU',
+			'location_id' => 550001,
+			'selected_location_id' => 550001,
+			'city_display_name' => 'Омская область, рп Таврическое',
+			'region_name' => 'Омская область',
+			'postcode' => '646800',
+		),
+		'carrier_key' => PekSettings::CARRIER_KEY,
+		'service_key' => PekSettings::SERVICE_KEY,
+		'delivery_type' => DeliveryType::COURIER,
+	);
+
+	return $order;
+}
+
 function wdc_recalc_pek_kz_selected_location(): array {
 	return array(
 		'id' => 162695,
@@ -1463,11 +1522,11 @@ recalc_smoke_assert( 0 === count( $kz_filtered_http->requests ), 'KZ PEK country
 
 $kz_failure_db = new WdcRecalcDeliveryServiceDb();
 $kz_failure_db->locations = array( wdc_recalc_pek_kz_location_row() );
-$kz_failure_http = new WdcRecalcPekPreviewHttpClient( array( array( 'status' => 500, 'body' => array( 'message' => 'temporary fake failure' ) ) ) );
+$kz_failure_http = new WdcRecalcPekPreviewHttpClient( array( array( 'status' => 500, 'body' => array( 'message' => 'temporary fake failure' ) ), wdc_recalc_pek_calc_reject_response() ) );
 $kz_failure_service = wdc_recalc_pek_preview_service( $kz_failure_http, $kz_failure_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
 $kz_failure_preview = $kz_failure_service->preview( wdc_recalc_pek_kz_order() );
 recalc_smoke_assert( ! isset( array_column( $kz_failure_preview['rates'] ?? array(), null, 'carrier_key' )[ PekSettings::CARRIER_KEY ] ), 'KZ PEK fake failure must return no PEK rates.' );
-recalc_smoke_assert( 1 === count( $kz_failure_http->requests ), 'KZ PEK fake failure must attempt PEK once through local fake HTTP.' );
+recalc_smoke_assert( 1 === wdc_recalc_pek_preview_endpoint_count( $kz_failure_http, '/branches/findzonebyaddress/' ) && 1 === wdc_recalc_pek_preview_endpoint_count( $kz_failure_http, '/calculator/calculateprice/' ), 'KZ PEK findzone failure must still attempt the independent courier calculator once through local fake HTTP.' );
 
 $kz_empty_db = new WdcRecalcDeliveryServiceDb();
 $kz_empty_db->locations = array( wdc_recalc_pek_kz_location_row() );
@@ -1481,6 +1540,32 @@ $kz_empty_http = new WdcRecalcPekPreviewHttpClient(
 $kz_empty_service = wdc_recalc_pek_preview_service( $kz_empty_http, $kz_empty_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
 $kz_empty_preview = $kz_empty_service->preview( wdc_recalc_pek_kz_order() );
 recalc_smoke_assert( ! isset( array_column( $kz_empty_preview['rates'] ?? array(), null, 'carrier_key' )[ PekSettings::CARRIER_KEY ] ), 'KZ PEK empty provider/calculator response must return no PEK rates.' );
+
+$tavricheskoe_db = new WdcRecalcDeliveryServiceDb();
+$tavricheskoe_db->locations = array( wdc_recalc_pek_tavricheskoe_location_row() );
+$tavricheskoe_http = new WdcRecalcPekPreviewHttpClient(
+	array(
+		array(
+			array(
+				'zoneId' => 'omsk-region-zone',
+				'zoneName' => 'Омская область',
+				'branchUID' => 'omsk-branch',
+				'branchTitle' => 'Омск',
+				'warehousePoint' => array( 'latitude' => 54.98848, 'longitude' => 73.32424 ),
+			),
+		),
+		array( 'freeDepartments' => array(), 'paidDepartments' => array() ),
+		wdc_recalc_pek_calc_response( 1850.0, 3 ),
+	)
+);
+$tavricheskoe_service = wdc_recalc_pek_preview_service( $tavricheskoe_http, $tavricheskoe_db, array( 'RU' ) );
+$tavricheskoe_preview = $tavricheskoe_service->preview( wdc_recalc_pek_tavricheskoe_order() );
+$tavricheskoe_rates = array_values( array_filter( $tavricheskoe_preview['rates'] ?? array(), static fn( array $rate ): bool => PekSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
+$tavricheskoe_calculator_requests = array_values( array_filter( $tavricheskoe_http->requests, static fn( array $request ): bool => str_contains( (string) ( $request['url'] ?? '' ), '/calculator/calculateprice/' ) ) );
+$tavricheskoe_calculator_body = is_array( $tavricheskoe_calculator_requests[0]['body'] ?? null ) ? $tavricheskoe_calculator_requests[0]['body'] : array();
+recalc_smoke_assert( true === ( $tavricheskoe_preview['success'] ?? false ) && 1 === count( $tavricheskoe_rates ) && PekSettings::COURIER_RATE_ID === (string) ( $tavricheskoe_rates[0]['id'] ?? '' ), 'Tavricheskoe admin recalculation must return exactly the PEK courier rate when pickup is unavailable.' );
+recalc_smoke_assert( 1 === wdc_recalc_pek_preview_endpoint_count( $tavricheskoe_http, '/branches/nearestdepartments/' ) && 1 === count( $tavricheskoe_calculator_requests ), 'Tavricheskoe admin recalculation must discover pickup once and calculate courier once.' );
+recalc_smoke_assert( true === ( $tavricheskoe_calculator_body['isDelivery'] ?? null ) && ! isset( $tavricheskoe_calculator_body['receiverWarehouseId'] ) && str_contains( (string) ( $tavricheskoe_calculator_body['delivery']['address'] ?? '' ), 'Таврическое' ), 'Tavricheskoe admin courier payload must not depend on receiverWarehouseId.' );
 
 $rate_ids = array_column( $preview['rates'], 'id' );
 recalc_smoke_assert( in_array( 'demo:pickup', $rate_ids, true ), 'Preview must include rates from every available carrier/service path.' );
