@@ -665,11 +665,15 @@ final class CheckoutSessionManager {
 		return $this->normalize_location_aliases( $context );
 	}
 
+	public function current_location_fingerprint(): string {
+		return $this->location_fingerprint( $this->current_location_context() );
+	}
+
 	/**
 	 * @param array<string,mixed> $selection
 	 */
 	private function pickup_selection_location_matches_current( array $selection ): bool {
-		$current = $this->location_fingerprint( $this->current_location_context() );
+		$current = $this->current_location_fingerprint();
 		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
 		$selected = (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' );
 		if ( '' === $current || '' === $selected ) {
@@ -837,10 +841,14 @@ final class CheckoutSessionManager {
 	}
 
 	public function clear_normalized_address(): void {
-		$this->set( self::NORMALIZED_ADDRESS_KEY, array() );
+		$this->clear_normalized_address_result();
 		$this->set( self::SELECTED_CITY_KEY, array() );
 		$this->set( self::CITY_CONTEXT_KEY, array() );
 		$this->set( self::FALLBACK_CITY_KEY, '' );
+	}
+
+	public function clear_normalized_address_result(): void {
+		$this->set( self::NORMALIZED_ADDRESS_KEY, array() );
 	}
 
 	/**

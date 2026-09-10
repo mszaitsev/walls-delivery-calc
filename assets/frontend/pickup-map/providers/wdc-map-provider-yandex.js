@@ -176,6 +176,9 @@
 		}
 
 		return {
+			getZoom: function () {
+				return map && typeof map.getZoom === 'function' ? map.getZoom() : pendingCenter.zoom;
+			},
 			setCenter: function (lat, lng, zoom) {
 				if (!validCoordinatePair(lat, lng)) {
 					return;

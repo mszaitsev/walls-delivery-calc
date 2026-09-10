@@ -1,8 +1,10 @@
 # Walls Delivery Calc Documentation
 
+0.155.17 keeps WooCommerce shipping-package normalization read-only so package recalculation cannot replace the canonical checkout city with a same-name location. A positive canonical location ID now prefers active database coordinates, while locations without coordinates keep the existing pickup-map fallback without changing identity. Generic Leaflet and Yandex maps stop viewport reloads after the second zoom-out step, and the sidebar renders at most 100 cards without limiting markers or point selection. Pickup selections survive F5 address repair when canonical destination identity is unchanged; canonical session selection is restored before textual reconciliation, including ambiguous names. City-picker rows append usable postal codes, while technical `999999999` is treated as absent in checkout. Fixed point datasets keep every marker and filter only sidebar cards by current map bounds.
+
 0.155.16 correction: postal_code is enrichment-owned, never a GAR changed field. The retired location alias index is no longer generated, exported or used by runtime. Search uses searchable_text and canonical hierarchy fields. Backup/restore and incremental apply swap locations only. Migration 0064 drops only the canonical live alias table; pending migrations run even at unchanged plugin version. Legacy alias backup/temporary tables are retained inert. Finish or cancel an older update before deployment and start a fresh GAR analysis; do not resume its pre-correction diff.
 
-Version: 0.155.16
+Version: 0.155.17
 
 0.155.16 introduces the one-click GAR update, NEW-only candidate enrichment, bounded stages, resumable DaData limits and exclusive maintenance ownership. See [Locations](subsystems/locations.md).
 

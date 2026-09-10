@@ -109,6 +109,8 @@ $wpdb->regions = array(
 	'30' => array( 'region_name' => 'Астраханская', 'region_type' => 'обл' ),
 	'31' => array( 'region_name' => 'Белгородская', 'region_type' => 'обл' ),
 	'36' => array( 'region_name' => 'Воронежская', 'region_type' => 'обл' ),
+	'23' => array( 'region_name' => 'Краснодарский', 'region_type' => 'край' ),
+	'34' => array( 'region_name' => 'Волгоградская', 'region_type' => 'обл' ),
 );
 
 update_option(
@@ -135,6 +137,11 @@ $locations = array(
 	checkout_location_picker_location( array( 'gar_object_id' => 1002, 'fias_id' => 'fias-gb', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'district_name' => 'Новосибирский', 'district_type' => 'р-н', 'place_name' => 'Гусиный Брод', 'place_type' => 'село', 'display_name' => 'Новосибирская обл., Новосибирский р-н, село Гусиный Брод', 'postal_code' => '630555' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1007, 'fias_id' => 'fias-nsk-child-beta', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'city_name' => 'Новосибирск', 'city_type' => 'г', 'place_name' => 'Бета', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., г. Новосибирск, деревня Бета' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1008, 'fias_id' => 'fias-nsk-child-alpha', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'city_name' => 'Новосибирск', 'city_type' => 'г', 'place_name' => 'Альфа', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., г. Новосибирск, деревня Альфа' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 1009, 'fias_id' => 'fias-no-postcode', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'place_name' => 'Безиндексная', 'place_type' => 'д', 'display_name' => 'Московская обл., деревня Безиндексная', 'postal_code' => '999999999' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 23001, 'fias_id' => 'fias-krasnodar-anapa-city', 'region_code' => '23', 'region_name' => 'Краснодарский', 'region_type' => 'край', 'city_name' => 'Анапа', 'city_type' => 'г', 'place_name' => 'Анапа', 'place_type' => 'г', 'display_name' => 'Краснодарский край, г. Анапа' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 34001, 'fias_id' => 'fias-volgograd-anapa-khutor', 'region_code' => '34', 'region_name' => 'Волгоградская', 'region_type' => 'обл', 'place_name' => 'Анапа', 'place_type' => 'х', 'display_name' => 'Волгоградская обл., хутор Анапа' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 28003, 'fias_id' => 'fias-amur-testocity', 'region_code' => '28', 'region_name' => 'Амурская', 'region_type' => 'обл', 'city_name' => 'Тестосити', 'city_type' => 'г', 'place_name' => 'Тестосити', 'place_type' => 'г', 'display_name' => 'Амурская обл., г. Тестосити' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 31003, 'fias_id' => 'fias-belgorod-testocity', 'region_code' => '31', 'region_name' => 'Белгородская', 'region_type' => 'обл', 'city_name' => 'Тестосити', 'city_type' => 'г', 'place_name' => 'Тестосити', 'place_type' => 'г', 'display_name' => 'Белгородская обл., г. Тестосити' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1003, 'fias_id' => 'fias-brod', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Брод', 'place_type' => 'село', 'display_name' => 'Новосибирская обл., село Брод' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1004, 'fias_id' => 'fias-brodki', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Бродки', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Бродки' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1005, 'fias_id' => 'fias-brodovka', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Бродовка', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Бродовка' ) ),
@@ -210,7 +217,16 @@ checkout_location_picker_assert( 'fias-alt-ivan' === ( $ajax->payload( 'алта
 checkout_location_picker_assert( 'fias-alt-ivan' === ( $ajax->payload( 'курьинский ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Search tokens match district plus place.' );
 checkout_location_picker_assert( 'fias-alt-ivan' === ( $ajax->payload( 'курьинский район ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'District synonym район matches р-н.' );
 checkout_location_picker_assert( 'Алтайский край' === ( $payload['groups'][0]['region_label'] ?? '' ), 'Region group heading uses mapped region type.' );
-checkout_location_picker_assert( str_contains( (string) ( $payload['groups'][0]['items'][0]['option_label'] ?? '' ), 'с. Ивановка - Курьинский р-н, Алтайский край' ), 'Location option label includes place type and hierarchy.' );
+checkout_location_picker_assert( str_ends_with( (string) ( $payload['groups'][0]['items'][0]['option_label'] ?? '' ), 'с. Ивановка - Курьинский р-н, Алтайский край, 658320' ), 'Location option label includes place type, hierarchy, and postal code at the end.' );
+checkout_location_picker_assert( 'д. Бета - г. Новосибирск, Новосибирская обл.' === $formatter->format_checkout_location_option( $locations[2] ), 'Location option without postal code must preserve its previous label exactly.' );
+$dmitrovka_option = checkout_location_picker_location( array( 'region_name' => 'Московская', 'region_type' => 'обл', 'place_name' => 'Дмитровка', 'place_type' => 'д', 'postal_code' => '141800' ) );
+checkout_location_picker_assert( str_ends_with( $formatter->format_checkout_location_option( $dmitrovka_option ), 'Московская обл., 141800' ), 'Dmitrovka option label must place postal code 141800 after its region context.' );
+$postcode_only_context = checkout_location_picker_location( array( 'region_name' => '', 'region_type' => '', 'place_name' => 'X', 'place_type' => 'д', 'postal_code' => '123456' ) );
+checkout_location_picker_assert( 'д. X, 123456' === $formatter->format_checkout_location_option( $postcode_only_context ), 'Main-only location option must append postal code with a comma and no empty context separator.' );
+$technical_postcode_payload = $ajax->payload( 'Безиндексная' )['groups'][0]['items'][0] ?? array();
+checkout_location_picker_assert( '' === (string) ( $technical_postcode_payload['postal_code'] ?? 'missing' ), 'Checkout location payload must expose technical postcode sentinel as missing.' );
+checkout_location_picker_assert( ! str_contains( (string) ( $technical_postcode_payload['option_label'] ?? '' ), '999999999' ), 'Checkout picker option must not expose technical postcode sentinel.' );
+checkout_location_picker_assert( 'д. Безиндексная - Московская обл.' === (string) ( $technical_postcode_payload['option_label'] ?? '' ), 'Technical postcode omission must preserve clean option punctuation.' );
 checkout_location_picker_assert( 10 === (int) $payload['region_limit'], 'Per-region limit defaults to 10.' );
 $single_region = $ajax->payload( 'тестоград' );
 checkout_location_picker_assert( 1 === count( $single_region['groups'] ) && 30 === (int) $single_region['groups'][0]['shown_count'], 'Single region search shows region_limit times three.' );
@@ -308,9 +324,7 @@ $grouped = $group_picker->invoke(
 $grouped_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], is_array( $grouped ) ? ( $grouped['groups'] ?? array() ) : array() );
 checkout_location_picker_assert( array( 'Алтайский', 'Херсонская', 'Брянская' ) === $grouped_regions, 'Region group comparator uses bucket first, alphabetic inside bucket, and raw score only after label/sort tie-breaks.' );
 $prefix_seniority_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'бродог' )['groups'] ?? array() );
-$sorted_prefix_seniority_regions = $prefix_seniority_regions;
-sort( $sorted_prefix_seniority_regions, SORT_STRING );
-checkout_location_picker_assert( $sorted_prefix_seniority_regions === $prefix_seniority_regions, 'Same-bucket prefix Бродог region groups sort alphabetically.' );
+checkout_location_picker_assert( array( 'Амурская', 'Тверская', 'Белгородская', 'Воронежская' ) === $prefix_seniority_regions, 'Same-bucket prefix Бродог groups rank city matches first and remain alphabetic within equal hierarchy ranks.' );
 $ivan_prefix_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'иван' )['groups'] ?? array() );
 $sorted_ivan_prefix_regions = $ivan_prefix_regions;
 sort( $sorted_ivan_prefix_regions, SORT_STRING );
@@ -464,6 +478,18 @@ $empty_type_resolved = $search->resolve_checkout_fields( '', 'поселок П�
 checkout_location_picker_assert( 'resolved' === $empty_type_resolved['status'] && $empty_type_resolved['location'] instanceof Location && 'fias-kz-empty-type' === $empty_type_resolved['location']->fias_id, 'Explicit type may fallback to a single exact-name location with empty place_type.' );
 $ivanovka_groups = array_map( static fn( array $group ): string => (string) $group['region_label'], $ajax->payload( 'Ивановка', '', 'RU' )['groups'] );
 checkout_location_picker_assert( array_slice( $ivanovka_groups, 0, 4 ) === array( 'Алтайский край', 'Амурская обл.', 'Липецкая обл.', 'Московская обл.' ), 'Exact Ивановка region cohort is alphabetic by displayed region_label.' );
+$anapa_groups = $ajax->payload( 'Анапа', '', 'RU' )['groups'];
+checkout_location_picker_assert( array( 'Краснодарский край', 'Волгоградская обл.' ) === array_column( $anapa_groups, 'region_label' ), 'Exact city Анапа group must rank above the exact хутор Анапа group.' );
+checkout_location_picker_assert( 'fias-krasnodar-anapa-city' === (string) ( $anapa_groups[0]['items'][0]['fias_id'] ?? '' ), 'Exact Анапа city result must lead its first-ranked region group.' );
+$anapa_prefix_groups = $ajax->payload( 'Анап', '', 'RU' )['groups'];
+checkout_location_picker_assert( array( 'Краснодарский край', 'Волгоградская обл.' ) === array_column( $anapa_prefix_groups, 'region_label' ), 'Prefix city Анап group must rank above the prefix хутор group.' );
+checkout_location_picker_assert( 'fias-volgograd-anapa-khutor' === (string) ( $ajax->payload( 'х Анапа', '', 'RU' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Explicit хутор Анапа query must keep requested place type ahead of generic city preference.' );
+checkout_location_picker_assert( 'fias-volgograd-anapa-khutor' === (string) ( $ajax->payload( 'хутор Анапа', '', 'RU' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Full explicit хутор Анапа query must keep requested place type semantics.' );
+checkout_location_picker_assert( 'fias-krasnodar-anapa-city' === (string) ( $ajax->payload( 'г Анапа', '', 'RU' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Explicit город Анапа query must keep the city first.' );
+$equal_city_groups = array_column( $ajax->payload( 'Тестосити', '', 'RU' )['groups'], 'region_label' );
+checkout_location_picker_assert( array( 'Амурская обл.', 'Белгородская обл.' ) === $equal_city_groups, 'Equally strong city matches must retain alphabetic region ordering.' );
+$forced_anapa = $ajax->payload( 'Анапа', '34', 'RU' );
+checkout_location_picker_assert( 1 === count( $forced_anapa['groups'] ) && 'Волгоградская обл.' === (string) ( $forced_anapa['groups'][0]['region_label'] ?? '' ) && 'fias-volgograd-anapa-khutor' === (string) ( $forced_anapa['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Forced-region picker mode must keep only the requested region with unchanged item ranking.' );
 
 $city_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
 $city_css = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.css' );

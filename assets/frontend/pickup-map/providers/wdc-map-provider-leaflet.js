@@ -66,6 +66,9 @@
 
 		return {
 			create: create,
+			getZoom: function () {
+				return map.getZoom();
+			},
 			setCenter: function (lat, lng, zoom) {
 				if (!validCoordinatePair(lat, lng)) {
 					return;

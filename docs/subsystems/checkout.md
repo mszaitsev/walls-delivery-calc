@@ -1,8 +1,10 @@
 # Checkout
 
+0.155.17 makes WooCommerce package mapping a read-only consumer of canonical checkout identity. Package address normalization may reuse the selected session location but cannot resolve a city-only package into another same-name WDC row or write `selected_city`, `city_context`, manual trust, or fallback city. For a positive canonical location ID, active database coordinates are authoritative; if that row has no valid coordinates, the existing rate/provider pickup-map fallback remains available without replacing the ID or FIAS identity. User city picker, initial profile reconciliation, and explicit manual city flows retain their existing mutating ownership. Address fingerprint changes clear only normalized address state before reconciliation; pickup reset compares canonical destination fingerprints afterward, so F5 repair of the same location preserves every family bucket even while the shipping method is transiently empty. Real location/country/manual-city changes still clear old selections. City-picker option labels append `postal_code` only as presentation; visible city, state, postcode and hidden canonical values are unchanged.
+
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.155.15
+Version: 0.155.17
 
 The platform setting `checkout_sort_selector_enabled` defaults to true, including upgrades with a missing key. When enabled, customers can use the checkout sorting selector; when disabled, no selector markup is rendered and `checkout_sort_mode` from admin is authoritative, ignoring posted/customer modes. Checkout synchronizes the session to the forced mode so re-enabling starts from the last admin-synchronized value. Actual effective-mode transitions, whether customer-driven or forced by admin, reset tariffs and WDC method choices once; stable-mode refreshes preserve manual tariff/method selections. Runtime/selection smokes cover checkbox persistence, visibility, stale POST/session, forced sorting and re-enabling.
 
@@ -125,7 +127,7 @@ PEK pickup map access uses the existing public REST routes with a registry-backe
 - The customer sees carrier, delivery type, delivery days/date, and final customer price.
 - Pickup point UI appears only for pickup delivery methods.
 - Courier address validation applies only when courier delivery is selected.
-- Selected city, rate, tariff, pickup point, and courier address are preserved through checkout session/runtime state.
+- Selected city, rate, tariff, pickup point, and courier address are preserved through checkout session/runtime state. On reload, a coherent non-manual canonical session location is localized and restored into hidden checkout fields before textual profile reconciliation; mismatched IDs, country/city changes, and post-order cleanup do not restore stale identity. The location sentinel postcode `999999999` remains a storage/import value but is empty at checkout payload, resolver, visible-field, and selected-notice boundaries.
 - Sorting can use price or delivery time.
 - Manager recalculation in the order admin must save a clear order note with old/new delivery title and price.
 - Planned checkout comments use `DeliveryRate::planned_delivery_comment` and the format `Доставка планируется* с 12 августа (среда).`.

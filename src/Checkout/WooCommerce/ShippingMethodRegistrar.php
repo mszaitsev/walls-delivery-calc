@@ -14,7 +14,10 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Services\CheckoutPostcode;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
+use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -352,6 +355,7 @@ final class ShippingMethodRegistrar {
 			'location_region_limit' => max( 3, min( 50, $this->settings->get_int( 'checkout_location_region_limit', 10 ) ) ),
 			'supported_location_countries' => $this->location_country_index instanceof LocationCountryIndexService ? $this->location_country_index->countries() : array(),
 			'manual_city_context' => $this->manual_city_context_config(),
+			'canonical_city_context' => $this->canonical_city_context_config(),
 			'resolve_action' => CheckoutLocationAjax::RESOLVE_ACTION,
 			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
 			'strings'   => array(
@@ -361,6 +365,62 @@ final class ShippingMethodRegistrar {
 				'searching' => __( 'Идёт поиск, подождите несколько секунд', 'walls-delivery-calc' ),
 			),
 		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function canonical_city_context_config(): array {
+		$selected = $this->session_manager->selected_city();
+		$context = $this->session_manager->city_context();
+		$selected_id = (int) ( $selected['id'] ?? 0 );
+		$context_id = (int) ( $context['location_id'] ?? $context['id'] ?? 0 );
+		$selected_country = strtoupper( trim( (string) ( $selected['country_code'] ?? '' ) ) );
+		$context_country = strtoupper( trim( (string) ( $context['country_code'] ?? '' ) ) );
+		$source = trim( (string) ( $context['source'] ?? $selected['source'] ?? '' ) );
+
+		if (
+			$selected_id <= 0
+			|| false === (bool) ( $selected['active'] ?? true )
+			|| 'manual' === $source
+			|| '' === $selected_country
+			|| ! preg_match( '/^[A-Z]{2}$/', $selected_country )
+			|| ( $context_id > 0 && $context_id !== $selected_id )
+			|| ( '' !== $context_country && $context_country !== $selected_country )
+		) {
+			return array();
+		}
+
+		$location = Location::from_array( array_merge( $context, $selected, array( 'id' => $selected_id, 'country_code' => $selected_country ) ) );
+		$formatter = LocationDisplayNameFormatter::from_rules( $this->location_display_rules() );
+		$city_value = $formatter->format_checkout_city_value( $location );
+		if ( '' === trim( $city_value ) ) {
+			return array();
+		}
+
+		return array_merge(
+			$location->to_array(),
+			array(
+				'id' => $selected_id,
+				'location_id' => $selected_id,
+				'country_code' => $selected_country,
+				'state_value' => $formatter->format_checkout_state_value( $location ),
+				'city_value' => $city_value,
+				'postal_code' => CheckoutPostcode::usable_value( $location->postal_code ),
+				'lat' => $location->latitude,
+				'lng' => $location->longitude,
+				'source' => '' !== $source ? $source : 'local_db',
+			)
+		);
+	}
+
+	/**
+	 * @return array<string,array<string,array{display?:string,position?:string}>>
+	 */
+	private function location_display_rules(): array {
+		$rules = function_exists( 'get_option' ) ? get_option( 'wdc_location_type_display_rules', array() ) : array();
+
+		return is_array( $rules ) ? $rules : array();
 	}
 
 	/**

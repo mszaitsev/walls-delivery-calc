@@ -18,6 +18,7 @@
 	var VIRTUAL_LIST_THRESHOLD = 200;
 	var VIRTUAL_ROW_HEIGHT = 112;
 	var VIRTUAL_LIST_OVERSCAN = 16;
+	var SIDEBAR_POINT_LIMIT = 100;
 
 	function createMap(element, card, confirmButton, labels, initialContext) {
 		var config = window.wdcPickupCheckout || {};
@@ -77,6 +78,10 @@
 		var loadingRequestId = 0;
 		var activeLoadingRequestId = 0;
 		var loadingOverlay = createLoadingOverlay(element, list, labels);
+		var initialLoadingZoom = hasInitialCoordinates ? 13 : 11;
+		var minLoadingZoom = initialLoadingZoom - 1;
+		var zoomLoadingWasBlocked = false;
+		var zoomWarning = createZoomWarning(element, labels);
 
 		if ('yandex' === providerName && !config.yandexApiKeyPresent) {
 			card.textContent = (config.errors && config.errors.yandexApiKeyMissing) || 'Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.';
@@ -90,6 +95,15 @@
 
 		function boundsChanged(bbox) {
 			lastBbox = bbox || lastBbox;
+			var loadingBlocked = zoomLoadingBlocked();
+			setZoomWarningVisible(loadingBlocked);
+			if (loadingBlocked) {
+				zoomLoadingWasBlocked = true;
+				if (debouncedLoad && debouncedLoad.cancel) {
+					debouncedLoad.cancel();
+				}
+				return;
+			}
 			if (programmaticBoundsSuppressed) {
 				scheduleProgrammaticBoundsRelease();
 				return;
@@ -101,6 +115,11 @@
 				}
 				return;
 			}
+			if (zoomLoadingWasBlocked) {
+				zoomLoadingWasBlocked = false;
+				loadBounds(bbox);
+				return;
+			}
 			debouncedLoad(bbox);
 		}
 
@@ -109,11 +128,27 @@
 		}
 
 		function listFollowsViewport() {
-			return yandexCityListMode;
+			return yandexCityListMode || !viewportReloadRequired();
+		}
+
+		function zoomLoadingBlocked() {
+			if (!viewportReloadRequired() || !provider || typeof provider.getZoom !== 'function') {
+				return false;
+			}
+			var zoom = Number(provider.getZoom());
+			return isFinite(zoom) && zoom < minLoadingZoom;
+		}
+
+		function setZoomWarningVisible(visible) {
+			if (!zoomWarning) {
+				return;
+			}
+			zoomWarning.hidden = !visible;
+			zoomWarning.setAttribute('aria-hidden', visible ? 'false' : 'true');
 		}
 
 		provider = providerFactory.create(element, {
-			center: hasInitialCoordinates ? { lat: initialLat, lng: initialLng, zoom: 13 } : { lat: 55.0302, lng: 82.9204, zoom: 11 },
+			center: hasInitialCoordinates ? { lat: initialLat, lng: initialLng, zoom: initialLoadingZoom } : { lat: 55.0302, lng: 82.9204, zoom: initialLoadingZoom },
 			yandexApiKey: config.yandexApiKey || '',
 			labels: labels,
 			onBoundsChange: boundsChanged
@@ -328,6 +363,9 @@
 				return;
 			}
 			points = Array.isArray(points) ? points : [];
+			var availableCount = points.length;
+			var sidebarOverflow = availableCount > SIDEBAR_POINT_LIMIT;
+			points = points.slice(0, SIDEBAR_POINT_LIMIT);
 			if (points.length > VIRTUAL_LIST_THRESHOLD) {
 				renderVirtualList(points, totalCount);
 				return;
@@ -346,6 +384,7 @@
 				originStatus ? '<div class="wdc-pickup-list__status' + (originStatusType === 'error' ? ' is-error' : '') + '">' + escapeHtml(originStatus) + '</div>' : '',
 				searchAddress ? '<div class="wdc-pickup-list__found"><strong>Найден адрес:</strong><span>' + escapeHtml(searchAddress.value || '') + '</span>' + (nearest ? '<em>Ближайший ПВЗ: ' + escapeHtml(nearest) + '</em>' : '') + '</div>' : '',
 				'<div class="wdc-pickup-list__meta">' + escapeHtml(listMeta(totalCount, points.length)) + '</div>',
+				sidebarOverflow ? '<div class="wdc-pickup-list__overflow">Показаны ближайшие 100 пунктов.<br>Приблизьте карту или найдите адрес, чтобы увидеть конкретные ПВЗ.</div>' : '',
 				'<div class="wdc-pickup-list__items">',
 				points.map(renderListItem).join(''),
 				'</div>'
@@ -469,6 +508,12 @@
 			if (!bbox) {
 				return;
 			}
+			if (zoomLoadingBlocked()) {
+				zoomLoadingWasBlocked = true;
+				setZoomWarningVisible(true);
+				return;
+			}
+			setZoomWarningVisible(false);
 			if (!viewportReloadRequired() && fixedDatasetLoaded && true !== options.forceRemote) {
 				if (listFollowsViewport()) {
 					renderCurrentList();
@@ -519,9 +564,9 @@
 
 		function listPointsForCurrentBounds() {
 			var points = visiblePoints;
-			if (yandexCityListMode && lastBbox) {
+			if (listFollowsViewport() && lastBbox) {
 				points = visiblePoints.filter(function (point) {
-					return pointInsideBounds(point, lastBbox);
+					return !validPointCoordinates(point) || pointInsideBounds(point, lastBbox);
 				});
 			}
 			if (!listFilterQuery) {
@@ -687,6 +732,9 @@
 				setLoadingState(false, '');
 				if (debouncedLoad.cancel) {
 					debouncedLoad.cancel();
+				}
+				if (zoomWarning && typeof zoomWarning.remove === 'function') {
+					zoomWarning.remove();
 				}
 				clearVirtualListState();
 				endProgrammaticBoundsSuppression();
@@ -1547,6 +1595,22 @@
 		overlay.textNode = text;
 		parent.appendChild(overlay);
 		return overlay;
+	}
+
+	function createZoomWarning(element, labels) {
+		var parent = element && element.parentNode ? element.parentNode : element;
+		if (!parent || typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof parent.appendChild !== 'function') {
+			return null;
+		}
+		var warning = document.createElement('div');
+		warning.className = 'wdc-pickup-map__zoom-warning';
+		warning.hidden = true;
+		warning.setAttribute('aria-hidden', 'true');
+		warning.setAttribute('role', 'status');
+		warning.setAttribute('aria-live', 'polite');
+		warning.textContent = (labels && labels.zoomInToLoad) || 'Увеличьте карту, чтобы увидеть пункты выдачи';
+		parent.appendChild(warning);
+		return warning;
 	}
 
 	function noopMap() {

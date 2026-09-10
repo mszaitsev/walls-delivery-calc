@@ -363,7 +363,8 @@ function createHarness(initial) {
         supported_location_countries: ['RU', 'AM', 'BY', 'KZ', 'KG'],
         min_chars: 3,
         strings: { start: 'start', searching: 'searching', error: 'error', not_found: 'not_found' },
-        manual_city_context: initial.manual_city_context || {}
+        manual_city_context: initial.manual_city_context || {},
+        canonical_city_context: initial.canonical_city_context || {}
       },
       setTimeout(callback) {
         const id = nextTimerId++;
@@ -485,6 +486,118 @@ const sakhaPayload = {
   place_type: 'г',
   fias_id: 'fias-yakutsk'
 };
+
+const dmitrovkaPayload = {
+  id: 100,
+  location_id: 100,
+  country_code: 'RU',
+  display_name: 'Московская обл., Дмитровский г.о., д. Дмитровка',
+  city_value: 'д. Дмитровка',
+  state_value: 'Московская обл.',
+  postal_code: '141800',
+  region_code: '50',
+  region_name: 'Московская',
+  region_type: 'обл.',
+  district_name: 'Дмитровский',
+  district_type: 'г.о.',
+  place_name: 'Дмитровка',
+  place_type: 'д.',
+  fias_id: 'fias-dmitrovka-a',
+  source: 'local_db'
+};
+
+{
+  const harness = createHarness({
+    billing_country: 'RU',
+    billing_city: 'д. Дмитровка',
+    billing_state: 'Московская обл.',
+    billing_postcode: '',
+    canonical_city_context: dmitrovkaPayload
+  });
+  harness.runTimers();
+  assert.strictEqual(harness.hidden('wdc_platform_location_id'), '100', 'ambiguous Dmitrovka reload must restore canonical session location_id before textual resolve.');
+  assert.strictEqual(harness.hidden('wdc_platform_location_fias_id'), 'fias-dmitrovka-a', 'ambiguous Dmitrovka reload must restore its exact FIAS identity.');
+  assert.strictEqual(harness.field('billing_city'), 'д. Дмитровка', 'canonical session restore must keep the compatible visible city.');
+  assert.strictEqual(harness.field('billing_postcode'), '141800', 'canonical session restore may repair a missing visible postcode.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'ambiguous Dmitrovka reload must not call textual resolver after session restore.');
+  assert.strictEqual(harness.updates(), 1, 'visible canonical field repair must request at most one checkout update.');
+  assert(harness.noticeClasses().includes('is-selected'), 'restored canonical session selection must show selected status.');
+  harness.context.window.__wdcCitySelectorTest.afterCheckoutUpdated();
+  harness.runTimers();
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'second checkout update after Dmitrovka repair must still skip textual resolver.');
+  assert.strictEqual(harness.updates(), 1, 'second checkout update after canonical repair must not schedule another recalculation.');
+}
+
+{
+  const harness = createHarness({
+    billing_country: 'RU',
+    billing_city: 'г Новосибирск',
+    billing_state: 'Новосибирская область',
+    billing_postcode: '630000',
+    canonical_city_context: {
+      id: 123,
+      country_code: 'RU',
+      display_name: 'Новосибирская область, г Новосибирск',
+      city_value: 'г Новосибирск',
+      state_value: 'Новосибирская область',
+      postal_code: '630000',
+      region_name: 'Новосибирская область',
+      city_name: 'Новосибирск',
+      city_type: 'г',
+      place_name: 'Новосибирск',
+      place_type: 'г',
+      source: 'local_db'
+    }
+  });
+  harness.runTimers();
+  assert.strictEqual(harness.hidden('wdc_platform_location_id'), '123', 'unique Novosibirsk reload must restore canonical identity.');
+  assert.strictEqual(harness.ajaxRequests().length, 0, 'canonical Novosibirsk reload must not add a resolver cycle.');
+  assert.strictEqual(harness.updates(), 0, 'already canonical Novosibirsk fields must not add an update_checkout cycle.');
+}
+
+{
+  const harness = createHarness({
+    billing_country: 'RU',
+    billing_city: 'Москва',
+    billing_state: 'Москва',
+    billing_postcode: '',
+    canonical_city_context: dmitrovkaPayload,
+    ajaxResponses: [{ success: true, data: { local_database_available: true, status: 'not_found' } }]
+  });
+  harness.runTimers();
+  assert.strictEqual(harness.hidden('wdc_platform_location_id'), '', 'actual visible city change must reject stale canonical session restore.');
+  assert.strictEqual(harness.ajaxRequests().length, 1, 'actual visible city change must continue through normal reconciliation.');
+}
+
+{
+  const harness = createHarness({
+    billing_country: 'KZ',
+    billing_city: 'д. Дмитровка',
+    billing_state: 'Московская обл.',
+    billing_postcode: '',
+    canonical_city_context: dmitrovkaPayload,
+    ajaxResponses: [{ success: true, data: { local_database_available: true, status: 'not_found' } }]
+  });
+  harness.runTimers();
+  assert.strictEqual(harness.hidden('wdc_platform_location_id'), '', 'country change must reject stale canonical session restore.');
+  assert.strictEqual(harness.ajaxRequests().length, 1, 'country change must leave normal reconciliation active.');
+}
+
+{
+  const technicalPostcodePayload = Object.assign({}, dmitrovkaPayload, {
+    id: 101,
+    location_id: 101,
+    display_name: 'Московская обл., д. Безиндексная',
+    city_value: 'д. Безиндексная',
+    place_name: 'Безиндексная',
+    postal_code: ''
+  });
+  const harness = createHarness({ billing_country: 'RU', billing_city: '', billing_state: '', billing_postcode: '' });
+  harness.context.window.WDCCheckoutCitySelector.applyLocation(technicalPostcodePayload, { updateCheckout: true, explicit: true, source: 'modal', updateFields: true });
+  harness.runTimers();
+  assert.strictEqual(harness.field('billing_postcode'), '', 'technical missing-postcode payload must leave visible postcode empty.');
+  assert(!harness.noticeText().includes('999999999'), 'selected notice must never expose the technical postcode sentinel.');
+}
 
 {
   const harness = createHarness({ billing_country: 'BY', billing_city: '', billing_state: '', billing_postcode: '' });

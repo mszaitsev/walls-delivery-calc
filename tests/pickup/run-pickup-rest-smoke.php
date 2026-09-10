@@ -453,7 +453,7 @@ pickup_rest_assert( $detail_pvz_requested_ops instanceof WP_Error && 'not_found'
 $checkout_pickup_controller_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
 pickup_rest_assert( str_contains( $checkout_pickup_controller_source, 'RussianPostDomesticSettings::is_pickup_rate_id' ), 'Checkout pickup point REST save must accept Russian Post pickup group ids without clearing the selected point.' );
 $frontend_map_source = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
-pickup_rest_assert( ! str_contains( $frontend_map_source, 'LIST_LIMIT' ) && ! str_contains( $frontend_map_source, 'points.slice(0' ) && str_contains( $frontend_map_source, 'points.map(renderListItem).join' ), 'Frontend pickup map must not re-truncate full REST point lists to the first 100 rows.' );
+pickup_rest_assert( str_contains( $frontend_map_source, 'provider.renderMarkers(visiblePoints' ) && str_contains( $frontend_map_source, 'SIDEBAR_POINT_LIMIT = 100' ) && str_contains( $frontend_map_source, 'points = points.slice(0, SIDEBAR_POINT_LIMIT)' ), 'Frontend pickup map must keep full REST results for markers and cap only sidebar presentation at 100 cards.' );
 $rp_repository_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/RussianPost/RussianPostPickupPointRepository.php' ) ?: '';
 pickup_rest_assert( str_contains( $rp_repository_source, 'limit_from_filters( $filters, 1000, 2000 )' ) && ! str_contains( $rp_repository_source, 'limit_from_filters( $filters, 300, 500 )' ), 'Russian Post location-context pickup lookup must not keep the old 300-row admin cap.' );
 

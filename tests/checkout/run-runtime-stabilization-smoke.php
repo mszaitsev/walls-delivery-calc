@@ -856,6 +856,29 @@ runtime_smoke_assert( 'Идёт поиск, подождите нескольк�
 $container->get( CheckoutSessionManager::class )->save_city_context( array( 'source' => 'manual', 'country_code' => 'RU', 'city_name' => 'Ручной город', 'region_name' => 'Ручная область' ) );
 $manual_city_selector_config = $registrar->city_selector_config();
 runtime_smoke_assert( 'manual' === (string) ( $manual_city_selector_config['manual_city_context']['source'] ?? '' ) && 'Ручной город' === (string) ( $manual_city_selector_config['manual_city_context']['city_name'] ?? '' ), 'City selector config must expose transient manual city context for current checkout reload.' );
+$checkout_session = $container->get( CheckoutSessionManager::class );
+$checkout_session->save_selected_city(
+	array(
+		'id' => 154958,
+		'country_code' => 'RU',
+		'region_code' => '78',
+		'region_name' => 'Санкт-Петербург',
+		'region_type' => 'г',
+		'place_name' => 'Зеленогорск',
+		'place_type' => 'г',
+		'display_name' => 'г Санкт-Петербург, г Зеленогорск',
+		'postal_code' => '197720',
+		'fias_id' => 'ac598324-b704-4957-a66e-e8142677981b',
+	)
+);
+$checkout_session->save_city_context( array( 'source' => 'local_db', 'country_code' => 'RU', 'location_id' => 154958 ) );
+$canonical_city_selector_config = $registrar->city_selector_config();
+runtime_smoke_assert( 154958 === (int) ( $canonical_city_selector_config['canonical_city_context']['id'] ?? 0 ), 'City selector config must expose the trusted positive selected_city ID for checkout reload.' );
+runtime_smoke_assert( '197720' === (string) ( $canonical_city_selector_config['canonical_city_context']['postal_code'] ?? '' ) && '' !== (string) ( $canonical_city_selector_config['canonical_city_context']['city_value'] ?? '' ), 'Canonical reload context must reuse checkout payload city and postcode semantics.' );
+$checkout_session->save_city_context( array( 'source' => 'local_db', 'country_code' => 'RU', 'location_id' => 24534 ) );
+runtime_smoke_assert( array() === $registrar->city_selector_config()['canonical_city_context'], 'Mismatched selected_city and city_context IDs must not be localized as trusted canonical state.' );
+$checkout_session->clear_normalized_address();
+runtime_smoke_assert( array() === $registrar->city_selector_config()['canonical_city_context'], 'Post-order destination cleanup must leave no canonical restore payload for a fresh checkout.' );
 
 $location_repository = new LocationRepository( $GLOBALS['wpdb'] );
 ( new LocationImportService( $location_repository ) )->import_from_json_file( dirname( __DIR__ ) . '/fixtures/demo/locations-demo.json' );

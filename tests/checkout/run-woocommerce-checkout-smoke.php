@@ -693,7 +693,8 @@ $coordinate_db = new class extends wpdb {
 	public int $checkout_hierarchy_candidate_calls = 0;
 };
 $coordinate_db->locations = array(
-	array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ),
+	array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирская область, г Новосибирск', 'fias_id' => 'fias-novosibirsk', 'postal_code' => '630000', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ),
+	array( 'id' => 650010, 'country_code' => 'RU', 'region_name' => 'Москва', 'city_name' => 'Москва', 'place_name' => 'Москва', 'place_type' => 'г', 'display_name' => 'г Москва', 'fias_id' => 'fias-moscow', 'postal_code' => '101000', 'latitude' => 55.755864, 'longitude' => 37.617698, 'active' => 1 ),
 	array( 'id' => 650001, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неактивный Новосибирск', 'latitude' => 55.1, 'longitude' => 82.9, 'active' => 0 ),
 	array( 'id' => 650002, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неверные координаты', 'latitude' => 91, 'longitude' => 82.9, 'active' => 1 ),
 	array( 'id' => 650003, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неполные координаты', 'latitude' => 55.03, 'longitude' => null, 'active' => 1 ),
@@ -701,6 +702,13 @@ $coordinate_db->locations = array(
 	array( 'id' => 184700, 'country_code' => 'RU', 'region_name' => 'Тестовая', 'city_name' => '', 'settlement_name' => 'Атбасар', 'settlement_type' => 'п', 'place_name' => 'Атбасар', 'place_type' => 'п', 'display_name' => 'Тестовая обл., п Атбасар', 'latitude' => 55.0, 'longitude' => 82.0, 'active' => 1 ),
 	array( 'id' => 184800, 'country_code' => 'KZ', 'region_name' => 'Первая', 'city_name' => '', 'settlement_name' => 'Ивановка', 'settlement_type' => 'п', 'place_name' => 'Ивановка', 'place_type' => 'п', 'display_name' => 'Первая обл., п Ивановка', 'active' => 1 ),
 	array( 'id' => 184801, 'country_code' => 'KZ', 'region_name' => 'Вторая', 'city_name' => '', 'settlement_name' => 'Ивановка', 'settlement_type' => 'п', 'place_name' => 'Ивановка', 'place_type' => 'п', 'display_name' => 'Вторая обл., п Ивановка', 'active' => 1 ),
+	array( 'id' => 10506, 'country_code' => 'RU', 'region_name' => 'Марий Эл', 'city_name' => 'Зеленогорск', 'place_name' => 'Зеленогорск', 'place_type' => 'г', 'display_name' => 'Марий Эл, г Зеленогорск', 'latitude' => 56.0, 'longitude' => 48.0, 'active' => 1 ),
+	array( 'id' => 24534, 'country_code' => 'RU', 'region_name' => 'Красноярский край', 'city_name' => 'Зеленогорск', 'place_name' => 'Зеленогорск', 'place_type' => 'г', 'display_name' => 'Красноярский край, г Зеленогорск', 'latitude' => 56.113354, 'longitude' => 94.588936, 'active' => 1 ),
+	array( 'id' => 154958, 'country_code' => 'RU', 'region_name' => 'Санкт-Петербург', 'city_name' => 'Санкт-Петербург', 'settlement_name' => 'Зеленогорск', 'place_name' => 'Зеленогорск', 'place_type' => 'г', 'display_name' => 'г Санкт-Петербург, г Зеленогорск', 'fias_id' => 'ac598324-b704-4957-a66e-e8142677981b', 'latitude' => 60.197029, 'longitude' => 29.705803, 'active' => 1 ),
+	array( 'id' => 24535, 'country_code' => 'RU', 'region_name' => 'Курская область', 'city_name' => 'Дмитровка', 'place_name' => 'Дмитровка', 'place_type' => 'д', 'display_name' => 'Курская область, д Дмитровка', 'latitude' => 51.9, 'longitude' => 35.9, 'active' => 1 ),
+	array( 'id' => 154959, 'country_code' => 'RU', 'region_name' => 'Московская область', 'city_name' => 'Дмитровка', 'place_name' => 'Дмитровка', 'place_type' => 'д', 'display_name' => 'Московская область, д Дмитровка', 'fias_id' => 'dmitrovka-moscow-fias', 'latitude' => 55.7, 'longitude' => 37.2, 'active' => 1 ),
+	array( 'id' => 154960, 'country_code' => 'RU', 'region_name' => 'Краснодарский край', 'city_name' => 'Цибанобалка', 'place_name' => 'Цибанобалка', 'place_type' => 'с', 'display_name' => 'Краснодарский край, с Цибанобалка', 'fias_id' => 'tsibanobalka-fias', 'latitude' => 44.98, 'longitude' => 37.34, 'active' => 1 ),
+	array( 'id' => 154961, 'country_code' => 'RU', 'region_name' => 'Тестовая область', 'city_name' => 'Безкоординатный', 'place_name' => 'Безкоординатный', 'place_type' => 'п', 'display_name' => 'Тестовая область, п Безкоординатный', 'fias_id' => 'no-coordinates-fias', 'latitude' => null, 'longitude' => null, 'active' => 1 ),
 );
 $coordinate_repository = new LocationRepository( $coordinate_db );
 $coordinate_location_search = new CheckoutLocationSearch( new LocationSearchService( $coordinate_repository ) );
@@ -807,8 +815,8 @@ wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_cal
 $coordinate_session = new CheckoutSessionManager();
 $coordinate_session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'latitude' => 54.9833, 'longitude' => 82.8964 ) );
 $coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
-wc_checkout_smoke_assert( 54.9833 === (float) ( $coordinate_request->customer_context['destination_latitude'] ?? 0 ) && 82.8964 === (float) ( $coordinate_request->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must prefer trusted session destination coordinates.' );
-wc_checkout_smoke_assert( 0 === $coordinate_db->location_find_by_id_calls, 'Package mapper must not query canonical location when session coordinates are already complete.' );
+wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request->customer_context['destination_longitude'] ?? 0 ), 'Canonical DB coordinates must override stale session coordinates for a known location_id.' );
+wc_checkout_smoke_assert( $coordinate_db->location_find_by_id_calls > 0, 'Package mapper must query the canonical location even when session coordinates are complete.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when selected city/session coordinates are already complete.' );
 
 $coordinate_session_id = new CheckoutSessionManager();
@@ -819,6 +827,158 @@ wc_checkout_smoke_assert( '650000' === (string) ( $coordinate_request_id->custom
 wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request_id->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request_id->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must resolve destination coordinates from canonical selected_location_id.' );
 wc_checkout_smoke_assert( 'session' === (string) ( $coordinate_request_id->customer_context['location_context_source'] ?? '' ), 'Package mapper must keep the session fast path when canonical location_id already exists.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when session location_id already exists.' );
+
+$homonym_runtime = static function ( CheckoutSessionManager $session ) use ( $coordinate_repository ): CheckoutAddressRuntime {
+	return new CheckoutAddressRuntime(
+		new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+		new CheckoutCityResolver( $coordinate_repository, new CheckoutLocationSearch( new LocationSearchService( $coordinate_repository ) ) ),
+		$session
+	);
+};
+$assert_read_only_package_identity = static function ( int $location_id, string $city, string $region, string $fias_id, float $latitude, float $longitude ) use ( $coordinate_repository, $coordinate_location_search, $coordinate_db, $homonym_runtime ): void {
+	$session = new CheckoutSessionManager();
+	$selection = array( 'id' => $location_id, 'location_id' => $location_id, 'country_code' => 'RU', 'region_name' => $region, 'city_name' => $city, 'place_name' => $city, 'display_name' => $region . ', ' . $city, 'fias_id' => $fias_id, 'latitude' => 1.0, 'longitude' => 2.0, 'source' => 'local_db' );
+	$session->save_selected_city( $selection );
+	$session->save_city_context( array_merge( $selection, array( 'location_id' => $location_id ) ) );
+	$package = wc_checkout_smoke_package();
+	$package['destination'] = array( 'country' => 'RU', 'city' => $city, 'state' => '', 'postcode' => '', 'address_1' => '' );
+	$coordinate_db->location_single_lookup_calls = 0;
+	$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+	$request = ( new WooCommercePackageMapper( $homonym_runtime( $session ), $session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $package );
+	wc_checkout_smoke_assert( $location_id === (int) ( $session->selected_city()['id'] ?? 0 ) && $location_id === (int) ( $session->city_context()['location_id'] ?? 0 ), $city . ' package mapping must not mutate canonical session identity.' );
+	wc_checkout_smoke_assert( (string) $location_id === (string) ( $request->customer_context['selected_location_id'] ?? '' ), $city . ' QuoteRequest must preserve canonical selected_location_id.' );
+	wc_checkout_smoke_assert( $latitude === (float) ( $request->customer_context['destination_latitude'] ?? 0 ) && $longitude === (float) ( $request->customer_context['destination_longitude'] ?? 0 ), $city . ' coordinates must come from the canonical DB row.' );
+	wc_checkout_smoke_assert( 0 === $coordinate_db->location_single_lookup_calls && 0 === $coordinate_db->checkout_hierarchy_candidate_calls, $city . ' package mapping must not perform city-only reconciliation.' );
+};
+$assert_read_only_package_identity( 154958, 'Зеленогорск', 'Санкт-Петербург', 'ac598324-b704-4957-a66e-e8142677981b', 60.197029, 29.705803 );
+$assert_read_only_package_identity( 154959, 'Дмитровка', 'Московская область', 'dmitrovka-moscow-fias', 55.7, 37.2 );
+$assert_read_only_package_identity( 154960, 'Цибанобалка', 'Краснодарский край', 'tsibanobalka-fias', 44.98, 37.34 );
+
+$no_coordinates_session = new CheckoutSessionManager();
+$no_coordinates_selection = array( 'id' => 154961, 'location_id' => 154961, 'country_code' => 'RU', 'region_name' => 'Тестовая область', 'city_name' => 'Безкоординатный', 'place_name' => 'Безкоординатный', 'fias_id' => 'no-coordinates-fias', 'latitude' => 54.5, 'longitude' => 83.5, 'source' => 'local_db' );
+$no_coordinates_session->save_selected_city( $no_coordinates_selection );
+$no_coordinates_session->save_city_context( $no_coordinates_selection );
+$no_coordinates_package = wc_checkout_smoke_package();
+$no_coordinates_package['destination'] = array( 'country' => 'RU', 'city' => 'Безкоординатный', 'state' => '', 'postcode' => '' );
+$coordinate_db->location_single_lookup_calls = 0;
+$no_coordinates_request = ( new WooCommercePackageMapper( $homonym_runtime( $no_coordinates_session ), $no_coordinates_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $no_coordinates_package );
+wc_checkout_smoke_assert( 154961 === (int) ( $no_coordinates_session->selected_city()['id'] ?? 0 ) && 154961 === (int) ( $no_coordinates_session->city_context()['location_id'] ?? 0 ), 'Coordinate-less canonical location must preserve identity.' );
+wc_checkout_smoke_assert( 54.5 === (float) ( $no_coordinates_request->customer_context['destination_latitude'] ?? 0 ) && 83.5 === (float) ( $no_coordinates_request->customer_context['destination_longitude'] ?? 0 ), 'Coordinate-less canonical DB row must keep the existing session/map fallback available.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->location_single_lookup_calls, 'Coordinate-less canonical location must not trigger city-only substitution.' );
+$no_coordinates_ozon_rate = array(
+	'rate_id' => 'ozon_delivery:pickup',
+	'id' => 'ozon_delivery:pickup',
+	'carrier_key' => 'ozon_delivery',
+	'service_key' => 'ozon_delivery',
+	'delivery_type' => DeliveryType::PICKUP,
+	'requires_pickup_point' => true,
+	'meta' => array(
+		'location' => array( 'location_id' => 154961, 'country_code' => 'RU', 'city_name' => 'Безкоординатный', 'latitude' => 54.6, 'longitude' => 83.6 ),
+	),
+);
+$no_coordinates_map_context = wc_checkout_pickup_map_initial_context( array( 'ozon_delivery:pickup' => $no_coordinates_ozon_rate ), array( 'location_id' => 154961, 'country_code' => 'RU', 'city_name' => 'Безкоординатный' ), 'wdc_platform_delivery:ozon_delivery:pickup' );
+wc_checkout_smoke_assert( 154961 === (int) ( $no_coordinates_map_context['location_id'] ?? 0 ) && 54.6 === (float) ( $no_coordinates_map_context['lat'] ?? 0 ) && 83.6 === (float) ( $no_coordinates_map_context['lng'] ?? 0 ), 'Coordinate-less canonical WDC identity must retain the existing Ozon rate-location map-center fallback.' );
+
+$make_reload_pickup_fixture = static function () use ( $homonym_runtime ): array {
+	$session = new CheckoutSessionManager();
+	$canonical = array( 'id' => 650000, 'location_id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирская область, г Новосибирск', 'fias_id' => 'fias-novosibirsk', 'postcode' => '', 'source' => 'local_db' );
+	$session->save_selected_city( $canonical );
+	$session->save_city_context( $canonical );
+	$session->save_address_fingerprint( 'pre-reload-address-fingerprint' );
+	foreach ( array( 'ozon_delivery:pickup' => 'OZON-NSK', 'russian_post_domestic:pickup' => 'RP-NSK' ) as $family => $point_code ) {
+		$carrier = str_starts_with( $family, 'ozon_delivery' ) ? 'ozon_delivery' : 'russian_post_domestic';
+		$session->save_pickup_selection_for_family(
+			$family,
+			array(
+				'pickup_family' => $family,
+				'carrier_key' => $carrier,
+				'service_key' => $carrier,
+				'rate_id' => $family,
+				'point_code' => $point_code,
+				'point_address' => 'Новосибирск, ПВЗ',
+				'country_code' => 'RU',
+				'city' => 'Новосибирск',
+				'location_id' => 650000,
+				'destination_fingerprint' => 'country=RU|location_id=650000',
+				'snapshot' => array( 'country_code' => 'RU', 'city' => 'Новосибирск', 'postcode' => '630000', 'destination_fingerprint' => 'country=RU|location_id=650000' ),
+			)
+		);
+	}
+
+	return array( $session, $homonym_runtime( $session ) );
+};
+
+list( $reload_session, $reload_runtime ) = $make_reload_pickup_fixture();
+$reload_first_update = array( 'shipping_country' => 'RU', 'shipping_state' => 'Новосибирская область', 'shipping_city' => 'Новосибирск', 'shipping_postcode' => '', 'shipping_address_1' => '', 'shipping_method' => array() );
+$reload_runtime->resolve_checkout_address( $reload_first_update );
+$reload_after_first = $reload_session->raw_pickup_selections();
+wc_checkout_smoke_assert( array( 'ozon_delivery:pickup', 'russian_post_domestic:pickup' ) === array_keys( $reload_after_first ), 'First F5 update without hidden WDC metadata or shipping method must preserve every same-city pickup family bucket.' );
+wc_checkout_smoke_assert( 'country=RU|location_id=650000' === $reload_session->current_location_fingerprint(), 'First F5 update must reconcile visible Новосибирск back to the same canonical location identity; actual=' . $reload_session->current_location_fingerprint() . '.' );
+$first_reload_address_fingerprint = $reload_session->address_fingerprint();
+$reload_second_update = array_merge(
+	$reload_first_update,
+	array(
+		'shipping_city' => 'г Новосибирск',
+		'shipping_postcode' => '630000',
+		'wdc_platform_location_id' => '650000',
+		'wdc_platform_location_fias_id' => 'fias-novosibirsk',
+		'wdc_platform_location_country_code' => 'RU',
+		'wdc_platform_location_city_name' => 'Новосибирск',
+		'wdc_platform_location_place_name' => 'Новосибирск',
+		'wdc_platform_location_place_type' => 'г',
+		'wdc_platform_location_region_name' => 'Новосибирская область',
+		'wdc_platform_location_display_name' => 'Новосибирская область, г Новосибирск',
+		'wdc_platform_location_postcode' => '630000',
+		'wdc_platform_location_selected_source' => 'modal',
+	)
+);
+$reload_runtime->resolve_checkout_address( $reload_second_update );
+$reload_after_second = $reload_session->raw_pickup_selections();
+wc_checkout_smoke_assert( $first_reload_address_fingerprint !== $reload_session->address_fingerprint(), 'Canonical field repair fixture must change the address fingerprint on the second checkout update.' );
+wc_checkout_smoke_assert( 'OZON-NSK' === (string) ( $reload_after_second['ozon_delivery:pickup']['point_code'] ?? '' ) && 'RP-NSK' === (string) ( $reload_after_second['russian_post_domestic:pickup']['point_code'] ?? '' ), 'Ozon and Russian Post selections must survive both F5 updates when reconciliation keeps location_id 650000.' );
+
+list( $city_change_session, $city_change_runtime ) = $make_reload_pickup_fixture();
+$city_change_runtime->resolve_checkout_address(
+	array_merge(
+		$reload_second_update,
+		array(
+			'shipping_state' => 'Москва',
+			'shipping_city' => 'г Москва',
+			'shipping_postcode' => '101000',
+			'wdc_platform_location_id' => '650010',
+			'wdc_platform_location_fias_id' => 'fias-moscow',
+			'wdc_platform_location_city_name' => 'Москва',
+			'wdc_platform_location_place_name' => 'Москва',
+			'wdc_platform_location_region_name' => 'Москва',
+			'wdc_platform_location_display_name' => 'г Москва',
+			'wdc_platform_location_postcode' => '101000',
+		)
+	)
+);
+wc_checkout_smoke_assert( array() === $city_change_session->raw_pickup_selections(), 'A real canonical city change from location_id 650000 to 650010 must clear all old pickup family buckets.' );
+
+list( $country_change_session, $country_change_runtime ) = $make_reload_pickup_fixture();
+$country_change_runtime->resolve_checkout_address(
+	array_merge(
+		$reload_second_update,
+		array(
+			'shipping_country' => 'KZ',
+			'shipping_state' => 'Акмолинская',
+			'shipping_city' => 'Атбасар',
+			'shipping_postcode' => '',
+			'wdc_platform_location_id' => '184506',
+			'wdc_platform_location_fias_id' => '',
+			'wdc_platform_location_country_code' => 'KZ',
+			'wdc_platform_location_city_name' => '',
+			'wdc_platform_location_place_name' => 'Атбасар',
+			'wdc_platform_location_place_type' => 'п',
+			'wdc_platform_location_region_name' => 'Акмолинская',
+			'wdc_platform_location_display_name' => 'Акмолинская обл., п Атбасар',
+			'wdc_platform_location_postcode' => '',
+		)
+	)
+);
+wc_checkout_smoke_assert( array() === $country_change_session->raw_pickup_selections(), 'A real RU to KZ destination change must clear all old pickup family buckets.' );
 
 $atbasar_package = wc_checkout_smoke_package( 'KZ' );
 $atbasar_package['destination']['state'] = 'Акмолинская';
@@ -1158,12 +1318,28 @@ $location_db->locations = array(
 		'searchable_text' => 'минская область г минск минск 220000',
 		'active' => 1,
 	),
+	array(
+		'id' => 103,
+		'country_code' => 'RU',
+		'region_name' => 'Московская область',
+		'region_code' => '50',
+		'city_name' => 'Безиндексный',
+		'place_name' => 'Безиндексный',
+		'place_type' => 'п',
+		'display_name' => 'Московская область, п Безиндексный',
+		'postal_code' => '999999999',
+		'searchable_text' => 'московская область п безиндексный',
+		'fias_id' => 'no-postcode-fias',
+		'gar_object_id' => 103,
+		'active' => 1,
+	),
 );
 $location_repository = new LocationRepository( $location_db );
 $country_city_resolver = new CheckoutCityResolver( $location_repository, new CheckoutLocationSearch( new LocationSearchService( $location_repository ) ) );
 $by_minsk_location = $country_city_resolver->resolve_city( 'Минск', 'BY' );
 wc_checkout_smoke_assert( $by_minsk_location instanceof Location && 'BY' === $by_minsk_location->country_code, 'CheckoutCityResolver must resolve same-name city within requested BY country.' );
 wc_checkout_smoke_assert( '220000' === $country_city_resolver->resolve_postcode( 'Минск', 'BY' ), 'CheckoutCityResolver must resolve postcode from same-country BY location.' );
+wc_checkout_smoke_assert( null === $country_city_resolver->resolve_postcode( 'Безиндексный', 'RU' ), 'CheckoutCityResolver must treat technical postcode sentinel as missing.' );
 
 $manual_location_db = new class extends wpdb {
 	public array $locations = array();
@@ -1283,6 +1459,56 @@ $manual_country_changed_runtime->resolve_checkout_address(
 	)
 );
 wc_checkout_smoke_assert( array() === $manual_country_changed_session->city_context(), 'Same-session manual trust must not protect the same city after country changes.' );
+$manual_pickup_session = new CheckoutSessionManager();
+$manual_pickup_context = array( 'source' => 'manual', 'selected_source' => 'manual', 'is_manual_city' => true, 'country_code' => 'BY', 'city_name' => 'Тестоград', 'display_name' => 'Тестоград', 'region_name' => 'Тестовая область', 'postcode' => '' );
+$manual_pickup_session->save_city_context( $manual_pickup_context );
+$manual_pickup_session->save_address_fingerprint( 'manual-pre-reload-address-fingerprint' );
+$manual_pickup_session->save_pickup_selection_for_family(
+	'manual:service_a:pickup',
+	array(
+		'pickup_family' => 'manual:service_a:pickup',
+		'carrier_key' => 'manual',
+		'service_key' => 'service_a',
+		'rate_id' => 'manual:service_a:pickup',
+		'point_code' => 'MANUAL-TEST',
+		'point_address' => 'Тестоград, пункт',
+		'country_code' => 'BY',
+		'city' => 'Тестоград',
+		'destination_fingerprint' => $manual_pickup_session->current_location_fingerprint(),
+		'snapshot' => array( 'country_code' => 'BY', 'city' => 'Тестоград' ),
+	)
+);
+$manual_pickup_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$manual_pickup_session
+);
+$manual_pickup_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Тестовая область',
+		'shipping_city' => 'Тестоград',
+		'shipping_postcode' => '123456',
+		'shipping_address_1' => '',
+		'shipping_method' => array(),
+	)
+);
+wc_checkout_smoke_assert( 'MANUAL-TEST' === (string) ( $manual_pickup_session->raw_pickup_selections()['manual:service_a:pickup']['point_code'] ?? '' ), 'Same manual country and city must preserve its pickup selection when only address/postcode fingerprint changes.' );
+wc_checkout_smoke_assert( array() === $manual_pickup_session->selected_city() && 'manual' === (string) ( $manual_pickup_session->city_context()['selected_source'] ?? '' ), 'Same manual destination must remain manual and must not become a canonical DB location.' );
+$manual_pickup_session->save_address_fingerprint( 'manual-before-real-city-change' );
+$manual_pickup_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Другая область',
+		'shipping_city' => 'Другойгород',
+		'shipping_postcode' => '654321',
+		'shipping_address_1' => '',
+		'shipping_method' => array(),
+		'wdc_platform_location_selected_source' => 'manual',
+	)
+);
+wc_checkout_smoke_assert( array() === $manual_pickup_session->raw_pickup_selections(), 'A real manual city change must clear the previous manual pickup selection.' );
+wc_checkout_smoke_assert( array() === $manual_pickup_session->selected_city() && 'manual' === (string) ( $manual_pickup_session->city_context()['selected_source'] ?? '' ), 'Changed manual destination must remain manual instead of becoming a DB canonical location.' );
 $manual_session->save_city_context( $manual_empty_region_context );
 $manual_validation = new CheckoutValidation( $manual_session );
 $manual_region_validation = new ReflectionMethod( $manual_validation, 'validate_manual_region' );

@@ -109,7 +109,10 @@ final class LocationDisplayNameFormatter {
 			}
 		}
 
-		return trim( $main . ( array() !== $context ? ' - ' . implode( ', ', $context ) : '' ) );
+		$label = trim( $main . ( array() !== $context ? ' - ' . implode( ', ', $context ) : '' ) );
+		$postcode = CheckoutPostcode::usable_value( $location->postal_code );
+
+		return $label . ( '' !== $postcode ? ', ' . $postcode : '' );
 	}
 
 	public function format_checkout_state_value( Location $location ): string {

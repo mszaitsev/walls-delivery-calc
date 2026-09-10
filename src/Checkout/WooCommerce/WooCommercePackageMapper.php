@@ -98,7 +98,7 @@ final class WooCommercePackageMapper {
 	 */
 	private function destination_address( array $destination, string $country ): Address {
 		if ( $this->address_runtime instanceof CheckoutAddressRuntime && $this->has_destination_data( $destination ) ) {
-			return $this->address_runtime->resolve_checkout_address( $destination )->address;
+			return $this->address_runtime->normalize_package_address( $destination )->address;
 		}
 
 		$session_result = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->normalized_address_result() : null;
@@ -396,22 +396,20 @@ final class WooCommercePackageMapper {
 	private function destination_coordinates( string $location_id, ?Location $resolved_location = null ): array {
 		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
 		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
-		$session = $this->coordinate_pair_from_contexts( $city, $context );
-		if ( null !== $session ) {
-			return $session;
-		}
-
 		$id = is_numeric( $location_id ) ? (int) $location_id : 0;
-		if ( $id <= 0 || ! $this->location_repository instanceof LocationRepository ) {
-			return array( 'latitude' => null, 'longitude' => null );
+		if ( $id > 0 && $this->location_repository instanceof LocationRepository ) {
+			$location = $resolved_location instanceof Location && (int) $resolved_location->id === $id ? $resolved_location : $this->location_repository->find_by_id( $id );
+			if ( null === $location || ! $location->active ) {
+				return array( 'latitude' => null, 'longitude' => null );
+			}
+
+			$database = $this->valid_coordinate_pair( $location->latitude, $location->longitude );
+			if ( null !== $database ) {
+				return $database;
+			}
 		}
 
-		$location = $resolved_location instanceof Location && (int) $resolved_location->id === $id ? $resolved_location : $this->location_repository->find_by_id( $id );
-		if ( null === $location || ! $location->active ) {
-			return array( 'latitude' => null, 'longitude' => null );
-		}
-
-		return $this->valid_coordinate_pair( $location->latitude, $location->longitude ) ?? array( 'latitude' => null, 'longitude' => null );
+		return $this->coordinate_pair_from_contexts( $city, $context ) ?? array( 'latitude' => null, 'longitude' => null );
 	}
 
 	/**
