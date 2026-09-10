@@ -1318,12 +1318,28 @@ $location_db->locations = array(
 		'searchable_text' => 'минская область г минск минск 220000',
 		'active' => 1,
 	),
+	array(
+		'id' => 103,
+		'country_code' => 'RU',
+		'region_name' => 'Московская область',
+		'region_code' => '50',
+		'city_name' => 'Безиндексный',
+		'place_name' => 'Безиндексный',
+		'place_type' => 'п',
+		'display_name' => 'Московская область, п Безиндексный',
+		'postal_code' => '999999999',
+		'searchable_text' => 'московская область п безиндексный',
+		'fias_id' => 'no-postcode-fias',
+		'gar_object_id' => 103,
+		'active' => 1,
+	),
 );
 $location_repository = new LocationRepository( $location_db );
 $country_city_resolver = new CheckoutCityResolver( $location_repository, new CheckoutLocationSearch( new LocationSearchService( $location_repository ) ) );
 $by_minsk_location = $country_city_resolver->resolve_city( 'Минск', 'BY' );
 wc_checkout_smoke_assert( $by_minsk_location instanceof Location && 'BY' === $by_minsk_location->country_code, 'CheckoutCityResolver must resolve same-name city within requested BY country.' );
 wc_checkout_smoke_assert( '220000' === $country_city_resolver->resolve_postcode( 'Минск', 'BY' ), 'CheckoutCityResolver must resolve postcode from same-country BY location.' );
+wc_checkout_smoke_assert( null === $country_city_resolver->resolve_postcode( 'Безиндексный', 'RU' ), 'CheckoutCityResolver must treat technical postcode sentinel as missing.' );
 
 $manual_location_db = new class extends wpdb {
 	public array $locations = array();

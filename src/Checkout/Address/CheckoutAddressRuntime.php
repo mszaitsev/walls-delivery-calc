@@ -9,6 +9,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Locations\ValueObjects\Location;
+use WallsShop\WDC\Locations\Services\CheckoutPostcode;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -89,7 +90,7 @@ final class CheckoutAddressRuntime {
 			$context['region_name'] = (string) ( $location_data['region_name'] ?? '' );
 			$context['region_code'] = (string) ( $location_data['region_code'] ?? '' );
 			if ( '' === (string) ( $context['postcode'] ?? '' ) ) {
-				$context['postcode'] = (string) ( $location_data['postal_code'] ?? '' );
+				$context['postcode'] = CheckoutPostcode::usable_value( (string) ( $location_data['postal_code'] ?? '' ) );
 			}
 		}
 
@@ -309,7 +310,7 @@ final class CheckoutAddressRuntime {
 		$country   = $this->value( $checkoutData, 'shipping_country', 'billing_country', $this->value( $checkoutData, 'country', 'country', 'RU' ) );
 		$city      = $this->value( $checkoutData, 'shipping_city', 'billing_city', $this->value( $checkoutData, 'city', 'city', '' ) );
 		$region    = $this->value( $checkoutData, 'shipping_state', 'billing_state', $this->value( $checkoutData, 'state', 'region', '' ) );
-		$postcode  = $this->value( $checkoutData, 'shipping_postcode', 'billing_postcode', $this->value( $checkoutData, 'postcode', 'postcode', '' ) );
+		$postcode  = CheckoutPostcode::usable_value( $this->value( $checkoutData, 'shipping_postcode', 'billing_postcode', $this->value( $checkoutData, 'postcode', 'postcode', '' ) ) );
 		$address_1 = $this->value( $checkoutData, 'shipping_address_1', 'billing_address_1', $this->value( $checkoutData, 'address', 'street', '' ) );
 		$address_2 = $this->value( $checkoutData, 'shipping_address_2', 'billing_address_2', '' );
 		$selected_region = $this->value( $checkoutData, 'wdc_platform_location_region_name', 'wdc_platform_location_region_name', '' );
@@ -318,7 +319,7 @@ final class CheckoutAddressRuntime {
 			$region = $selected_region;
 		}
 
-		$selected_postcode = $this->value( $checkoutData, 'wdc_platform_location_postcode', 'wdc_platform_location_postcode', '' );
+		$selected_postcode = CheckoutPostcode::usable_value( $this->value( $checkoutData, 'wdc_platform_location_postcode', 'wdc_platform_location_postcode', '' ) );
 		if ( '' !== $selected_postcode ) {
 			$postcode = $selected_postcode;
 		}
@@ -389,7 +390,7 @@ final class CheckoutAddressRuntime {
 			$context['region_name'] = $context['selected_region_name'];
 		}
 		if ( '' === $context['postcode'] ) {
-			$context['postcode'] = trim( (string) ( $identity['postcode'] ?? $identity['postal_code'] ?? '' ) );
+			$context['postcode'] = CheckoutPostcode::usable_value( (string) ( $identity['postcode'] ?? $identity['postal_code'] ?? '' ) );
 		}
 
 		return $context;
@@ -497,7 +498,7 @@ final class CheckoutAddressRuntime {
 			'display_name'    => (string) ( $location['display_name'] ?? '' ),
 			'region_name'     => (string) ( $location['region_name'] ?? '' ),
 			'region_code'     => (string) ( $location['region_code'] ?? '' ),
-			'postcode'        => (string) ( $location['postal_code'] ?? '' ),
+			'postcode'        => CheckoutPostcode::usable_value( (string) ( $location['postal_code'] ?? '' ) ),
 			'fias_id'         => (string) ( $location['fias_id'] ?? '' ),
 			'gar_id'          => (string) ( $location['gar_id'] ?? '' ),
 			'source'          => 'local_db',

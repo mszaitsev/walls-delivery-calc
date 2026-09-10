@@ -128,7 +128,7 @@
 		}
 
 		function listFollowsViewport() {
-			return yandexCityListMode;
+			return yandexCityListMode || !viewportReloadRequired();
 		}
 
 		function zoomLoadingBlocked() {
@@ -564,9 +564,9 @@
 
 		function listPointsForCurrentBounds() {
 			var points = visiblePoints;
-			if (yandexCityListMode && lastBbox) {
+			if (listFollowsViewport() && lastBbox) {
 				points = visiblePoints.filter(function (point) {
-					return pointInsideBounds(point, lastBbox);
+					return !validPointCoordinates(point) || pointInsideBounds(point, lastBbox);
 				});
 			}
 			if (!listFilterQuery) {

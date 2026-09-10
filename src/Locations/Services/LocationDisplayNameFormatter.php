@@ -110,7 +110,7 @@ final class LocationDisplayNameFormatter {
 		}
 
 		$label = trim( $main . ( array() !== $context ? ' - ' . implode( ', ', $context ) : '' ) );
-		$postcode = trim( $location->postal_code );
+		$postcode = CheckoutPostcode::usable_value( $location->postal_code );
 
 		return $label . ( '' !== $postcode ? ', ' . $postcode : '' );
 	}

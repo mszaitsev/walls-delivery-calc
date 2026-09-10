@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\Locations;
 
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\Services\CheckoutPostcode;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -38,7 +39,7 @@ final class CheckoutCityResolver {
 			return null;
 		}
 
-		$postcode = trim( $location->postal_code );
+		$postcode = CheckoutPostcode::usable_value( $location->postal_code );
 
 		return '' !== $postcode ? $postcode : null;
 	}

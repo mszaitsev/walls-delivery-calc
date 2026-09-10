@@ -127,7 +127,7 @@ PEK pickup map access uses the existing public REST routes with a registry-backe
 - The customer sees carrier, delivery type, delivery days/date, and final customer price.
 - Pickup point UI appears only for pickup delivery methods.
 - Courier address validation applies only when courier delivery is selected.
-- Selected city, rate, tariff, pickup point, and courier address are preserved through checkout session/runtime state.
+- Selected city, rate, tariff, pickup point, and courier address are preserved through checkout session/runtime state. On reload, a coherent non-manual canonical session location is localized and restored into hidden checkout fields before textual profile reconciliation; mismatched IDs, country/city changes, and post-order cleanup do not restore stale identity. The location sentinel postcode `999999999` remains a storage/import value but is empty at checkout payload, resolver, visible-field, and selected-notice boundaries.
 - Sorting can use price or delivery time.
 - Manager recalculation in the order admin must save a clear order note with old/new delivery title and price.
 - Planned checkout comments use `DeliveryRate::planned_delivery_comment` and the format `Доставка планируется* с 12 августа (среда).`.

@@ -314,6 +314,9 @@
 			unlockRegionField();
 			return;
 		}
+		if ( ! hasSelectedLocation() && restoreCanonicalSessionSelection() ) {
+			return;
+		}
 		var displayName = hiddenValue( 'wdc_platform_location_display_name' );
 		var $field = cityField();
 		if ( displayName && $field.length ) {
@@ -350,6 +353,62 @@
 	function manualSessionContext() {
 		var context = config.manual_city_context && 'object' === typeof config.manual_city_context ? config.manual_city_context : {};
 		return 'manual' === String( context.source || '' ) ? context : {};
+	}
+
+	function canonicalSessionContext() {
+		var context = config.canonical_city_context && 'object' === typeof config.canonical_city_context ? config.canonical_city_context : {};
+		return Number( context.id || context.location_id || 0 ) > 0 && 'manual' !== String( context.source || '' ) ? context : {};
+	}
+
+	function normalizedLocationText( value ) {
+		return String( value || '' ).replace( /[Ёё]/g, 'е' ).replace( /\./g, '' ).replace( /\s+/g, ' ' ).trim().toLowerCase();
+	}
+
+	function visibleCityMatchesCanonicalSession( context ) {
+		var visible = normalizedLocationText( checkoutFieldText( cityField() ) );
+		var candidates = [
+			context.city_value,
+			[ context.place_type, context.place_name || context.settlement_name ].filter( Boolean ).join( ' ' ),
+			context.place_name,
+			context.settlement_name,
+			[ context.city_type, context.city_name ].filter( Boolean ).join( ' ' ),
+			context.city_name
+		].map( normalizedLocationText ).filter( Boolean );
+
+		return !! visible && candidates.indexOf( visible ) !== -1;
+	}
+
+	function visibleRegionMatchesCanonicalSession( context ) {
+		var $state = stateField();
+		var visibleText = normalizedLocationText( checkoutFieldText( $state ) );
+		var visibleValue = normalizedLocationText( $state.val() );
+		if ( ! visibleText && ! visibleValue ) {
+			return true;
+		}
+		var candidates = [ context.state_value, context.region_name, context.region_code ].map( normalizedLocationText ).filter( Boolean );
+
+		return candidates.indexOf( visibleText ) !== -1 || candidates.indexOf( visibleValue ) !== -1;
+	}
+
+	function restoreCanonicalSessionSelection() {
+		var context = canonicalSessionContext();
+		if (
+			! context.id
+			|| String( context.country_code || '' ).toUpperCase() !== currentCountryCode()
+			|| ! visibleCityMatchesCanonicalSession( context )
+			|| ! visibleRegionMatchesCanonicalSession( context )
+		) {
+			return false;
+		}
+		var needsVisibleRepair = ! visibleFieldsMatchCanonicalLocation( context );
+		applySelectedLocation( context, {
+			updateCheckout: needsVisibleRepair,
+			explicit: false,
+			source: context.source || 'local_db',
+			updateFields: needsVisibleRepair
+		} );
+
+		return true;
 	}
 
 	function sameManualDestination( context ) {

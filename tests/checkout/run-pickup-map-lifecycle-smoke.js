@@ -885,7 +885,9 @@ async function fixedAreaLargeDatasetDoesNotReloadOnViewportChange() {
 	const api = {
 		context: {
 			carrier: 'carrier_with_fixed_area_dataset',
-			reload_on_viewport_change: false
+			reload_on_viewport_change: false,
+			lat: 55.75,
+			lng: 37.61
 		},
 		points: () => {
 			pointRequests += 1;
@@ -913,7 +915,7 @@ async function fixedAreaLargeDatasetDoesNotReloadOnViewportChange() {
 	assert.strictEqual(pointRequests, 1, 'fixed-area viewport changes must not download the same points again');
 	assert.strictEqual(ariaBusyTrueCount(harness.element), busyAfterInitial, 'fixed-area viewport changes must not show a fake loading/search state');
 	assert.strictEqual(mapLoader(harness).hidden, true, 'fixed-area viewport changes must keep the loader hidden');
-	assert.strictEqual(harness.list.innerHTMLWrites, listWritesAfterInitial, 'fixed-area viewport-only changes must not rerender the full sidebar list');
+	assert(harness.list.innerHTMLWrites > listWritesAfterInitial, 'fixed-area viewport-only changes must rerender the sidebar for the current bounds');
 	assert.strictEqual(harness.list.scrollTop, 2400, 'fixed-area viewport-only changes must preserve sidebar scroll position');
 	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'fixed-area viewport changes must not force map-level marker rerender through REST');
 	assert.strictEqual(renderedPointRows(harness.list.innerHTML), 100, 'sidebar cap must remain stable after fixed-area viewport changes');
@@ -1077,8 +1079,7 @@ async function fixedDatasetSearchUsesAddressOriginWithoutReloadingPoints() {
 	assert.strictEqual(lastMarkers[2].searchMarker.type, 'search', 'address search must render a search origin marker.');
 	assert.strictEqual(lastMarkers[2].searchMarker.value, 'Красный проспект, 25', 'search marker must use the found address label.');
 	assert.strictEqual(lastMarkers[1][0].point_code, 'manual-near', 'fixed dataset points must be re-sorted by distance from the searched address.');
-	assert(harness.list.innerHTML.includes('manual-near') && harness.list.innerHTML.includes('manual-far'), 'address search must not text-filter fixed dataset pickup points.');
-	assert(harness.list.innerHTML.indexOf('manual-near') < harness.list.innerHTML.indexOf('manual-far'), 'fixed dataset list must follow recalculated distance order.');
+	assert(harness.list.innerHTML.includes('manual-near') && !harness.list.innerHTML.includes('manual-far'), 'address search must show the focused fixed-dataset point and keep out-of-viewport points out of the sidebar.');
 	harness.map.destroy();
 }
 
@@ -1165,6 +1166,43 @@ async function viewportFilteredFixedDatasetUpdatesListWithoutLoader() {
 	assert.strictEqual(ariaBusyTrueCount(harness.element), busyAfterInitial, 'viewport-filtered local bounds changes must not show loading');
 	assert(harness.list.innerHTMLWrites > writesAfterInitial, 'viewport-filtered local bounds changes must update the sidebar list');
 	assert(harness.list.innerHTML.includes('inside') && !harness.list.innerHTML.includes('outside'), 'viewport-filtered local list must follow the current bbox');
+	harness.map.destroy();
+}
+
+async function genericFixedDatasetSidebarFollowsViewport() {
+	let pointRequests = 0;
+	const points = Array.from({ length: 150 }, (_, index) => point('viewport-' + index, 55 + index * 0.001, 37));
+	const api = {
+		context: {
+			carrier: 'ozon_delivery',
+			reload_on_viewport_change: false,
+			lat: 55.05,
+			lng: 37
+		},
+		points: () => {
+			pointRequests += 1;
+			return Promise.resolve(points);
+		}
+	};
+	const harness = createHarness(api);
+	await wait(120);
+	const markerRender = harness.calls.filter((call) => call[0] === 'renderMarkers')[0];
+	assert.strictEqual(markerRender[1].length, 150, 'generic fixed dataset must keep all 150 markers in the provider source');
+	harness.element.dispatch('pointerdown');
+	harness.provider().fireBounds('36.9,54.9,37.1,55.0795');
+	await wait(40);
+	assert.strictEqual(renderedPointRows(harness.list.innerHTML), 80, 'fixed dataset viewport with 80 points must render 80 sidebar cards');
+	assert(!harness.list.innerHTML.includes('Показаны ближайшие 100 пунктов.'), '80-point viewport subset must not show overflow');
+	harness.provider().fireBounds('36.9,54.9,37.1,55.1195');
+	await wait(40);
+	assert.strictEqual(renderedPointRows(harness.list.innerHTML), 100, 'fixed dataset viewport with 120 points must cap sidebar at 100 cards');
+	assert(harness.list.innerHTML.includes('Показаны ближайшие 100 пунктов.'), '120-point viewport subset must show overflow');
+	harness.provider().fireBounds('36.9,55.05,37.1,55.0695');
+	await wait(40);
+	assert.strictEqual(renderedPointRows(harness.list.innerHTML), 20, 'fixed dataset viewport with 20 points must render 20 sidebar cards');
+	assert(!harness.list.innerHTML.includes('Показаны ближайшие 100 пунктов.'), '20-point viewport subset must clear overflow');
+	assert.strictEqual(pointRequests, 1, 'fixed dataset pan must not perform remote point reloads');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'fixed dataset pan must not rerender or remove markers');
 	harness.map.destroy();
 }
 
@@ -2426,6 +2464,7 @@ async function run() {
 	await dynamicDatasetSearchReloadsByAddressBounds();
 	await presentationCommentStaysSeparateWhenDistinct();
 	await viewportFilteredFixedDatasetUpdatesListWithoutLoader();
+	await genericFixedDatasetSidebarFollowsViewport();
 	console.log('Pickup map lifecycle smoke OK');
 }
 

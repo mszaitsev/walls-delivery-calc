@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Checkout\Locations;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
+use WallsShop\WDC\Locations\Services\CheckoutPostcode;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -165,7 +166,7 @@ final class CheckoutLocationAjax {
 			'option_label'    => $formatter->format_checkout_location_option( $location ),
 			'state_value'     => $formatter->format_checkout_state_value( $location ),
 			'city_value'      => $formatter->format_checkout_city_value( $location ),
-			'postal_code'     => $location->postal_code,
+			'postal_code'     => CheckoutPostcode::usable_value( $location->postal_code ),
 			'latitude'        => $location->latitude,
 			'longitude'       => $location->longitude,
 			'lat'             => $location->latitude,
