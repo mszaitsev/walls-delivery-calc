@@ -133,6 +133,18 @@ final class CheckoutAddressRuntime {
 	}
 
 	/**
+	 * Normalize a WooCommerce shipping package without changing checkout city ownership.
+	 *
+	 * @param array<string,mixed> $package_data
+	 */
+	public function normalize_package_address( array $package_data ): AddressNormalizationResult {
+		$context = $this->context_from_checkout_data( $package_data, false );
+		$context = $this->package_context_with_session_identity( $context );
+
+		return $this->normalizer->normalize( $this->raw_address( $context ), $context );
+	}
+
+	/**
 	 * @param array<string,mixed> $checkoutData
 	 */
 	public function fingerprint_from_checkout_data( array $checkoutData ): string {
@@ -278,7 +290,7 @@ final class CheckoutAddressRuntime {
 	 * @param array<string,mixed> $checkoutData
 	 * @return array<string,string>
 	 */
-	private function context_from_checkout_data( array $checkoutData ): array {
+	private function context_from_checkout_data( array $checkoutData, bool $resolve_postcode = true ): array {
 		$country   = $this->value( $checkoutData, 'shipping_country', 'billing_country', $this->value( $checkoutData, 'country', 'country', 'RU' ) );
 		$city      = $this->value( $checkoutData, 'shipping_city', 'billing_city', $this->value( $checkoutData, 'city', 'city', '' ) );
 		$region    = $this->value( $checkoutData, 'shipping_state', 'billing_state', $this->value( $checkoutData, 'state', 'region', '' ) );
@@ -296,7 +308,7 @@ final class CheckoutAddressRuntime {
 			$postcode = $selected_postcode;
 		}
 
-		if ( '' === $postcode && '' !== $city ) {
+		if ( $resolve_postcode && '' === $postcode && '' !== $city ) {
 			$postcode = (string) ( $this->city_resolver->resolve_postcode( $city, $country ) ?? '' );
 		}
 
@@ -325,6 +337,47 @@ final class CheckoutAddressRuntime {
 			'selected_lat'          => $this->value( $checkoutData, 'wdc_platform_location_lat', 'wdc_platform_location_lat', '' ),
 			'selected_lng'          => $this->value( $checkoutData, 'wdc_platform_location_lng', 'wdc_platform_location_lng', '' ),
 		);
+	}
+
+	/**
+	 * @param array<string,string> $context
+	 * @return array<string,string>
+	 */
+	private function package_context_with_session_identity( array $context ): array {
+		$identity = array_merge( $this->session_manager->selected_city(), $this->session_manager->city_context() );
+		$identity_country = strtoupper( trim( (string) ( $identity['country_code'] ?? '' ) ) );
+		if ( array() === $identity || ( '' !== $identity_country && $identity_country !== $context['country_code'] ) ) {
+			return $context;
+		}
+
+		$location_id = trim( (string) ( $identity['location_id'] ?? $identity['id'] ?? '' ) );
+		$is_manual = 'manual' === (string) ( $identity['selected_source'] ?? $identity['source'] ?? '' ) || ! empty( $identity['is_manual_city'] );
+		$context['selected_location_id'] = $is_manual ? '' : $location_id;
+		$context['selected_fias_id'] = $is_manual ? '' : trim( (string) ( $identity['fias_id'] ?? '' ) );
+		$context['selected_gar_id'] = $is_manual ? '' : trim( (string) ( $identity['gar_id'] ?? '' ) );
+		$context['selected_gar_object_id'] = $is_manual ? '' : trim( (string) ( $identity['gar_object_id'] ?? '' ) );
+		$context['selected_display_name'] = trim( (string) ( $identity['display_name'] ?? '' ) );
+		$context['selected_country_code'] = $identity_country;
+		$context['selected_region_name'] = trim( (string) ( $identity['region_name'] ?? '' ) );
+		$context['selected_region_type'] = trim( (string) ( $identity['region_type'] ?? '' ) );
+		$context['selected_district_name'] = trim( (string) ( $identity['district_name'] ?? '' ) );
+		$context['selected_district_type'] = trim( (string) ( $identity['district_type'] ?? '' ) );
+		$context['selected_city_name'] = trim( (string) ( $identity['city_name'] ?? '' ) );
+		$context['selected_city_type'] = trim( (string) ( $identity['city_type'] ?? '' ) );
+		$context['selected_place_name'] = trim( (string) ( $identity['place_name'] ?? $identity['settlement_name'] ?? '' ) );
+		$context['selected_place_type'] = trim( (string) ( $identity['place_type'] ?? $identity['settlement_type'] ?? '' ) );
+		$context['selected_source'] = $is_manual ? 'manual' : trim( (string) ( $identity['selected_source'] ?? $identity['source'] ?? '' ) );
+		$context['selected_lat'] = trim( (string) ( $identity['latitude'] ?? $identity['lat'] ?? '' ) );
+		$context['selected_lng'] = trim( (string) ( $identity['longitude'] ?? $identity['lng'] ?? $identity['lon'] ?? '' ) );
+
+		if ( '' === $context['region_name'] ) {
+			$context['region_name'] = $context['selected_region_name'];
+		}
+		if ( '' === $context['postcode'] ) {
+			$context['postcode'] = trim( (string) ( $identity['postcode'] ?? $identity['postal_code'] ?? '' ) );
+		}
+
+		return $context;
 	}
 
 	/**

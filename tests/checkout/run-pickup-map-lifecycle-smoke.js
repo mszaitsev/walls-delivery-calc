@@ -201,16 +201,21 @@ function createHarness(api) {
 						}
 						providerInstance = {
 							options,
+							currentZoom: Number(options.center.zoom),
 							selected: null,
 							cancelledFit: 0,
 							pendingFit: false,
 							renderMarkers(points, options) {
 								calls.push(['renderMarkers', points, options || {}]);
 							},
+							getZoom() {
+								return this.currentZoom;
+							},
 							clearMarkers() {
 								calls.push(['clearMarkers']);
 							},
 							setCenter(lat, lng, zoom) {
+								this.currentZoom = Number(zoom || this.currentZoom);
 								calls.push(['setCenter', Number(lat), Number(lng), zoom]);
 							},
 							fitToMarkers(options) {
@@ -251,6 +256,10 @@ function createHarness(api) {
 								calls.push(['providerDestroy']);
 							},
 							fireBounds(bbox) {
+								options.onBoundsChange(bbox || '1,2,3,4');
+							},
+							fireZoom(zoom, bbox) {
+								this.currentZoom = Number(zoom);
 								options.onBoundsChange(bbox || '1,2,3,4');
 							}
 						};
@@ -342,6 +351,10 @@ function ariaBusyTrueCount(element) {
 
 function mapLoader(harness) {
 	return harness.mapPane.children.find((child) => child.className === 'wdc-pickup-map__loading') || null;
+}
+
+function mapZoomWarning(harness) {
+	return harness.mapPane.children.find((child) => child.className === 'wdc-pickup-map__zoom-warning') || null;
 }
 
 function abortableDeferred(signal) {
@@ -887,7 +900,8 @@ async function fixedAreaLargeDatasetDoesNotReloadOnViewportChange() {
 	assert.strictEqual(mapLoader(harness).hidden, true, 'fixed-area initial success must hide the loader');
 	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'initial fixed-area fetch must render markers once');
 	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers')[0][1].length, 6403, 'cluster source must keep the full fixed-area dataset');
-	assert(renderedPointRows(harness.list.innerHTML) <= 80, 'virtualized sidebar must keep DOM rows bounded for 6403 source points');
+	assert.strictEqual(renderedPointRows(harness.list.innerHTML), 100, 'sidebar must render only the nearest 100 cards from a large fixed dataset');
+	assert(harness.list.innerHTML.includes('Показаны ближайшие 100 пунктов.'), 'large fixed dataset must show the sidebar overflow hint');
 	const busyAfterInitial = ariaBusyTrueCount(harness.element);
 	const listWritesAfterInitial = harness.list.innerHTMLWrites;
 	harness.list.scrollTop = 2400;
@@ -902,12 +916,59 @@ async function fixedAreaLargeDatasetDoesNotReloadOnViewportChange() {
 	assert.strictEqual(harness.list.innerHTMLWrites, listWritesAfterInitial, 'fixed-area viewport-only changes must not rerender the full sidebar list');
 	assert.strictEqual(harness.list.scrollTop, 2400, 'fixed-area viewport-only changes must preserve sidebar scroll position');
 	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'fixed-area viewport changes must not force map-level marker rerender through REST');
-	assert(renderedPointRows(harness.list.innerHTML) <= 80, 'virtualized sidebar must remain bounded after viewport changes');
-	harness.list.scrollTop = 6402 * 112;
-	harness.list.dispatch('scroll');
-	await wait(30);
-	assert(harness.list.innerHTML.includes('p06403'), 'virtualized sidebar must make the last point reachable by scroll');
+	assert.strictEqual(renderedPointRows(harness.list.innerHTML), 100, 'sidebar cap must remain stable after fixed-area viewport changes');
 	harness.map.destroy();
+}
+
+async function zoomOutThrottleAndResume() {
+	let pointRequests = 0;
+	const api = {
+		context: { carrier: 'cdek', cdek_city_code: '9220', lat: 55.03, lng: 82.92 },
+		points: () => {
+			pointRequests += 1;
+			return Promise.resolve([point('zoom-point', 55.03, 82.92)]);
+		}
+	};
+	const harness = createHarness(api);
+	await wait(120);
+	assert.strictEqual(pointRequests, 1, 'default zoom 13 must load pickup points');
+	harness.provider().fireZoom(12, 'one-step');
+	await wait(320);
+	assert.strictEqual(pointRequests, 2, 'one zoom-out step to 12 must still load pickup points');
+	harness.provider().fireZoom(11, 'two-steps');
+	await wait(320);
+	assert.strictEqual(pointRequests, 2, 'second zoom-out step to 11 must block new pickup requests');
+	assert.strictEqual(mapZoomWarning(harness).hidden, false, 'blocked zoom must show the zoom-in warning');
+	assert.strictEqual(mapZoomWarning(harness).textContent, 'Увеличьте карту, чтобы увидеть пункты выдачи', 'zoom warning must use the approved user-facing text');
+	harness.provider().fireZoom(10, 'three-steps');
+	await wait(320);
+	assert.strictEqual(pointRequests, 2, 'all zoom levels below 12 must remain throttled');
+	harness.provider().fireZoom(12, 'back-in');
+	await wait(40);
+	assert.strictEqual(pointRequests, 3, 'zooming back to 12 must immediately resume the normal viewport reload');
+	assert.strictEqual(mapZoomWarning(harness).hidden, true, 'zoom-in must hide the warning');
+	harness.map.destroy();
+}
+
+async function sidebarPresentationLimitBoundaries() {
+	for (const count of [99, 100, 150]) {
+		const points = largePoints(count);
+		const api = {
+			context: { carrier: 'cdek', cdek_city_code: '9220' },
+			points: () => Promise.resolve(points),
+			search: () => Promise.resolve([points[Math.min(139, points.length - 1)]])
+		};
+		const harness = createHarness(api);
+		await wait(120);
+		assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers')[0][1].length, count, count + ' source points must all reach marker rendering');
+		assert.strictEqual(renderedPointRows(harness.list.innerHTML), Math.min(100, count), count + ' source points must respect only the 100-card sidebar limit');
+		assert.strictEqual(harness.list.innerHTML.includes('Показаны ближайшие 100 пунктов.'), count > 100, count + ' source points must toggle the overflow hint at the exact boundary');
+		if (count === 150) {
+			await harness.map.search('p00140');
+			assert(harness.list.innerHTML.includes('p00140'), 'existing search must still find and render point 140 beyond the default presentation cap');
+		}
+		harness.map.destroy();
+	}
 }
 
 async function manualFixedDatasetKeepsTitleCommentAndSingleRequest() {
@@ -2284,9 +2345,11 @@ async function run() {
 		&& checkoutSource.includes('prefetchGeneration++')
 		&& !checkoutSource.includes('reload_on_viewport_change: config.reload_on_viewport_change'), 'pickup checkout must keep rate capabilities separate from mutable destination context and apply them when opening the modal.');
 	assert(leafletProviderSource.includes("map.on('zoomend', scheduleClusterRebuild)")
+		&& leafletProviderSource.includes('getZoom: function ()')
 		&& leafletProviderSource.includes('function cancelScheduledClusterRebuild()')
 		&& leafletProviderSource.includes('requestAnimationFrame')
 		&& !leafletProviderSource.includes("map.on('zoomend', rebuildClusters)"), 'Leaflet zoom reclustering must be scheduled and coalesced instead of bound as a synchronous full rebuild.');
+	assert(yandexProviderSource.includes('getZoom: function ()') && yandexProviderSource.includes('map.getZoom() : pendingCenter.zoom'), 'Yandex adapter must expose current or pending zoom through the generic map contract.');
 	assert(checkoutSource.includes('function hasAuthoritativePickupSelections(response)')
 		&& checkoutSource.includes('? extractPickupSelections(response)')
 		&& checkoutSource.includes(': mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response))'), 'checkout state response with explicit pickup selections must replace local selections instead of preserving stale selected points.');
@@ -2356,6 +2419,8 @@ async function run() {
 	await geolocationResponseDoesNotAutoFit();
 	await destroyAfterAddressSearchPreventsLatePointsMutation();
 	await fixedAreaLargeDatasetDoesNotReloadOnViewportChange();
+	await zoomOutThrottleAndResume();
+	await sidebarPresentationLimitBoundaries();
 	await manualFixedDatasetKeepsTitleCommentAndSingleRequest();
 	await fixedDatasetSearchUsesAddressOriginWithoutReloadingPoints();
 	await dynamicDatasetSearchReloadsByAddressBounds();

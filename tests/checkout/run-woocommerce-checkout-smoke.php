@@ -701,6 +701,13 @@ $coordinate_db->locations = array(
 	array( 'id' => 184700, 'country_code' => 'RU', 'region_name' => 'Тестовая', 'city_name' => '', 'settlement_name' => 'Атбасар', 'settlement_type' => 'п', 'place_name' => 'Атбасар', 'place_type' => 'п', 'display_name' => 'Тестовая обл., п Атбасар', 'latitude' => 55.0, 'longitude' => 82.0, 'active' => 1 ),
 	array( 'id' => 184800, 'country_code' => 'KZ', 'region_name' => 'Первая', 'city_name' => '', 'settlement_name' => 'Ивановка', 'settlement_type' => 'п', 'place_name' => 'Ивановка', 'place_type' => 'п', 'display_name' => 'Первая обл., п Ивановка', 'active' => 1 ),
 	array( 'id' => 184801, 'country_code' => 'KZ', 'region_name' => 'Вторая', 'city_name' => '', 'settlement_name' => 'Ивановка', 'settlement_type' => 'п', 'place_name' => 'Ивановка', 'place_type' => 'п', 'display_name' => 'Вторая обл., п Ивановка', 'active' => 1 ),
+	array( 'id' => 10506, 'country_code' => 'RU', 'region_name' => 'Марий Эл', 'city_name' => 'Зеленогорск', 'place_name' => 'Зеленогорск', 'place_type' => 'г', 'display_name' => 'Марий Эл, г Зеленогорск', 'latitude' => 56.0, 'longitude' => 48.0, 'active' => 1 ),
+	array( 'id' => 24534, 'country_code' => 'RU', 'region_name' => 'Красноярский край', 'city_name' => 'Зеленогорск', 'place_name' => 'Зеленогорск', 'place_type' => 'г', 'display_name' => 'Красноярский край, г Зеленогорск', 'latitude' => 56.113354, 'longitude' => 94.588936, 'active' => 1 ),
+	array( 'id' => 154958, 'country_code' => 'RU', 'region_name' => 'Санкт-Петербург', 'city_name' => 'Санкт-Петербург', 'settlement_name' => 'Зеленогорск', 'place_name' => 'Зеленогорск', 'place_type' => 'г', 'display_name' => 'г Санкт-Петербург, г Зеленогорск', 'fias_id' => 'ac598324-b704-4957-a66e-e8142677981b', 'latitude' => 60.197029, 'longitude' => 29.705803, 'active' => 1 ),
+	array( 'id' => 24535, 'country_code' => 'RU', 'region_name' => 'Курская область', 'city_name' => 'Дмитровка', 'place_name' => 'Дмитровка', 'place_type' => 'д', 'display_name' => 'Курская область, д Дмитровка', 'latitude' => 51.9, 'longitude' => 35.9, 'active' => 1 ),
+	array( 'id' => 154959, 'country_code' => 'RU', 'region_name' => 'Московская область', 'city_name' => 'Дмитровка', 'place_name' => 'Дмитровка', 'place_type' => 'д', 'display_name' => 'Московская область, д Дмитровка', 'fias_id' => 'dmitrovka-moscow-fias', 'latitude' => 55.7, 'longitude' => 37.2, 'active' => 1 ),
+	array( 'id' => 154960, 'country_code' => 'RU', 'region_name' => 'Краснодарский край', 'city_name' => 'Цибанобалка', 'place_name' => 'Цибанобалка', 'place_type' => 'с', 'display_name' => 'Краснодарский край, с Цибанобалка', 'fias_id' => 'tsibanobalka-fias', 'latitude' => 44.98, 'longitude' => 37.34, 'active' => 1 ),
+	array( 'id' => 154961, 'country_code' => 'RU', 'region_name' => 'Тестовая область', 'city_name' => 'Безкоординатный', 'place_name' => 'Безкоординатный', 'place_type' => 'п', 'display_name' => 'Тестовая область, п Безкоординатный', 'fias_id' => 'no-coordinates-fias', 'latitude' => null, 'longitude' => null, 'active' => 1 ),
 );
 $coordinate_repository = new LocationRepository( $coordinate_db );
 $coordinate_location_search = new CheckoutLocationSearch( new LocationSearchService( $coordinate_repository ) );
@@ -807,8 +814,8 @@ wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_cal
 $coordinate_session = new CheckoutSessionManager();
 $coordinate_session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'latitude' => 54.9833, 'longitude' => 82.8964 ) );
 $coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
-wc_checkout_smoke_assert( 54.9833 === (float) ( $coordinate_request->customer_context['destination_latitude'] ?? 0 ) && 82.8964 === (float) ( $coordinate_request->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must prefer trusted session destination coordinates.' );
-wc_checkout_smoke_assert( 0 === $coordinate_db->location_find_by_id_calls, 'Package mapper must not query canonical location when session coordinates are already complete.' );
+wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request->customer_context['destination_longitude'] ?? 0 ), 'Canonical DB coordinates must override stale session coordinates for a known location_id.' );
+wc_checkout_smoke_assert( $coordinate_db->location_find_by_id_calls > 0, 'Package mapper must query the canonical location even when session coordinates are complete.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when selected city/session coordinates are already complete.' );
 
 $coordinate_session_id = new CheckoutSessionManager();
@@ -819,6 +826,57 @@ wc_checkout_smoke_assert( '650000' === (string) ( $coordinate_request_id->custom
 wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request_id->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request_id->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must resolve destination coordinates from canonical selected_location_id.' );
 wc_checkout_smoke_assert( 'session' === (string) ( $coordinate_request_id->customer_context['location_context_source'] ?? '' ), 'Package mapper must keep the session fast path when canonical location_id already exists.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when session location_id already exists.' );
+
+$homonym_runtime = static function ( CheckoutSessionManager $session ) use ( $coordinate_repository ): CheckoutAddressRuntime {
+	return new CheckoutAddressRuntime(
+		new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+		new CheckoutCityResolver( $coordinate_repository, new CheckoutLocationSearch( new LocationSearchService( $coordinate_repository ) ) ),
+		$session
+	);
+};
+$assert_read_only_package_identity = static function ( int $location_id, string $city, string $region, string $fias_id, float $latitude, float $longitude ) use ( $coordinate_repository, $coordinate_location_search, $coordinate_db, $homonym_runtime ): void {
+	$session = new CheckoutSessionManager();
+	$selection = array( 'id' => $location_id, 'location_id' => $location_id, 'country_code' => 'RU', 'region_name' => $region, 'city_name' => $city, 'place_name' => $city, 'display_name' => $region . ', ' . $city, 'fias_id' => $fias_id, 'latitude' => 1.0, 'longitude' => 2.0, 'source' => 'local_db' );
+	$session->save_selected_city( $selection );
+	$session->save_city_context( array_merge( $selection, array( 'location_id' => $location_id ) ) );
+	$package = wc_checkout_smoke_package();
+	$package['destination'] = array( 'country' => 'RU', 'city' => $city, 'state' => '', 'postcode' => '', 'address_1' => '' );
+	$coordinate_db->location_single_lookup_calls = 0;
+	$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+	$request = ( new WooCommercePackageMapper( $homonym_runtime( $session ), $session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $package );
+	wc_checkout_smoke_assert( $location_id === (int) ( $session->selected_city()['id'] ?? 0 ) && $location_id === (int) ( $session->city_context()['location_id'] ?? 0 ), $city . ' package mapping must not mutate canonical session identity.' );
+	wc_checkout_smoke_assert( (string) $location_id === (string) ( $request->customer_context['selected_location_id'] ?? '' ), $city . ' QuoteRequest must preserve canonical selected_location_id.' );
+	wc_checkout_smoke_assert( $latitude === (float) ( $request->customer_context['destination_latitude'] ?? 0 ) && $longitude === (float) ( $request->customer_context['destination_longitude'] ?? 0 ), $city . ' coordinates must come from the canonical DB row.' );
+	wc_checkout_smoke_assert( 0 === $coordinate_db->location_single_lookup_calls && 0 === $coordinate_db->checkout_hierarchy_candidate_calls, $city . ' package mapping must not perform city-only reconciliation.' );
+};
+$assert_read_only_package_identity( 154958, 'Зеленогорск', 'Санкт-Петербург', 'ac598324-b704-4957-a66e-e8142677981b', 60.197029, 29.705803 );
+$assert_read_only_package_identity( 154959, 'Дмитровка', 'Московская область', 'dmitrovka-moscow-fias', 55.7, 37.2 );
+$assert_read_only_package_identity( 154960, 'Цибанобалка', 'Краснодарский край', 'tsibanobalka-fias', 44.98, 37.34 );
+
+$no_coordinates_session = new CheckoutSessionManager();
+$no_coordinates_selection = array( 'id' => 154961, 'location_id' => 154961, 'country_code' => 'RU', 'region_name' => 'Тестовая область', 'city_name' => 'Безкоординатный', 'place_name' => 'Безкоординатный', 'fias_id' => 'no-coordinates-fias', 'latitude' => 54.5, 'longitude' => 83.5, 'source' => 'local_db' );
+$no_coordinates_session->save_selected_city( $no_coordinates_selection );
+$no_coordinates_session->save_city_context( $no_coordinates_selection );
+$no_coordinates_package = wc_checkout_smoke_package();
+$no_coordinates_package['destination'] = array( 'country' => 'RU', 'city' => 'Безкоординатный', 'state' => '', 'postcode' => '' );
+$coordinate_db->location_single_lookup_calls = 0;
+$no_coordinates_request = ( new WooCommercePackageMapper( $homonym_runtime( $no_coordinates_session ), $no_coordinates_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $no_coordinates_package );
+wc_checkout_smoke_assert( 154961 === (int) ( $no_coordinates_session->selected_city()['id'] ?? 0 ) && 154961 === (int) ( $no_coordinates_session->city_context()['location_id'] ?? 0 ), 'Coordinate-less canonical location must preserve identity.' );
+wc_checkout_smoke_assert( 54.5 === (float) ( $no_coordinates_request->customer_context['destination_latitude'] ?? 0 ) && 83.5 === (float) ( $no_coordinates_request->customer_context['destination_longitude'] ?? 0 ), 'Coordinate-less canonical DB row must keep the existing session/map fallback available.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->location_single_lookup_calls, 'Coordinate-less canonical location must not trigger city-only substitution.' );
+$no_coordinates_ozon_rate = array(
+	'rate_id' => 'ozon_delivery:pickup',
+	'id' => 'ozon_delivery:pickup',
+	'carrier_key' => 'ozon_delivery',
+	'service_key' => 'ozon_delivery',
+	'delivery_type' => DeliveryType::PICKUP,
+	'requires_pickup_point' => true,
+	'meta' => array(
+		'location' => array( 'location_id' => 154961, 'country_code' => 'RU', 'city_name' => 'Безкоординатный', 'latitude' => 54.6, 'longitude' => 83.6 ),
+	),
+);
+$no_coordinates_map_context = wc_checkout_pickup_map_initial_context( array( 'ozon_delivery:pickup' => $no_coordinates_ozon_rate ), array( 'location_id' => 154961, 'country_code' => 'RU', 'city_name' => 'Безкоординатный' ), 'wdc_platform_delivery:ozon_delivery:pickup' );
+wc_checkout_smoke_assert( 154961 === (int) ( $no_coordinates_map_context['location_id'] ?? 0 ) && 54.6 === (float) ( $no_coordinates_map_context['lat'] ?? 0 ) && 83.6 === (float) ( $no_coordinates_map_context['lng'] ?? 0 ), 'Coordinate-less canonical WDC identity must retain the existing Ozon rate-location map-center fallback.' );
 
 $atbasar_package = wc_checkout_smoke_package( 'KZ' );
 $atbasar_package['destination']['state'] = 'Акмолинская';

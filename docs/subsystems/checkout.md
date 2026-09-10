@@ -1,8 +1,10 @@
 # Checkout
 
+0.155.17 makes WooCommerce package mapping a read-only consumer of canonical checkout identity. Package address normalization may reuse the selected session location but cannot resolve a city-only package into another same-name WDC row or write `selected_city`, `city_context`, manual trust, or fallback city. For a positive canonical location ID, active database coordinates are authoritative; if that row has no valid coordinates, the existing rate/provider pickup-map fallback remains available without replacing the ID or FIAS identity. User city picker, initial profile reconciliation, and explicit manual city flows retain their existing mutating ownership.
+
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.155.15
+Version: 0.155.17
 
 The platform setting `checkout_sort_selector_enabled` defaults to true, including upgrades with a missing key. When enabled, customers can use the checkout sorting selector; when disabled, no selector markup is rendered and `checkout_sort_mode` from admin is authoritative, ignoring posted/customer modes. Checkout synchronizes the session to the forced mode so re-enabling starts from the last admin-synchronized value. Actual effective-mode transitions, whether customer-driven or forced by admin, reset tariffs and WDC method choices once; stable-mode refreshes preserve manual tariff/method selections. Runtime/selection smokes cover checkbox persistence, visibility, stale POST/session, forced sorting and re-enabling.
 

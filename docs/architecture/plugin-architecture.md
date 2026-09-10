@@ -1,8 +1,10 @@
 # Plugin Architecture
 
+0.155.17 separates read-only WooCommerce package-address normalization from the mutating checkout city-selection flows. `WooCommercePackageMapper` uses the read-only boundary and gives an active database location row coordinate priority for a positive canonical ID; missing row coordinates retain the established map fallback. The generic pickup-map lifecycle owns zoom throttling and sidebar presentation limiting, while Leaflet and Yandex adapters expose only their current zoom. Carrier discovery, pricing, quote caching and pickup selection persistence contracts are unchanged.
+
 0.155.16 correction: postal_code is enrichment-owned, never a GAR changed field. The retired location alias index is no longer generated, exported or used by runtime. Search uses searchable_text and canonical hierarchy fields. Backup/restore and incremental apply swap locations only. Migration 0064 drops only the canonical live alias table; pending migrations run even at unchanged plugin version. Legacy alias backup/temporary tables are retained inert. Finish or cancel an older update before deployment and start a fresh GAR analysis; do not resume its pre-correction diff.
 
-Version: 0.155.16
+Version: 0.155.17
 
 ## One-Click GAR Update
 
