@@ -693,7 +693,8 @@ $coordinate_db = new class extends wpdb {
 	public int $checkout_hierarchy_candidate_calls = 0;
 };
 $coordinate_db->locations = array(
-	array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ),
+	array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирская область, г Новосибирск', 'fias_id' => 'fias-novosibirsk', 'postal_code' => '630000', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ),
+	array( 'id' => 650010, 'country_code' => 'RU', 'region_name' => 'Москва', 'city_name' => 'Москва', 'place_name' => 'Москва', 'place_type' => 'г', 'display_name' => 'г Москва', 'fias_id' => 'fias-moscow', 'postal_code' => '101000', 'latitude' => 55.755864, 'longitude' => 37.617698, 'active' => 1 ),
 	array( 'id' => 650001, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неактивный Новосибирск', 'latitude' => 55.1, 'longitude' => 82.9, 'active' => 0 ),
 	array( 'id' => 650002, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неверные координаты', 'latitude' => 91, 'longitude' => 82.9, 'active' => 1 ),
 	array( 'id' => 650003, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неполные координаты', 'latitude' => 55.03, 'longitude' => null, 'active' => 1 ),
@@ -877,6 +878,107 @@ $no_coordinates_ozon_rate = array(
 );
 $no_coordinates_map_context = wc_checkout_pickup_map_initial_context( array( 'ozon_delivery:pickup' => $no_coordinates_ozon_rate ), array( 'location_id' => 154961, 'country_code' => 'RU', 'city_name' => 'Безкоординатный' ), 'wdc_platform_delivery:ozon_delivery:pickup' );
 wc_checkout_smoke_assert( 154961 === (int) ( $no_coordinates_map_context['location_id'] ?? 0 ) && 54.6 === (float) ( $no_coordinates_map_context['lat'] ?? 0 ) && 83.6 === (float) ( $no_coordinates_map_context['lng'] ?? 0 ), 'Coordinate-less canonical WDC identity must retain the existing Ozon rate-location map-center fallback.' );
+
+$make_reload_pickup_fixture = static function () use ( $homonym_runtime ): array {
+	$session = new CheckoutSessionManager();
+	$canonical = array( 'id' => 650000, 'location_id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирская область, г Новосибирск', 'fias_id' => 'fias-novosibirsk', 'postcode' => '', 'source' => 'local_db' );
+	$session->save_selected_city( $canonical );
+	$session->save_city_context( $canonical );
+	$session->save_address_fingerprint( 'pre-reload-address-fingerprint' );
+	foreach ( array( 'ozon_delivery:pickup' => 'OZON-NSK', 'russian_post_domestic:pickup' => 'RP-NSK' ) as $family => $point_code ) {
+		$carrier = str_starts_with( $family, 'ozon_delivery' ) ? 'ozon_delivery' : 'russian_post_domestic';
+		$session->save_pickup_selection_for_family(
+			$family,
+			array(
+				'pickup_family' => $family,
+				'carrier_key' => $carrier,
+				'service_key' => $carrier,
+				'rate_id' => $family,
+				'point_code' => $point_code,
+				'point_address' => 'Новосибирск, ПВЗ',
+				'country_code' => 'RU',
+				'city' => 'Новосибирск',
+				'location_id' => 650000,
+				'destination_fingerprint' => 'country=RU|location_id=650000',
+				'snapshot' => array( 'country_code' => 'RU', 'city' => 'Новосибирск', 'postcode' => '630000', 'destination_fingerprint' => 'country=RU|location_id=650000' ),
+			)
+		);
+	}
+
+	return array( $session, $homonym_runtime( $session ) );
+};
+
+list( $reload_session, $reload_runtime ) = $make_reload_pickup_fixture();
+$reload_first_update = array( 'shipping_country' => 'RU', 'shipping_state' => 'Новосибирская область', 'shipping_city' => 'Новосибирск', 'shipping_postcode' => '', 'shipping_address_1' => '', 'shipping_method' => array() );
+$reload_runtime->resolve_checkout_address( $reload_first_update );
+$reload_after_first = $reload_session->raw_pickup_selections();
+wc_checkout_smoke_assert( array( 'ozon_delivery:pickup', 'russian_post_domestic:pickup' ) === array_keys( $reload_after_first ), 'First F5 update without hidden WDC metadata or shipping method must preserve every same-city pickup family bucket.' );
+wc_checkout_smoke_assert( 'country=RU|location_id=650000' === $reload_session->current_location_fingerprint(), 'First F5 update must reconcile visible Новосибирск back to the same canonical location identity; actual=' . $reload_session->current_location_fingerprint() . '.' );
+$first_reload_address_fingerprint = $reload_session->address_fingerprint();
+$reload_second_update = array_merge(
+	$reload_first_update,
+	array(
+		'shipping_city' => 'г Новосибирск',
+		'shipping_postcode' => '630000',
+		'wdc_platform_location_id' => '650000',
+		'wdc_platform_location_fias_id' => 'fias-novosibirsk',
+		'wdc_platform_location_country_code' => 'RU',
+		'wdc_platform_location_city_name' => 'Новосибирск',
+		'wdc_platform_location_place_name' => 'Новосибирск',
+		'wdc_platform_location_place_type' => 'г',
+		'wdc_platform_location_region_name' => 'Новосибирская область',
+		'wdc_platform_location_display_name' => 'Новосибирская область, г Новосибирск',
+		'wdc_platform_location_postcode' => '630000',
+		'wdc_platform_location_selected_source' => 'modal',
+	)
+);
+$reload_runtime->resolve_checkout_address( $reload_second_update );
+$reload_after_second = $reload_session->raw_pickup_selections();
+wc_checkout_smoke_assert( $first_reload_address_fingerprint !== $reload_session->address_fingerprint(), 'Canonical field repair fixture must change the address fingerprint on the second checkout update.' );
+wc_checkout_smoke_assert( 'OZON-NSK' === (string) ( $reload_after_second['ozon_delivery:pickup']['point_code'] ?? '' ) && 'RP-NSK' === (string) ( $reload_after_second['russian_post_domestic:pickup']['point_code'] ?? '' ), 'Ozon and Russian Post selections must survive both F5 updates when reconciliation keeps location_id 650000.' );
+
+list( $city_change_session, $city_change_runtime ) = $make_reload_pickup_fixture();
+$city_change_runtime->resolve_checkout_address(
+	array_merge(
+		$reload_second_update,
+		array(
+			'shipping_state' => 'Москва',
+			'shipping_city' => 'г Москва',
+			'shipping_postcode' => '101000',
+			'wdc_platform_location_id' => '650010',
+			'wdc_platform_location_fias_id' => 'fias-moscow',
+			'wdc_platform_location_city_name' => 'Москва',
+			'wdc_platform_location_place_name' => 'Москва',
+			'wdc_platform_location_region_name' => 'Москва',
+			'wdc_platform_location_display_name' => 'г Москва',
+			'wdc_platform_location_postcode' => '101000',
+		)
+	)
+);
+wc_checkout_smoke_assert( array() === $city_change_session->raw_pickup_selections(), 'A real canonical city change from location_id 650000 to 650010 must clear all old pickup family buckets.' );
+
+list( $country_change_session, $country_change_runtime ) = $make_reload_pickup_fixture();
+$country_change_runtime->resolve_checkout_address(
+	array_merge(
+		$reload_second_update,
+		array(
+			'shipping_country' => 'KZ',
+			'shipping_state' => 'Акмолинская',
+			'shipping_city' => 'Атбасар',
+			'shipping_postcode' => '',
+			'wdc_platform_location_id' => '184506',
+			'wdc_platform_location_fias_id' => '',
+			'wdc_platform_location_country_code' => 'KZ',
+			'wdc_platform_location_city_name' => '',
+			'wdc_platform_location_place_name' => 'Атбасар',
+			'wdc_platform_location_place_type' => 'п',
+			'wdc_platform_location_region_name' => 'Акмолинская',
+			'wdc_platform_location_display_name' => 'Акмолинская обл., п Атбасар',
+			'wdc_platform_location_postcode' => '',
+		)
+	)
+);
+wc_checkout_smoke_assert( array() === $country_change_session->raw_pickup_selections(), 'A real RU to KZ destination change must clear all old pickup family buckets.' );
 
 $atbasar_package = wc_checkout_smoke_package( 'KZ' );
 $atbasar_package['destination']['state'] = 'Акмолинская';
@@ -1341,6 +1443,56 @@ $manual_country_changed_runtime->resolve_checkout_address(
 	)
 );
 wc_checkout_smoke_assert( array() === $manual_country_changed_session->city_context(), 'Same-session manual trust must not protect the same city after country changes.' );
+$manual_pickup_session = new CheckoutSessionManager();
+$manual_pickup_context = array( 'source' => 'manual', 'selected_source' => 'manual', 'is_manual_city' => true, 'country_code' => 'BY', 'city_name' => 'Тестоград', 'display_name' => 'Тестоград', 'region_name' => 'Тестовая область', 'postcode' => '' );
+$manual_pickup_session->save_city_context( $manual_pickup_context );
+$manual_pickup_session->save_address_fingerprint( 'manual-pre-reload-address-fingerprint' );
+$manual_pickup_session->save_pickup_selection_for_family(
+	'manual:service_a:pickup',
+	array(
+		'pickup_family' => 'manual:service_a:pickup',
+		'carrier_key' => 'manual',
+		'service_key' => 'service_a',
+		'rate_id' => 'manual:service_a:pickup',
+		'point_code' => 'MANUAL-TEST',
+		'point_address' => 'Тестоград, пункт',
+		'country_code' => 'BY',
+		'city' => 'Тестоград',
+		'destination_fingerprint' => $manual_pickup_session->current_location_fingerprint(),
+		'snapshot' => array( 'country_code' => 'BY', 'city' => 'Тестоград' ),
+	)
+);
+$manual_pickup_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$manual_pickup_session
+);
+$manual_pickup_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Тестовая область',
+		'shipping_city' => 'Тестоград',
+		'shipping_postcode' => '123456',
+		'shipping_address_1' => '',
+		'shipping_method' => array(),
+	)
+);
+wc_checkout_smoke_assert( 'MANUAL-TEST' === (string) ( $manual_pickup_session->raw_pickup_selections()['manual:service_a:pickup']['point_code'] ?? '' ), 'Same manual country and city must preserve its pickup selection when only address/postcode fingerprint changes.' );
+wc_checkout_smoke_assert( array() === $manual_pickup_session->selected_city() && 'manual' === (string) ( $manual_pickup_session->city_context()['selected_source'] ?? '' ), 'Same manual destination must remain manual and must not become a canonical DB location.' );
+$manual_pickup_session->save_address_fingerprint( 'manual-before-real-city-change' );
+$manual_pickup_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Другая область',
+		'shipping_city' => 'Другойгород',
+		'shipping_postcode' => '654321',
+		'shipping_address_1' => '',
+		'shipping_method' => array(),
+		'wdc_platform_location_selected_source' => 'manual',
+	)
+);
+wc_checkout_smoke_assert( array() === $manual_pickup_session->raw_pickup_selections(), 'A real manual city change must clear the previous manual pickup selection.' );
+wc_checkout_smoke_assert( array() === $manual_pickup_session->selected_city() && 'manual' === (string) ( $manual_pickup_session->city_context()['selected_source'] ?? '' ), 'Changed manual destination must remain manual instead of becoming a DB canonical location.' );
 $manual_session->save_city_context( $manual_empty_region_context );
 $manual_validation = new CheckoutValidation( $manual_session );
 $manual_region_validation = new ReflectionMethod( $manual_validation, 'validate_manual_region' );

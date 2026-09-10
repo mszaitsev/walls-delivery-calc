@@ -210,7 +210,12 @@ checkout_location_picker_assert( 'fias-alt-ivan' === ( $ajax->payload( 'алта
 checkout_location_picker_assert( 'fias-alt-ivan' === ( $ajax->payload( 'курьинский ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Search tokens match district plus place.' );
 checkout_location_picker_assert( 'fias-alt-ivan' === ( $ajax->payload( 'курьинский район ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'District synonym район matches р-н.' );
 checkout_location_picker_assert( 'Алтайский край' === ( $payload['groups'][0]['region_label'] ?? '' ), 'Region group heading uses mapped region type.' );
-checkout_location_picker_assert( str_contains( (string) ( $payload['groups'][0]['items'][0]['option_label'] ?? '' ), 'с. Ивановка - Курьинский р-н, Алтайский край' ), 'Location option label includes place type and hierarchy.' );
+checkout_location_picker_assert( str_ends_with( (string) ( $payload['groups'][0]['items'][0]['option_label'] ?? '' ), 'с. Ивановка - Курьинский р-н, Алтайский край, 658320' ), 'Location option label includes place type, hierarchy, and postal code at the end.' );
+checkout_location_picker_assert( 'д. Бета - г. Новосибирск, Новосибирская обл.' === $formatter->format_checkout_location_option( $locations[2] ), 'Location option without postal code must preserve its previous label exactly.' );
+$dmitrovka_option = checkout_location_picker_location( array( 'region_name' => 'Московская', 'region_type' => 'обл', 'place_name' => 'Дмитровка', 'place_type' => 'д', 'postal_code' => '141800' ) );
+checkout_location_picker_assert( str_ends_with( $formatter->format_checkout_location_option( $dmitrovka_option ), 'Московская обл., 141800' ), 'Dmitrovka option label must place postal code 141800 after its region context.' );
+$postcode_only_context = checkout_location_picker_location( array( 'region_name' => '', 'region_type' => '', 'place_name' => 'X', 'place_type' => 'д', 'postal_code' => '123456' ) );
+checkout_location_picker_assert( 'д. X, 123456' === $formatter->format_checkout_location_option( $postcode_only_context ), 'Main-only location option must append postal code with a comma and no empty context separator.' );
 checkout_location_picker_assert( 10 === (int) $payload['region_limit'], 'Per-region limit defaults to 10.' );
 $single_region = $ajax->payload( 'тестоград' );
 checkout_location_picker_assert( 1 === count( $single_region['groups'] ) && 30 === (int) $single_region['groups'][0]['shown_count'], 'Single region search shows region_limit times three.' );
