@@ -129,6 +129,10 @@ final class RussianPostOtpravkaApiSettings {
 		return '' !== $this->access_token();
 	}
 
+	public function credentials_complete(): bool {
+		return '' !== $this->access_token() && '' !== $this->basic_key();
+	}
+
 	public function encryption_ready(): bool {
 		return $this->encryption->has_configured_key() || true;
 	}

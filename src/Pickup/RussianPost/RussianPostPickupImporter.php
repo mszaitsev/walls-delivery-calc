@@ -14,7 +14,6 @@ final class RussianPostPickupImporter {
 	public const INIT_HOOK = 'wdc_russian_post_pickup_import_init';
 	public const BATCH_HOOK = 'wdc_russian_post_pickup_import_batch';
 	public const FINALIZE_HOOK = 'wdc_russian_post_pickup_import_finalize';
-	private const LOCK_KEY = 'wdc_russian_post_pickup_import_lock';
 	private const BATCH_SIZE = 500;
 	private const MAX_STORED_ERRORS = 10;
 
@@ -25,7 +24,8 @@ final class RussianPostPickupImporter {
 		private RussianPostPassportPointNormalizer $normalizer,
 		private ?RussianPostPickupImportStateService $state = null,
 		private ?ActionScheduler $scheduler = null,
-		private ?RussianPostPickupLocationResolver $location_resolver = null
+		private ?RussianPostPickupLocationResolver $location_resolver = null,
+		private ?RussianPostPickupImportLock $import_lock = null
 	) {
 	}
 
@@ -77,13 +77,28 @@ final class RussianPostPickupImporter {
 	 * @return array<string,mixed>
 	 */
 	public function run_import_init( string $import_id = '', string $type = 'ALL' ): array {
-		$type = $this->normalize_type( $type );
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		if ( '' === $import_id || $import_id !== (string) ( $state['import_id'] ?? '' ) ) {
-			return array( 'success' => false, 'errors' => array( 'Import init ignored: stale import id.' ) );
+		if ( '' === $import_id || $import_id !== (string) ( $state['import_id'] ?? '' ) || ! in_array( (string) ( $state['status'] ?? '' ), array( 'queued', 'running' ), true ) || ! $this->lock_service()->owns( $import_id ) ) {
+			return array( 'success' => false, 'errors' => array( 'Import init ignored: stale import state or lock owner.' ) );
 		}
 
-		$this->lock();
+		try {
+			return $this->execute_import_init( $import_id, $type );
+		} catch ( \Throwable $exception ) {
+			try {
+				return $this->fail_unexpected_pipeline( $import_id, $type, $exception );
+			} finally {
+				$this->lock_service()->release_terminal( $import_id );
+			}
+		}
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function execute_import_init( string $import_id, string $type ): array {
+		$type = $this->normalize_type( $type );
+		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
 		$staging_table = $this->repository->staging_table( $import_id );
 		$main_table = $this->repository->main_table();
 		$backup_table = $this->repository->backup_table( $import_id );
@@ -206,12 +221,28 @@ final class RussianPostPickupImporter {
 	 * @return array<string,mixed>
 	 */
 	public function run_import_batch( string $import_id = '', string $type = 'ALL', int $payload_offset = 0 ): array {
-		$type = $this->normalize_type( $type );
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		if ( '' === $import_id || $import_id !== (string) ( $state['import_id'] ?? '' ) || ! in_array( (string) ( $state['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
-			return array( 'success' => false, 'errors' => array( 'Import batch ignored: stale import state.' ) );
+		if ( '' === $import_id || $import_id !== (string) ( $state['import_id'] ?? '' ) || ! in_array( (string) ( $state['status'] ?? '' ), array( 'queued', 'running' ), true ) || ! $this->lock_service()->owns( $import_id ) ) {
+			return array( 'success' => false, 'errors' => array( 'Import batch ignored: stale import state or lock owner.' ) );
 		}
 
+		try {
+			return $this->execute_import_batch( $import_id, $type, $payload_offset );
+		} catch ( \Throwable $exception ) {
+			try {
+				return $this->fail_unexpected_pipeline( $import_id, $type, $exception );
+			} finally {
+				$this->lock_service()->release_terminal( $import_id );
+			}
+		}
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function execute_import_batch( string $import_id, string $type, int $payload_offset ): array {
+		$type = $this->normalize_type( $type );
+		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
 		$payload_file = (string) ( $state['payload_file'] ?? '' );
 		$result = $this->state_to_result( $state, $type, $import_id );
 		if ( '' === $payload_file || ! is_file( $payload_file ) ) {
@@ -302,12 +333,28 @@ final class RussianPostPickupImporter {
 	 * @return array<string,mixed>
 	 */
 	public function run_import_finalize( string $import_id = '', string $type = 'ALL' ): array {
-		$type = $this->normalize_type( $type );
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		if ( '' === $import_id || $import_id !== (string) ( $state['import_id'] ?? '' ) ) {
-			return array( 'success' => false, 'errors' => array( 'Import finalize ignored: stale import id.' ) );
+		if ( '' === $import_id || $import_id !== (string) ( $state['import_id'] ?? '' ) || ! in_array( (string) ( $state['status'] ?? '' ), array( 'queued', 'running' ), true ) || ! $this->lock_service()->owns( $import_id ) ) {
+			return array( 'success' => false, 'errors' => array( 'Import finalize ignored: stale import state or lock owner.' ) );
 		}
 
+		try {
+			return $this->execute_import_finalize( $import_id, $type );
+		} catch ( \Throwable $exception ) {
+			try {
+				return $this->fail_unexpected_pipeline( $import_id, $type, $exception );
+			} finally {
+				$this->lock_service()->release_terminal( $import_id );
+			}
+		}
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function execute_import_finalize( string $import_id, string $type ): array {
+		$type = $this->normalize_type( $type );
+		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
 		$result = $this->state_to_result( $state, $type, $import_id );
 		$result['swap_started_at'] = $this->now();
 		$this->state?->update( 'deactivate', $result );
@@ -331,29 +378,32 @@ final class RussianPostPickupImporter {
 		$this->cleanup_state_files( $state, false );
 		$this->settings->save_import_result( $result, true );
 		$this->state?->success( $result );
-		$this->unlock();
+		$this->lock_service()->release( $import_id );
 
 		return $result;
 	}
 
 	public function is_locked(): bool {
 		$this->refresh_state_for_status();
-		if ( function_exists( 'get_transient' ) ) {
-			return false !== get_transient( self::LOCK_KEY );
-		}
 
-		return (bool) get_option( self::LOCK_KEY, false );
+		return $this->lock_service()->is_locked();
 	}
 
 	/**
 	 * @return array<string,mixed>
 	 */
 	public function refresh_state_for_status(): array {
+		$before = $this->state?->current() ?? array();
 		$state = $this->state?->reset_stale_if_needed() ?? array();
-		if ( is_array( $state ) && 'failed' === (string) ( $state['status'] ?? '' ) && str_contains( strtolower( implode( ';', array_map( 'strval', is_array( $state['errors'] ?? null ) ? $state['errors'] : array() ) ) ), 'stale' ) ) {
-			$this->cleanup_state_files( $state );
-			$this->unlock();
-			$state = $this->state?->current() ?? $state;
+		$became_stale = in_array( (string) ( $before['status'] ?? '' ), array( 'queued', 'running' ), true ) && 'failed' === (string) ( $state['status'] ?? '' );
+		if ( $became_stale ) {
+			try {
+				$this->cleanup_state_files( $state );
+			} finally {
+				$this->lock_service()->release_terminal( (string) ( $state['import_id'] ?? '' ) );
+			}
+		} elseif ( in_array( (string) ( $state['status'] ?? '' ), array( 'success', 'failed' ), true ) ) {
+			$this->lock_service()->release_terminal( (string) ( $state['import_id'] ?? '' ) );
 		}
 
 		return is_array( $state ) ? $state : array();
@@ -364,49 +414,39 @@ final class RussianPostPickupImporter {
 	 */
 	public function reset_stale_or_running_import(): array {
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		$this->unlock();
-		$this->cleanup_state_files( $state, true );
+		$job_id = (string) ( $state['import_id'] ?? '' );
+		try {
+			$cancelled = $this->state instanceof RussianPostPickupImportStateService ? $this->state->cancel_by_admin() : array();
+			$this->cleanup_state_files( $state, true );
 
-		return $this->state instanceof RussianPostPickupImportStateService ? $this->state->cancel_by_admin() : array();
+			return $cancelled;
+		} finally {
+			$this->lock_service()->release_terminal( $job_id );
+		}
 	}
 
 	public function queue_background_import( string $type ): bool {
-		if ( $this->is_locked() ) {
-			return false;
-		}
-
-		$current = $this->state?->reset_stale_if_needed() ?? array();
-		if ( in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+		if ( ! $this->can_start_import() ) {
 			return false;
 		}
 
 		$type = $this->normalize_type( $type );
 		$import_id = sha1( (string) microtime( true ) . '|' . $type . '|' . ( function_exists( 'wp_rand' ) ? (string) wp_rand() : (string) random_int( 1, PHP_INT_MAX ) ) );
-		if ( $this->schedule_single( self::INIT_HOOK, array( $import_id, $type ) ) ) {
-			$this->state?->queue( $type, $import_id, array( 'source' => 'api_download' ) );
-			$this->lock();
-			return true;
-		}
+		if ( ! $this->settings->credentials_complete() ) {
+			$result = $this->base_result( $type, $import_id );
+			$result['finished_at'] = $this->now();
+			$result['errors'][] = 'Russian Post Otpravka credentials are incomplete.';
+			$this->settings->save_import_result( $result, false );
+			$this->state?->failed( $result );
 
-		$this->state?->failed(
-			array(
-				'type' => $type,
-				'import_id' => $import_id,
-				'finished_at' => $this->now(),
-				'errors' => array( 'Unable to schedule background import job.' ),
-			)
-		);
-
-		return false;
-	}
-
-	public function queue_background_import_from_zip( string $zip_file, string $type = 'ALL', string $original_upload_name = '' ): bool {
-		if ( $this->is_locked() ) {
 			return false;
 		}
 
-		$current = $this->state?->reset_stale_if_needed() ?? array();
-		if ( in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+		return $this->queue_import( $type, $import_id, array( 'source' => 'api_download' ) );
+	}
+
+	public function queue_background_import_from_zip( string $zip_file, string $type = 'ALL', string $original_upload_name = '' ): bool {
+		if ( ! $this->can_start_import() ) {
 			return false;
 		}
 
@@ -431,45 +471,20 @@ final class RussianPostPickupImporter {
 			return false;
 		}
 
-		if ( $this->schedule_single( self::INIT_HOOK, array( $import_id, $type ) ) ) {
-			$this->state?->queue(
-				$type,
-				$import_id,
-				array(
-					'source' => 'uploaded_zip',
-					'temp_zip_file' => $zip_file,
-					'original_upload_name' => $original_upload_name,
-					'uploaded_file_size' => $file_size,
-				)
-			);
-			$this->lock();
-			return true;
-		}
-
-		$this->state?->failed(
+		return $this->queue_import(
+			$type,
+			$import_id,
 			array(
-				'type' => $type,
-				'import_id' => $import_id,
 				'source' => 'uploaded_zip',
 				'temp_zip_file' => $zip_file,
 				'original_upload_name' => $original_upload_name,
 				'uploaded_file_size' => $file_size,
-				'finished_at' => $this->now(),
-				'errors' => array( 'Unable to schedule background import job.' ),
 			)
 		);
-		$this->delete_temp_file( $zip_file );
-
-		return false;
 	}
 
 	public function queue_background_import_from_payload( string $payload_file, string $type = 'ALL', string $original_upload_name = '' ): bool {
-		if ( $this->is_locked() ) {
-			return false;
-		}
-
-		$current = $this->state?->reset_stale_if_needed() ?? array();
-		if ( in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+		if ( ! $this->can_start_import() ) {
 			return false;
 		}
 
@@ -496,54 +511,78 @@ final class RussianPostPickupImporter {
 			return false;
 		}
 
-		if ( $this->schedule_single( self::INIT_HOOK, array( $import_id, $type ) ) ) {
-			$this->state?->queue(
-				$type,
-				$import_id,
-				array(
-					'source' => 'uploaded_payload',
-					'payload_file' => $payload_file,
-					'payload_size' => $file_size,
-					'original_upload_name' => $original_upload_name,
-					'uploaded_file_size' => $file_size,
-				)
-			);
-			$this->lock();
-			return true;
-		}
-
-		$this->state?->failed(
+		return $this->queue_import(
+			$type,
+			$import_id,
 			array(
-				'type' => $type,
-				'import_id' => $import_id,
 				'source' => 'uploaded_payload',
 				'payload_file' => $payload_file,
 				'payload_size' => $file_size,
 				'original_upload_name' => $original_upload_name,
 				'uploaded_file_size' => $file_size,
-				'finished_at' => $this->now(),
-				'errors' => array( 'Unable to schedule background import job.' ),
 			)
 		);
-		$this->delete_temp_file( $payload_file );
-
-		return false;
 	}
 
-	private function lock(): void {
-		if ( function_exists( 'set_transient' ) ) {
-			set_transient( self::LOCK_KEY, 1, 3 * ( defined( 'HOUR_IN_SECONDS' ) ? HOUR_IN_SECONDS : 3600 ) );
-			return;
+	/** @param array<string,mixed> $context */
+	private function queue_import( string $type, string $import_id, array $context ): bool {
+		if ( ! $this->lock_service()->acquire( $import_id ) ) {
+			return false;
 		}
-		update_option( self::LOCK_KEY, 1, false );
+
+		$queued = false;
+		try {
+			$this->state?->queue( $type, $import_id, $context );
+			if ( ! $this->schedule_single( self::INIT_HOOK, array( $import_id, $type ) ) ) {
+				$this->state?->failed(
+					array_merge(
+						$context,
+						array(
+							'type' => $type,
+							'import_id' => $import_id,
+							'finished_at' => $this->now(),
+							'errors' => array( 'Unable to schedule background import job.' ),
+						)
+					)
+				);
+
+				return false;
+			}
+			$queued = true;
+
+			return true;
+		} catch ( \Throwable $exception ) {
+			try {
+				$this->state?->failed(
+					array_merge(
+						$context,
+						array(
+							'type' => $type,
+							'import_id' => $import_id,
+							'finished_at' => $this->now(),
+							'errors' => array( 'Unable to start Russian Post pickup import: ' . $exception->getMessage() ),
+						)
+					)
+				);
+			} catch ( \Throwable ) {
+			}
+
+			return false;
+		} finally {
+			if ( ! $queued ) {
+				$this->lock_service()->release( $import_id );
+				$this->delete_temp_file( (string) ( $context['temp_zip_file'] ?? $context['payload_file'] ?? '' ) );
+			}
+		}
 	}
 
-	private function unlock(): void {
-		if ( function_exists( 'delete_transient' ) ) {
-			delete_transient( self::LOCK_KEY );
-			return;
+	private function can_start_import(): bool {
+		$current = $this->refresh_state_for_status();
+		if ( in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+			return false;
 		}
-		delete_option( self::LOCK_KEY );
+
+		return ! $this->lock_service()->is_locked();
 	}
 
 	private function schedule_single( string $hook, array $args ): bool {
@@ -565,12 +604,50 @@ final class RussianPostPickupImporter {
 		$result['success'] = false;
 		$result['finished_at'] = $this->now();
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		$this->cleanup_state_files( array_merge( $state, $result ), $cleanup_tables );
-		$this->settings->save_import_result( $result, false );
-		$this->state?->failed( $result );
-		$this->unlock();
+		$job_id = (string) ( $result['import_id'] ?? $state['import_id'] ?? '' );
+		try {
+			try {
+				$this->cleanup_state_files( array_merge( $state, $result ), $cleanup_tables );
+			} catch ( \Throwable $exception ) {
+				$this->add_limited_error( $result['errors'], 'Import cleanup failed: ' . $exception->getMessage() );
+			}
+			try {
+				$this->settings->save_import_result( $result, false );
+			} catch ( \Throwable $exception ) {
+				$this->add_limited_error( $result['errors'], 'Unable to save import result: ' . $exception->getMessage() );
+			}
+			try {
+				$this->state?->failed( $result );
+			} catch ( \Throwable $exception ) {
+				$this->add_limited_error( $result['errors'], 'Unable to save failed import state: ' . $exception->getMessage() );
+			}
+		} finally {
+			$this->lock_service()->release_terminal( $job_id );
+		}
 
 		return $result;
+	}
+
+	/** @return array<string,mixed> */
+	private function fail_unexpected_pipeline( string $import_id, string $type, \Throwable $exception ): array {
+		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
+		$result = array_merge(
+			$this->base_result( $this->normalize_type( $type ), $import_id ),
+			$state
+		);
+		$errors = is_array( $result['errors'] ?? null ) ? $result['errors'] : array();
+		$this->add_limited_error( $errors, 'Unexpected Russian Post pickup import failure: ' . $exception->getMessage() );
+		$result['errors'] = $errors;
+
+		return $this->fail_pipeline( $result );
+	}
+
+	private function lock_service(): RussianPostPickupImportLock {
+		if ( ! $this->import_lock instanceof RussianPostPickupImportLock ) {
+			$this->import_lock = new RussianPostPickupImportLock();
+		}
+
+		return $this->import_lock;
 	}
 
 	private function delete_temp_file( string $temp_file ): void {

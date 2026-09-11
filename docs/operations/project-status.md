@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.1
+Version: 1.0.2
 
-Walls Delivery Calc is in production at version 1.0.1. The production source uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.1 rebuilds location display/search fields for every active country instead of only active Russian rows; the schema baseline remains 1.0.0.
+The current Walls Delivery Calc release source is version 1.0.2. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.2 makes the Russian Post pickup import lock owner-aware, guarantees owned-lock release on terminal lifecycle paths, and safely recovers a legacy lock attached to a terminal failed job; the schema baseline remains 1.0.0.
 
 Current production scope includes:
 

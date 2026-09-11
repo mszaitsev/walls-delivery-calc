@@ -1892,7 +1892,6 @@ final class DeliveryServicesAdminPage {
 			? $this->pickup_importer->queue_background_import_from_zip( $target, $type, $original_name )
 			: $this->pickup_importer->queue_background_import_from_payload( $target, $type, $original_name );
 		if ( ! $queued ) {
-			$target_size = is_file( $target ) ? (int) filesize( $target ) : 0;
 			if ( is_file( $target ) ) {
 				if ( function_exists( 'wp_delete_file' ) ) {
 					wp_delete_file( $target );
@@ -1900,17 +1899,6 @@ final class DeliveryServicesAdminPage {
 					@unlink( $target );
 				}
 			}
-			$this->pickup_import_state?->failed(
-				array(
-					'source' => 'zip' === $extension ? 'uploaded_zip' : 'uploaded_payload',
-					'temp_zip_file' => 'zip' === $extension ? $target : '',
-					'payload_file' => 'zip' === $extension ? '' : $target,
-					'payload_size' => 'zip' === $extension ? 0 : $target_size,
-					'original_upload_name' => $original_name,
-					'uploaded_file_size' => $target_size,
-					'errors' => array( 'Unable to queue pickup import. Another import may be running.' ),
-				)
-			);
 		}
 	}
 

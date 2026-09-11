@@ -1,0 +1,140 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Pickup\RussianPost;
+
+defined( 'ABSPATH' ) || exit;
+
+final class RussianPostPickupImportLock {
+	public const OPTION_NAME = 'wdc_russian_post_pickup_import_lock';
+	private const LEGACY_TRANSIENT_NAME = 'wdc_russian_post_pickup_import_lock';
+	private const TTL_SECONDS = 10800;
+
+	private \wpdb $wpdb;
+
+	public function __construct( ?\wpdb $db = null ) {
+		if ( $db instanceof \wpdb ) {
+			$this->wpdb = $db;
+			return;
+		}
+
+		global $wpdb;
+		$this->wpdb = $wpdb;
+	}
+
+	public function acquire( string $job_id ): bool {
+		$job_id = trim( $job_id );
+		if ( '' === $job_id || $this->has_legacy_lock() ) {
+			return false;
+		}
+
+		$now = time();
+		$value = array(
+			'job_id' => $job_id,
+			'token' => $this->new_token(),
+			'acquired_at' => $now,
+			'expires_at' => $now + self::TTL_SECONDS,
+		);
+		if ( add_option( self::OPTION_NAME, $value, '', 'no' ) ) {
+			return true;
+		}
+
+		$current = get_option( self::OPTION_NAME, array() );
+		if ( ! is_array( $current ) || (int) ( $current['expires_at'] ?? 0 ) > $now ) {
+			return false;
+		}
+
+		return $this->compare_and_delete( $current ) && add_option( self::OPTION_NAME, $value, '', 'no' );
+	}
+
+	public function is_locked(): bool {
+		if ( $this->has_legacy_lock() ) {
+			return true;
+		}
+
+		$current = get_option( self::OPTION_NAME, null );
+		if ( null !== $current && ! is_array( $current ) ) {
+			return true;
+		}
+
+		return is_array( $current ) && '' !== (string) ( $current['job_id'] ?? '' ) && (int) ( $current['expires_at'] ?? 0 ) > time();
+	}
+
+	public function owns( string $job_id ): bool {
+		$current = get_option( self::OPTION_NAME, null );
+		if ( is_array( $current ) ) {
+			return (int) ( $current['expires_at'] ?? 0 ) > time() && hash_equals( (string) ( $current['job_id'] ?? '' ), $job_id );
+		}
+
+		return null !== $current || $this->has_legacy_lock();
+	}
+
+	public function release( string $job_id ): void {
+		$current = get_option( self::OPTION_NAME, array() );
+		if ( is_array( $current ) && hash_equals( (string) ( $current['job_id'] ?? '' ), $job_id ) ) {
+			$this->compare_and_delete( $current );
+		}
+	}
+
+	public function release_terminal( string $job_id ): void {
+		$this->release( $job_id );
+		if ( $this->has_legacy_lock() ) {
+			delete_transient( self::LEGACY_TRANSIENT_NAME );
+		}
+		$current = get_option( self::OPTION_NAME, null );
+		if ( null !== $current && ! is_array( $current ) ) {
+			$this->compare_and_delete( $current );
+		}
+	}
+
+	private function has_legacy_lock(): bool {
+		return function_exists( 'get_transient' ) && false !== get_transient( self::LEGACY_TRANSIENT_NAME );
+	}
+
+	private function compare_and_delete( mixed $expected ): bool {
+		if ( ! isset( $this->wpdb->options ) || ! method_exists( $this->wpdb, 'prepare' ) || ! method_exists( $this->wpdb, 'query' ) ) {
+			if ( get_option( self::OPTION_NAME, array() ) !== $expected ) {
+				return false;
+			}
+
+			return delete_option( self::OPTION_NAME );
+		}
+
+		$serialized = function_exists( 'maybe_serialize' ) ? maybe_serialize( $expected ) : serialize( $expected );
+		$this->wpdb->last_error = '';
+		$sql = $this->wpdb->prepare(
+			"DELETE FROM {$this->wpdb->options} WHERE option_name = %s AND option_value = %s LIMIT 1",
+			self::OPTION_NAME,
+			$serialized
+		);
+		$result = $this->wpdb->query( $sql );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Russian Post pickup import lock compare-delete failed.' );
+		}
+		if ( 1 !== (int) $result ) {
+			return false;
+		}
+		$this->clear_option_cache();
+
+		return true;
+	}
+
+	private function clear_option_cache(): void {
+		if ( function_exists( 'wp_cache_delete' ) ) {
+			wp_cache_delete( self::OPTION_NAME, 'options' );
+			wp_cache_delete( 'notoptions', 'options' );
+			wp_cache_delete( 'alloptions', 'options' );
+		}
+	}
+
+	private function new_token(): string {
+		if ( function_exists( 'wp_generate_uuid4' ) ) {
+			return wp_generate_uuid4();
+		}
+		try {
+			return bin2hex( random_bytes( 16 ) );
+		} catch ( \Throwable ) {
+			return sha1( microtime( true ) . '|' . (string) random_int( 1, PHP_INT_MAX ) );
+		}
+	}
+}
