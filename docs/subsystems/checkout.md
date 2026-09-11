@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 1.0.4
+Version: 1.0.5
 
 The WooCommerce checkout boundary maps the current package and canonical destination into a `QuoteRequest`, runs enabled carriers, applies rules and delivery-service post-processing, then publishes only fresh WDC rates. Package mapping is read-only: city selection/profile reconciliation own session mutations, and an active canonical location row is authoritative for identity and coordinates.
 

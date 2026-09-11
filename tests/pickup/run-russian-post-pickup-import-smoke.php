@@ -266,6 +266,7 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportLock;
@@ -274,6 +275,86 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupLocationResolver;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostWorkTimeFormatter;
+
+class RpControlledExecutionBudget extends BackgroundExecutionBudget {
+	/** @var callable|null */
+	private $after_mark;
+
+	/** @var callable|null */
+	private $before_continue;
+
+	public function __construct( int $max_units, ?callable $after_mark = null, ?callable $before_continue = null ) {
+		$this->after_mark = $after_mark;
+		$this->before_continue = $before_continue;
+		parent::__construct( 999.0, $max_units, null );
+	}
+
+	public function can_continue(): bool {
+		if ( is_callable( $this->before_continue ) ) {
+			( $this->before_continue )( $this->units_processed() );
+		}
+
+		return parent::can_continue();
+	}
+
+	public function mark_unit_processed(): void {
+		parent::mark_unit_processed();
+		if ( is_callable( $this->after_mark ) ) {
+			( $this->after_mark )( $this->units_processed() );
+		}
+	}
+}
+
+/** @param array<string,mixed> $base_item */
+function rp_worker_payload( array $base_item, int $count, string $prefix ): string {
+	$items = array();
+	for ( $i = 0; $i < $count; ++$i ) {
+		$item = $base_item;
+		$item['address'] = array( 'index' => (string) ( 100000 + $i ), 'region' => 'НСО', 'place' => 'Новосибирск', 'street' => $prefix, 'house' => (string) $i );
+		$item['addressFias'] = array( 'ads' => 'Новосибирск, ' . $prefix . ', ' . $i, 'locationGarCode' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' );
+		$item['latitude'] = 55.0 + ( $i % 100 ) / 1000;
+		$item['longitude'] = 82.0 + ( $i % 100 ) / 1000;
+		$items[] = (string) json_encode( $item, JSON_UNESCAPED_UNICODE );
+	}
+
+	return '{"passportElements":[' . implode( ',', $items ) . ']}';
+}
+
+/** @param array<string,mixed> $base_item @return array{payload:string,staging:string} */
+function rp_prepare_worker_job( RussianPostPickupPointRepository $repository, RussianPostPickupImportStateService $state, RussianPostPickupImportLock $lock, array $base_item, int $count, string $job_id ): array {
+	delete_option( RussianPostPickupImportLock::OPTION_NAME );
+	delete_transient( 'wdc_russian_post_pickup_import_lock' );
+	$payload = tempnam( sys_get_temp_dir(), 'wdc-rp-slice-' );
+	if ( false === $payload ) {
+		throw new RuntimeException( 'Unable to create worker-slice fixture payload.' );
+	}
+	file_put_contents( $payload, rp_worker_payload( $base_item, $count, $job_id ) );
+	$staging = $repository->staging_table( $job_id );
+	$repository->create_schema_if_needed( $staging );
+	update_option(
+		RussianPostPickupImportStateService::OPTION_NAME,
+		array_merge(
+			$state->defaults(),
+			array(
+				'status' => 'running',
+				'stage' => 'parse',
+				'import_id' => $job_id,
+				'type' => 'ALL',
+				'started_at' => current_time( 'mysql' ),
+				'last_activity_at' => current_time( 'mysql' ),
+				'payload_file' => $payload,
+				'payload_size' => filesize( $payload ),
+				'staging_table' => $staging,
+				'main_table' => $repository->main_table(),
+				'backup_table' => $repository->backup_table( $job_id ),
+			)
+		),
+		false
+	);
+	rp_pickup_assert( $lock->acquire( $job_id ), 'Worker fixture must acquire its owner lock.' );
+
+	return array( 'payload' => $payload, 'staging' => $staging );
+}
 
 $GLOBALS['wpdb'] = new wpdb();
 $repo = new RussianPostPickupPointRepository( $GLOBALS['wpdb'] );
@@ -526,6 +607,136 @@ rp_pickup_assert( '' !== (string) $state['swap_started_at'] && '' !== (string) $
 rp_pickup_assert( in_array( $main, $GLOBALS['wpdb']->analyzed_tables, true ), 'Successful finalize must analyze main table.' );
 rp_pickup_assert( 501 === (int) $GLOBALS['wpdb']->tables[ $main ][0]['location_id'], 'Final imported Russian Post pickup rows must keep resolved location_id after staging swap.' );
 rp_pickup_assert( ! $request_four_importer->is_locked(), 'Successful terminal finalize must release the owner lock.' );
+
+// One Action Scheduler callback must process multiple durable 500-object units
+// and schedule only one continuation when its unit budget is exhausted.
+$slice_lock = new RussianPostPickupImportLock( $GLOBALS['wpdb'] );
+rp_prepare_worker_job( $repo, $state_service, $slice_lock, $base_item, 1601, 'slice-unit-budget' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$slice_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, $slice_lock, static fn(): BackgroundExecutionBudget => new RpControlledExecutionBudget( 3 ) );
+$slice_result = $slice_importer->run_import_batch( 'slice-unit-budget', 'ALL', 0 );
+$slice_state = $state_service->current();
+$slice_continuations = array_values( array_filter( $GLOBALS['wdc_scheduled_events'], static fn( array $event ): bool => RussianPostPickupImporter::BATCH_HOOK === $event['hook'] ) );
+rp_pickup_assert( ! empty( $slice_result['success'] ) && 1500 === (int) $slice_state['objects_processed'] && 3 === (int) $slice_state['worker_slice_batches'] && 1500 === (int) $slice_state['worker_slice_objects'], 'One worker callback must process three atomic batches and more than 500 objects.' );
+rp_pickup_assert( 'unit_budget' === (string) $slice_state['worker_slice_stop_reason'] && 1 === count( $slice_continuations ) && $slice_importer->is_locked(), 'Unit-budget stop must keep the owner lock and schedule exactly one continuation.' );
+echo sprintf( "Russian Post worker slice fixture: batches=%d objects=%d duration_ms=%d stop_reason=%s.\n", (int) $slice_state['worker_slice_batches'], (int) $slice_state['worker_slice_objects'], (int) $slice_state['worker_slice_duration_ms'], (string) $slice_state['worker_slice_stop_reason'] );
+$slice_importer->reset_stale_or_running_import();
+
+// The same worker loop must stop deterministically on elapsed time after three units.
+rp_prepare_worker_job( $repo, $state_service, $slice_lock, $base_item, 1601, 'slice-time-budget' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$clock_values = array( 0.0, 0.0, 5.0, 10.0, 18.0 );
+$clock_last = 18.0;
+$time_budget_factory = static function () use ( &$clock_values, &$clock_last ): BackgroundExecutionBudget {
+	return new BackgroundExecutionBudget(
+		18.0,
+		15,
+		null,
+		static function () use ( &$clock_values, &$clock_last ): float {
+			if ( array() !== $clock_values ) {
+				$clock_last = (float) array_shift( $clock_values );
+			}
+			return $clock_last;
+		}
+	);
+};
+$time_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, $slice_lock, $time_budget_factory );
+$time_result = $time_importer->run_import_batch( 'slice-time-budget', 'ALL', 0 );
+$time_state = $state_service->current();
+rp_pickup_assert( ! empty( $time_result['success'] ) && 3 === (int) $time_state['worker_slice_batches'] && 'time_budget' === (string) $time_state['worker_slice_stop_reason'] && 1 === count( $GLOBALS['wdc_scheduled_events'] ), 'Time budget must stop after the deterministic third batch and schedule one continuation.' );
+$time_importer->reset_stale_or_running_import();
+
+// EOF inside a slice schedules finalize exactly once and no batch continuation.
+rp_prepare_worker_job( $repo, $state_service, $slice_lock, $base_item, 1001, 'slice-eof' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$eof_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, $slice_lock, static fn(): BackgroundExecutionBudget => new RpControlledExecutionBudget( 15 ) );
+$eof_result = $eof_importer->run_import_batch( 'slice-eof', 'ALL', 0 );
+$eof_state = $state_service->current();
+rp_pickup_assert( ! empty( $eof_result['success'] ) && 1001 === (int) $eof_state['objects_processed'] && 3 === (int) $eof_state['worker_slice_batches'] && 'eof' === (string) $eof_state['worker_slice_stop_reason'], 'EOF must be reached within one multi-batch callback.' );
+rp_pickup_assert( 1 === count( $GLOBALS['wdc_scheduled_events'] ) && RussianPostPickupImporter::FINALIZE_HOOK === $GLOBALS['wdc_scheduled_events'][0]['hook'], 'EOF must schedule finalize exactly once without a batch continuation.' );
+$eof_importer->reset_stale_or_running_import();
+
+// Cancellation and lock loss between units must prevent the next batch.
+rp_prepare_worker_job( $repo, $state_service, $slice_lock, $base_item, 1001, 'slice-cancel' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$cancel_worker = null;
+$cancel_budget = static function () use ( &$cancel_worker ): BackgroundExecutionBudget {
+	return new RpControlledExecutionBudget( 15, static function ( int $units ) use ( &$cancel_worker ): void {
+		if ( 1 === $units && $cancel_worker instanceof RussianPostPickupImporter ) {
+			$cancel_worker->reset_stale_or_running_import();
+		}
+	} );
+};
+$cancel_worker = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, $slice_lock, $cancel_budget );
+$cancel_result = $cancel_worker->run_import_batch( 'slice-cancel', 'ALL', 0 );
+$cancel_state = $state_service->current();
+rp_pickup_assert( empty( $cancel_result['success'] ) && ! empty( $cancel_result['cancelled'] ) && 500 === (int) $cancel_state['objects_processed'] && 'cancelled' === (string) $cancel_state['worker_slice_stop_reason'] && array() === $GLOBALS['wdc_scheduled_events'], 'Admin cancellation after batch one must prevent batch two and schedule nothing.' );
+
+rp_prepare_worker_job( $repo, $state_service, $slice_lock, $base_item, 1001, 'slice-lock-loss' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$lock_loss_budget = static fn(): BackgroundExecutionBudget => new RpControlledExecutionBudget( 15, static function ( int $units ): void {
+	if ( 1 === $units ) {
+		delete_option( RussianPostPickupImportLock::OPTION_NAME );
+	}
+} );
+$lock_loss_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, $slice_lock, $lock_loss_budget );
+$lock_loss_result = $lock_loss_importer->run_import_batch( 'slice-lock-loss', 'ALL', 0 );
+$lock_loss_state = $state_service->current();
+rp_pickup_assert( empty( $lock_loss_result['success'] ) && 'failed' === (string) $lock_loss_state['status'] && 500 === (int) $lock_loss_state['objects_processed'] && 'lock_lost' === (string) $lock_loss_state['worker_slice_stop_reason'] && array() === $GLOBALS['wdc_scheduled_events'], 'Owner lock loss after batch one must fail explicitly before batch two.' );
+
+$owner_race_fixture = rp_prepare_worker_job( $repo, $state_service, $slice_lock, $base_item, 1001, 'slice-old-owner' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$new_owner_state = array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'parse', 'import_id' => 'slice-new-owner', 'last_activity_at' => current_time( 'mysql' ) ) );
+$new_owner_lock = array( 'job_id' => 'slice-new-owner', 'token' => 'slice-new-token', 'acquired_at' => time(), 'expires_at' => time() + 10800 );
+$owner_race_budget = static fn(): BackgroundExecutionBudget => new RpControlledExecutionBudget( 15, static function ( int $units ) use ( $new_owner_state, $new_owner_lock ): void {
+	if ( 1 === $units ) {
+		update_option( RussianPostPickupImportStateService::OPTION_NAME, $new_owner_state, false );
+		update_option( RussianPostPickupImportLock::OPTION_NAME, $new_owner_lock, false );
+	}
+} );
+$owner_race_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, $slice_lock, $owner_race_budget );
+$owner_race_thrown = false;
+try {
+	$owner_race_importer->run_import_batch( 'slice-old-owner', 'ALL', 0 );
+} catch ( RuntimeException $exception ) {
+	$owner_race_thrown = str_contains( $exception->getMessage(), 'lost state ownership' );
+}
+rp_pickup_assert( $owner_race_thrown && $new_owner_state === get_option( RussianPostPickupImportStateService::OPTION_NAME, array() ) && $new_owner_lock === get_option( RussianPostPickupImportLock::OPTION_NAME, array() ) && array() === $GLOBALS['wdc_scheduled_events'], 'A stale worker must fail its callback without mutating or unlocking a new active owner.' );
+wp_delete_file( (string) $owner_race_fixture['payload'] );
+unset( $GLOBALS['wpdb']->tables[ $owner_race_fixture['staging'] ] );
+delete_option( RussianPostPickupImportLock::OPTION_NAME );
+
+// A crash before unit three must retain the checkpoint written after unit two.
+rp_prepare_worker_job( $repo, $state_service, $slice_lock, $base_item, 1601, 'slice-crash' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$crash_budget = static fn(): BackgroundExecutionBudget => new RpControlledExecutionBudget( 15, null, static function ( int $units ): void {
+	if ( 2 === $units ) {
+		throw new RuntimeException( 'Injected crash before batch three.' );
+	}
+} );
+$crash_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, $slice_lock, $crash_budget );
+$crash_result = $crash_importer->run_import_batch( 'slice-crash', 'ALL', 0 );
+$crash_state = $state_service->current();
+rp_pickup_assert( empty( $crash_result['success'] ) && 'failed' === (string) $crash_state['status'] && 1000 === (int) $crash_state['objects_processed'] && (int) $crash_state['payload_offset'] > 0 && 'error' === (string) $crash_state['worker_slice_stop_reason'], 'Failure before batch three must preserve the durable checkpoint after batch two.' );
+
+// Read-only status polling between batches must preserve the active owner and allow the slice to continue.
+rp_prepare_worker_job( $repo, $state_service, $slice_lock, $base_item, 1201, 'slice-status-poll' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$poll_worker = null;
+$poll_budget = static function () use ( &$poll_worker ): BackgroundExecutionBudget {
+	return new RpControlledExecutionBudget( 2, static function ( int $units ) use ( &$poll_worker ): void {
+		if ( 1 === $units && $poll_worker instanceof RussianPostPickupImporter ) {
+			$polled = $poll_worker->refresh_state_for_status();
+			rp_pickup_assert( 'running' === (string) $polled['status'] && $poll_worker->is_locked(), 'Status poll inside a slice must preserve its owner lock.' );
+		}
+	} );
+};
+$poll_worker = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, $slice_lock, $poll_budget );
+$poll_result = $poll_worker->run_import_batch( 'slice-status-poll', 'ALL', 0 );
+$poll_state = $state_service->current();
+rp_pickup_assert( ! empty( $poll_result['success'] ) && 1000 === (int) $poll_state['objects_processed'] && $poll_worker->is_locked() && 1 === count( $GLOBALS['wdc_scheduled_events'] ), 'Status polling must not interrupt subsequent internal batches or duplicate continuation.' );
+$poll_worker->reset_stale_or_running_import();
+$GLOBALS['wdc_scheduled_events'] = array();
 
 $guard_payload = tempnam( sys_get_temp_dir(), 'wdc-rp-guard-' );
 file_put_contents( $guard_payload, '{"passportElements":[]}' );

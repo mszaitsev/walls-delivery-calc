@@ -97,12 +97,12 @@ final class RussianPostPickupImportStateService {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
+		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'worker_slice_duration_ms', 'worker_slice_batches', 'worker_slice_objects', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'source', 'original_upload_name', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'download_url', 'download_started_at', 'download_response_message', 'download_error', 'download_backend', 'first_backend_error', 'curl_error', 'extract_started_at', 'extract_zip_file', 'extract_backend', 'extract_error', 'extracted_payload_file', 'extracted_payload_entry_name' ) as $key ) {
+		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'source', 'original_upload_name', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'worker_slice_started_at', 'worker_slice_stop_reason', 'download_url', 'download_started_at', 'download_response_message', 'download_error', 'download_backend', 'first_backend_error', 'curl_error', 'extract_started_at', 'extract_zip_file', 'extract_backend', 'extract_error', 'extracted_payload_file', 'extracted_payload_entry_name' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = (string) $counters[ $key ];
 			}
@@ -168,6 +168,25 @@ final class RussianPostPickupImportStateService {
 		$diagnostics = is_array( $state['guard_diagnostics'] ?? null ) ? $state['guard_diagnostics'] : array();
 		$diagnostics[] = $diagnostic;
 		$state['guard_diagnostics'] = array_slice( $diagnostics, -self::MAX_GUARD_DIAGNOSTICS );
+		$this->save( $state );
+
+		return $state;
+	}
+
+	/** @param array<string,mixed> $metrics @return array<string,mixed> */
+	public function record_worker_slice_metrics( array $metrics ): array {
+		$state = $this->current();
+		foreach ( array( 'worker_slice_duration_ms', 'worker_slice_batches', 'worker_slice_objects' ) as $key ) {
+			if ( array_key_exists( $key, $metrics ) ) {
+				$state[ $key ] = max( 0, (int) $metrics[ $key ] );
+			}
+		}
+		foreach ( array( 'worker_slice_started_at', 'worker_slice_stop_reason' ) as $key ) {
+			if ( array_key_exists( $key, $metrics ) ) {
+				$state[ $key ] = (string) $metrics[ $key ];
+			}
+		}
+		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );
 		$this->save( $state );
 
 		return $state;
@@ -258,6 +277,11 @@ final class RussianPostPickupImportStateService {
 			'current_batch_size' => 0,
 			'last_batch_duration_ms' => 0,
 			'max_batch_duration_ms' => 0,
+			'worker_slice_started_at' => '',
+			'worker_slice_duration_ms' => 0,
+			'worker_slice_batches' => 0,
+			'worker_slice_objects' => 0,
+			'worker_slice_stop_reason' => '',
 			'parser_completed' => false,
 			'downloaded' => 0,
 			'parsed' => 0,
@@ -292,7 +316,7 @@ final class RussianPostPickupImportStateService {
 		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped', 'location_matched_fias', 'location_matched_postal_code', 'location_matched_region_city', 'location_match_no_match', 'location_match_ambiguous' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
-		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
+		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'worker_slice_duration_ms', 'worker_slice_batches', 'worker_slice_objects', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
 		$state['status'] = $status;
@@ -310,6 +334,8 @@ final class RussianPostPickupImportStateService {
 		$state['backup_table'] = (string) ( $result['backup_table'] ?? $state['backup_table'] ?? '' );
 		$state['swap_started_at'] = (string) ( $result['swap_started_at'] ?? $state['swap_started_at'] ?? '' );
 		$state['swap_finished_at'] = (string) ( $result['swap_finished_at'] ?? $state['swap_finished_at'] ?? '' );
+		$state['worker_slice_started_at'] = (string) ( $result['worker_slice_started_at'] ?? $state['worker_slice_started_at'] ?? '' );
+		$state['worker_slice_stop_reason'] = (string) ( $result['worker_slice_stop_reason'] ?? $state['worker_slice_stop_reason'] ?? '' );
 		$state['download_url'] = (string) ( $result['download_url'] ?? $state['download_url'] ?? '' );
 		$state['download_started_at'] = (string) ( $result['download_started_at'] ?? $state['download_started_at'] ?? '' );
 		$state['download_response_message'] = (string) ( $result['download_response_message'] ?? $state['download_response_message'] ?? '' );

@@ -6,7 +6,7 @@ Branch: `fix/russian-post-background-pipeline`
 
 Baseline HEAD: `be221f5b8872e9ba56bc2e7a56af872140a4b5c3`
 
-Plugin version: `1.0.4`; schema version: `1.0.0`
+Plugin version: `1.0.5`; schema version: `1.0.0`
 
 This is an architecture report. It does not change production code, schedules, schemas, versions, or server configuration.
 
@@ -387,7 +387,7 @@ Integration/production-like:
 
 1. **Measurement only:** add bounded state diagnostics for unit duration, slice duration, units/slice, memory peak, continuation reason, and action count. Confirm p50/p95 on production-like data.
 2. **Shared primitive:** introduce and unit-test the small execution-budget helper; no scheduler abstraction.
-3. **Russian Post pilot:** wrap existing batches, start with a conservative 15-unit/18-second cap, retain current ownership and all 1.0.4 guards, validate on the 184k snapshot.
+3. **Russian Post pilot — implemented in 1.0.5:** the existing 500-object atomic batch is wrapped by a 15-unit/18-second worker slice with an 80% finite-memory-limit guard. Checkpoints, activity timestamps, and owner renewals remain per batch; the callback schedules exactly one continuation on budget exhaustion or one finalize action on EOF. Production tuning should record slice duration, batches, objects, and stop reason on the 184k snapshot.
 4. **Ozon:** add remote-aware slicing; preserve explicit retry delay and salvage cap; measure quota/load.
 5. **Yandex:** first strengthen/prove outer ownership, then slice local stages; leave download isolated.
 6. **Operational option:** only after application changes, evaluate one Action Scheduler WP-CLI runner as an optional accelerator for the whole WooCommerce queue. It must not be a WDC installation requirement.

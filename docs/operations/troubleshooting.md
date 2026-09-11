@@ -1,12 +1,12 @@
 # Troubleshooting
 
-Version: 1.0.4
+Version: 1.0.5
 
 Start with the safe status/diagnostic panel owned by the affected subsystem. Never enable raw payload logging or expose carrier credentials, tokens, cookies, full addresses, phone numbers, email, or payment data to diagnose a failure.
 
 ## Installation and migrations
 
-On activation, verify the plugin reports version 1.0.4 and that the unchanged schema baseline `wdc_db_version` remains `1.0.0`. A fresh install runs only `database/migrations/0001_initial_schema.php`. If activation reports a migration failure, inspect the WordPress database error and table privileges; do not edit migration options manually or replay deleted 0.x migration files.
+On activation, verify the plugin reports version 1.0.5 and that the unchanged schema baseline `wdc_db_version` remains `1.0.0`. A fresh install runs only `database/migrations/0001_initial_schema.php`. If activation reports a migration failure, inspect the WordPress database error and table privileges; do not edit migration options manually or replay deleted 0.x migration files.
 
 The initial migration is idempotent for an already-correct development database and never drops/truncates business tables. Retired pre-1.0 tables that already exist are inert and may be removed separately only after an operator backup and explicit decision.
 

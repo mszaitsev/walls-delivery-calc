@@ -1,6 +1,6 @@
 # Technical Debt
 
-Version: 1.0.4
+Version: 1.0.5
 
 Active items only.
 
