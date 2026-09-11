@@ -1,6 +1,6 @@
 # Cron And Background Jobs
 
-Version: 1.0.9
+Version: 1.0.10
 
 WDC business clock times use `Asia/Novosibirsk`; scheduler APIs receive Unix timestamps. Owners register callbacks during plugin bootstrap and defer Action Scheduler inspection/creation until `action_scheduler_init`. Registration after that hook ensures the schedule immediately. Expected pre-initialization and disabled/no-work states are silent.
 
@@ -21,7 +21,9 @@ Manual Russian Post cancellation makes the persisted terminal state authoritativ
 
 Since 1.0.7, `init`, `batch`, and `finalize` use one foreign-callback policy: a callback whose immutable argument `import_id` differs from the persisted active job fails without recording diagnostics into, cleaning, failing, renewing, scheduling for, or unlocking that job. Unexpected-failure handling rechecks state ownership before building a result and before cleanup, and never lets mutable current state replace the callback owner ID.
 
-Version 1.0.9 keeps the 1.0.8 profiler and reduces Russian Post batch database round-trips with request-local exact-FIAS prefetch and bounded 100-row staging inserts. Matching priority, ambiguity handling, the 500-row atomic batch, 18-second/15-unit worker slice, scheduling, lease, and retry contracts are unchanged.
+Version 1.0.10 retains the accepted 1.0.9 exact-FIAS prefetch and bounded 100-row staging inserts. The temporary batch profiler and lock forensic journal have been removed; operational state keeps only lifecycle, progress, guard, memory, and worker-slice fields.
+
+The Russian Post weekly start is configured by ISO weekday (`1` Monday through `7` Sunday) and a quarter-hour `HH:MM` value. Its only business timezone is `Asia/Novosibirsk`. A fresh install defaults to Monday 09:00. An upgraded installation with weekly scheduling enabled but without the new explicit fields keeps its existing WP-Cron timestamp and derives the displayed weekday/time from that event until the administrator explicitly saves the form. Changing enabled state, weekday, or time synchronizes the event immediately; bootstrap `sync_schedule()` remains a duplicate-free self-healing check.
 
 Ozon browser polling reads local progress only and never executes background work. Checkout reads published local pickup snapshots and never initiates imports.
 

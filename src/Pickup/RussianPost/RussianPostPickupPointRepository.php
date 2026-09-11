@@ -66,7 +66,7 @@ final class RussianPostPickupPointRepository {
 	 * @param array<int,array<string,mixed>> $rows
 	 * @return array{inserted:int,updated:int,skipped:int}
 	 */
-	public function insert_batch( array $rows, string $table = '', ?RussianPostImportBatchProfiler $profiler = null ): array {
+	public function insert_batch( array $rows, string $table = '' ): array {
 		$table = '' !== $table ? $this->sanitize_table_name( $table ) : $this->main_table();
 		$stats = array( 'inserted' => 0, 'updated' => 0, 'skipped' => 0 );
 		$now = function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
@@ -76,9 +76,7 @@ final class RussianPostPickupPointRepository {
 				++$stats['skipped'];
 				continue;
 			}
-			$row = $profiler instanceof RussianPostImportBatchProfiler
-				? $profiler->measure( 'staging_prepare_ms', fn(): array => $this->normalize_row( $row, $now ) )
-				: $this->normalize_row( $row, $now );
+			$row = $this->normalize_row( $row, $now );
 			if ( '' === (string) $row['point_code'] || '' === (string) $row['address'] || null === $row['latitude'] || null === $row['longitude'] || '' === (string) $row['source_hash'] ) {
 				++$stats['skipped'];
 				continue;
@@ -87,10 +85,7 @@ final class RussianPostPickupPointRepository {
 		}
 
 		foreach ( array_chunk( $prepared_rows, self::INSERT_CHUNK_SIZE ) as $chunk ) {
-			$profiler?->increment_query( 'staging_write_queries' );
-			$inserted = $profiler instanceof RussianPostImportBatchProfiler
-				? $profiler->measure( 'staging_write_ms', fn(): int|false => $this->insert_rows( $table, $chunk ) )
-				: $this->insert_rows( $table, $chunk );
+			$inserted = $this->insert_rows( $table, $chunk );
 			if ( false !== $inserted ) {
 				$stats['inserted'] += max( 0, min( count( $chunk ), $inserted ) );
 				$stats['skipped'] += max( 0, count( $chunk ) - $inserted );
@@ -99,10 +94,7 @@ final class RussianPostPickupPointRepository {
 
 			// Preserve the former per-row failure semantics for an exceptional failed statement.
 			foreach ( $chunk as $row ) {
-				$profiler?->increment_query( 'staging_write_queries' );
-				$row_inserted = $profiler instanceof RussianPostImportBatchProfiler
-					? $profiler->measure( 'staging_write_ms', fn(): bool => (bool) $this->wpdb->insert( $table, $row, $this->formats( $row ) ) )
-					: (bool) $this->wpdb->insert( $table, $row, $this->formats( $row ) );
+				$row_inserted = (bool) $this->wpdb->insert( $table, $row, $this->formats( $row ) );
 				++$stats[ $row_inserted ? 'inserted' : 'skipped' ];
 			}
 		}

@@ -6,9 +6,9 @@ Branch: `fix/russian-post-background-pipeline`
 
 Baseline HEAD: `be221f5b8872e9ba56bc2e7a56af872140a4b5c3`
 
-Plugin version: `1.0.9`; schema version: `1.0.0`
+Plugin version: `1.0.10`; schema version: `1.0.0`
 
-The Russian Post pilot retains the 1.0.8 production profiling layer and, in 1.0.9, batches exact FIAS lookups and staging inserts. Ozon and Yandex remain outside this implementation phase.
+The Russian Post pilot batches exact FIAS lookups and staging inserts. Production acceptance of 1.0.9 completed successfully; the temporary 1.0.8 profiler was removed in 1.0.10. Ozon and Yandex remain outside this implementation phase.
 
 This is an architecture report. It does not change production code, schedules, schemas, versions, or server configuration.
 

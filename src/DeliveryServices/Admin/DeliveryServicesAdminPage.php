@@ -85,6 +85,7 @@ use WallsShop\WDC\Packaging\PackagingApplicationResult;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupSchedule;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
@@ -1173,6 +1174,9 @@ final class DeliveryServicesAdminPage {
 			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import' ), true ) && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
 				$this->otpravka_settings->save_from_admin( $_POST );
 				$this->save_russian_post_pickup_type_settings( $id );
+				if ( 'save_russian_post_pickup' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
+					$this->pickup_importer->sync_schedule();
+				}
 				if ( 'run_russian_post_pickup_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
 					$this->pickup_importer->queue_background_import( $this->otpravka_settings->unload_type() );
 				}
@@ -4492,9 +4496,14 @@ final class DeliveryServicesAdminPage {
 		$total = $this->russian_post_pickup_points instanceof RussianPostPickupPointRepository ? $this->russian_post_pickup_points->count_active() : 0;
 		$point_types = $this->pickup_point_type_settings instanceof RussianPostPickupPointTypeSettings ? $this->pickup_point_type_settings->all() : RussianPostPickupPointTypeSettings::defaults();
 		$locked = $this->pickup_importer instanceof RussianPostPickupImporter && $this->pickup_importer->is_locked();
-		$lock_audit = $this->pickup_importer instanceof RussianPostPickupImporter ? $this->pickup_importer->lock_audit_events() : array();
 		$schedule_enabled = ! empty( $values[ RussianPostOtpravkaApiSettings::PICKUP_SCHEDULE_ENABLED_KEY ] );
 		$next_schedule = $schedule_enabled && function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( RussianPostPickupImporter::SCHEDULE_HOOK ) : false;
+		$effective_schedule = $this->pickup_importer instanceof RussianPostPickupImporter
+			? $this->pickup_importer->effective_schedule()
+			: array( 'weekday' => 1, 'time' => '09:00', 'explicit' => false );
+		$schedule_time_control = in_array( (string) $effective_schedule['time'], RussianPostPickupSchedule::time_options(), true )
+			? (string) $effective_schedule['time']
+			: RussianPostPickupSchedule::DEFAULT_TIME;
 		?>
 		<form method="post" enctype="multipart/form-data" style="max-width: 960px; margin-top:16px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -4524,6 +4533,16 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row">Статус импорта</th><td><div class="wdc-rp-pickup-import-status" data-wdc-rp-pickup-import-status data-wdc-rp-status="<?php echo esc_attr( (string) ( $state['status'] ?? 'idle' ) ); ?>"><details><summary data-wdc-rp-status-summary><?php echo esc_html( $this->pickup_import_status_summary( $state ) ); ?> <span class="spinner <?php echo $is_busy ? 'is-active' : ''; ?>" data-wdc-rp-spinner></span></summary><table class="widefat striped" style="max-width: 760px; margin-top: 8px;"><tbody><?php foreach ( $this->pickup_import_state_rows() as $key => $label ) : ?><tr><th scope="row"><?php echo esc_html( $label ); ?></th><td data-wdc-rp-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $this->pickup_import_state_value( $state, $key ) ); ?></td></tr><?php endforeach; ?></tbody></table><p><button type="button" class="button" data-wdc-rp-refresh-status>Обновить статус</button></p></details></div></td></tr>
 				<?php $this->select_row( 'russian_post_pickup_unload_type', 'Тип выгрузки', (string) ( $values[ RussianPostOtpravkaApiSettings::PICKUP_UNLOAD_TYPE_KEY ] ?? 'ALL' ), array( 'ALL', 'OPS', 'PVZ', 'APS' ) ); ?>
 				<?php $this->checkbox_row( 'russian_post_pickup_schedule_enabled', 'Обновлять еженедельно', ! empty( $values[ RussianPostOtpravkaApiSettings::PICKUP_SCHEDULE_ENABLED_KEY ] ) ); ?>
+				<tr><th scope="row"><label for="russian_post_pickup_schedule_weekday">День недели</label></th><td><select id="russian_post_pickup_schedule_weekday" name="russian_post_pickup_schedule_weekday">
+					<?php foreach ( RussianPostPickupSchedule::weekday_labels() as $weekday => $label ) : ?>
+						<option value="<?php echo esc_attr( (string) $weekday ); ?>" <?php selected( (int) $effective_schedule['weekday'], $weekday ); ?>><?php echo esc_html( $label ); ?></option>
+					<?php endforeach; ?>
+				</select></td></tr>
+				<tr><th scope="row"><label for="russian_post_pickup_schedule_time">Время</label></th><td><select id="russian_post_pickup_schedule_time" name="russian_post_pickup_schedule_time">
+					<?php foreach ( RussianPostPickupSchedule::time_options() as $time ) : ?>
+						<option value="<?php echo esc_attr( $time ); ?>" <?php selected( $schedule_time_control, $time ); ?>><?php echo esc_html( $time ); ?></option>
+					<?php endforeach; ?>
+				</select><p class="description">Время Новосибирска (GMT+7)</p></td></tr>
 				<?php if ( $schedule_enabled ) : ?>
 					<tr><th scope="row">Следующий запуск</th><td>
 						<?php if ( false !== $next_schedule ) : ?>
@@ -4539,11 +4558,6 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row">Последний статус</th><td><?php echo esc_html( ! empty( $result['success'] ) ? 'успешно' : ( array() === $result ? '-' : 'ошибка' ) ); ?></td></tr>
 				<tr><th scope="row">Статистика</th><td>начат: <?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $result['started_at'] ?? '' ) ) ?: '-' ); ?>; завершен: <?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $result['finished_at'] ?? '' ) ) ?: '-' ); ?>; добавлено: <?php echo esc_html( (string) ( $result['inserted'] ?? 0 ) ); ?>; обновлено: <?php echo esc_html( (string) ( $result['updated'] ?? 0 ) ); ?>; деактивировано: <?php echo esc_html( (string) ( $result['deactivated'] ?? 0 ) ); ?>; пропущено: <?php echo esc_html( (string) ( $result['skipped'] ?? 0 ) ); ?>; ошибки: <?php echo esc_html( $this->translate_import_message( implode( '; ', array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ) ) ) ); ?></td></tr>
 			</table>
-			<?php $this->render_russian_post_batch_profile( $state ); ?>
-			<details style="max-width: 960px; margin: 12px 0;">
-				<summary>Временный журнал блокировки (последние 40 событий)</summary>
-				<pre style="max-height:420px;overflow:auto;white-space:pre-wrap;background:#f6f7f7;padding:12px;border:1px solid #dcdcde;"><?php echo esc_html( (string) wp_json_encode( $lock_audit, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></pre>
-			</details>
 			<?php submit_button( 'Сохранить настройки импорта', 'secondary', 'submit', false ); ?>
 			<button class="button button-primary" type="submit" name="wdc_delivery_services_action" value="run_russian_post_pickup_import" <?php disabled( $is_busy ); ?>>Запустить импорт сейчас</button>
 			<?php if ( $is_busy ) : ?>
@@ -4583,68 +4597,6 @@ Expand-Archive -Path "D:\russian-post-passport-all.zip" -DestinationPath "D:\rus
 Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			</details>
 		</form>
-		<?php
-	}
-
-	/** @param array<string,mixed> $state */
-	private function render_russian_post_batch_profile( array $state ): void {
-		$last = is_array( $state['last_batch_profile'] ?? null ) ? $state['last_batch_profile'] : array();
-		$aggregate = is_array( $state['batch_profile_aggregate'] ?? null ) ? $state['batch_profile_aggregate'] : array();
-		$slow = is_array( $state['slow_batch_profiles'] ?? null ) ? $state['slow_batch_profiles'] : array();
-		$query_counts = is_array( $last['query_counts'] ?? null ) ? $last['query_counts'] : array();
-		$phase_sum = is_array( $aggregate['phase_sum_ms'] ?? null ) ? $aggregate['phase_sum_ms'] : array();
-		?>
-		<details style="max-width: 960px; margin: 12px 0;">
-			<summary>Профилирование batch</summary>
-			<h4>Последний batch</h4>
-			<table class="widefat striped" style="max-width:960px;"><tbody>
-				<?php foreach ( array(
-					'objects' => 'Объекты',
-					'total_batch_ms' => 'Всего, мс',
-					'payload_read_ms' => 'Чтение payload, мс',
-					'parse_ms' => 'Parse, мс',
-					'normalize_ms' => 'Normalize, мс',
-					'location_match_ms' => 'Matching, мс',
-					'staging_prepare_ms' => 'Подготовка staging, мс',
-					'staging_write_ms' => 'Запись staging, мс',
-					'checkpoint_ms' => 'Checkpoint, мс',
-					'lock_renew_ms' => 'Renew lock, мс',
-					'memory_before' => 'Память до, байт',
-					'memory_after' => 'Память после, байт',
-					'memory_peak' => 'Пик памяти, байт',
-				) as $key => $label ) : ?>
-					<tr><th scope="row"><?php echo esc_html( $label ); ?></th><td><?php echo esc_html( (string) ( $last[ $key ] ?? 0 ) ); ?></td></tr>
-				<?php endforeach; ?>
-				<tr><th scope="row">Счётчики запросов</th><td><code><?php echo esc_html( (string) wp_json_encode( $query_counts, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></td></tr>
-				<tr><th scope="row">Сопоставление</th><td><code><?php echo esc_html( (string) wp_json_encode( $last['match_counts'] ?? array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></td></tr>
-				<tr><th scope="row">Lookup/unique</th><td><code><?php echo esc_html( (string) wp_json_encode( $last['lookup_counts'] ?? array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></td></tr>
-			</tbody></table>
-			<h4>Сводка импорта</h4>
-			<p>Профилировано batch: <?php echo esc_html( (string) ( $aggregate['total_profiled_batches'] ?? 0 ) ); ?>; медленных: <?php echo esc_html( (string) ( $aggregate['slow_batch_count'] ?? 0 ) ); ?>; максимум: <?php echo esc_html( (string) ( $aggregate['max_batch_time_ms'] ?? 0 ) ); ?> мс; matching суммарно: <?php echo esc_html( (string) ( $phase_sum['location_match_ms'] ?? 0 ) ); ?> мс; staging write суммарно: <?php echo esc_html( (string) ( $phase_sum['staging_write_ms'] ?? 0 ) ); ?> мс.</p>
-			<p>Суммарные запросы: <code><?php echo esc_html( (string) wp_json_encode( $aggregate['query_totals'] ?? array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></p>
-			<h4>Медленные batch (последние 10)</h4>
-			<table class="widefat striped" style="max-width:960px;">
-				<thead><tr><th>#</th><th>Offset</th><th>Объекты</th><th>Всего</th><th>Parse</th><th>Normalize</th><th>Matching</th><th>Write</th><th>Queries</th><th>Память peak</th><th>Время</th></tr></thead>
-				<tbody>
-				<?php if ( array() === $slow ) : ?><tr><td colspan="11">Медленные batch пока не зафиксированы.</td></tr><?php endif; ?>
-				<?php foreach ( $slow as $profile ) : $profile = is_array( $profile ) ? $profile : array(); $queries = is_array( $profile['query_counts'] ?? null ) ? $profile['query_counts'] : array(); ?>
-					<tr>
-						<td><?php echo esc_html( (string) ( $profile['batch_sequence'] ?? 0 ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $profile['payload_offset_start'] ?? 0 ) . '–' . (string) ( $profile['payload_offset_end'] ?? 0 ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $profile['objects'] ?? 0 ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $profile['total_batch_ms'] ?? 0 ) ); ?> ms</td>
-						<td><?php echo esc_html( (string) ( $profile['parse_ms'] ?? 0 ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $profile['normalize_ms'] ?? 0 ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $profile['location_match_ms'] ?? 0 ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $profile['staging_write_ms'] ?? 0 ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $queries['total_profiled_queries'] ?? 0 ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $profile['memory_peak'] ?? 0 ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $profile['timestamp'] ?? '' ) ); ?></td>
-					</tr>
-				<?php endforeach; ?>
-				</tbody>
-			</table>
-		</details>
 		<?php
 	}
 

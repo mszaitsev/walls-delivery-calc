@@ -53,7 +53,7 @@ final class RussianPostPickupLocationResolver {
 	 *
 	 * @param array<int,array<string,mixed>> $rows
 	 */
-	public function prefetch_fias_for_rows( array $rows, ?RussianPostImportBatchProfiler $profiler = null ): void {
+	public function prefetch_fias_for_rows( array $rows ): void {
 		$raw_by_cache_key = array();
 		foreach ( $rows as $row ) {
 			$raw = trim( (string) ( $row['fias_location_guid'] ?? '' ) );
@@ -63,7 +63,7 @@ final class RussianPostPickupLocationResolver {
 			}
 			$raw_by_cache_key[ $normalized ] = $raw;
 		}
-		$this->prefetch_exact_fias_values( array_values( array_unique( $raw_by_cache_key ) ), $profiler );
+		$this->prefetch_exact_fias_values( array_values( array_unique( $raw_by_cache_key ) ) );
 
 		$normalized_fallbacks = array();
 		foreach ( $raw_by_cache_key as $normalized => $raw ) {
@@ -71,17 +71,13 @@ final class RussianPostPickupLocationResolver {
 				$normalized_fallbacks[] = $normalized;
 			}
 		}
-		$this->prefetch_exact_fias_values( array_values( array_unique( $normalized_fallbacks ) ), $profiler );
+		$this->prefetch_exact_fias_values( array_values( array_unique( $normalized_fallbacks ) ) );
 	}
 
 	/** @param array<int,string> $values */
-	private function prefetch_exact_fias_values( array $values, ?RussianPostImportBatchProfiler $profiler ): void {
+	private function prefetch_exact_fias_values( array $values ): void {
 		foreach ( array_chunk( $values, self::FIAS_PREFETCH_CHUNK_SIZE ) as $chunk ) {
-			$started = $profiler?->monotonic_now();
 			$locations = $this->locations->find_by_exact_fias_ids( $chunk );
-			if ( null !== $started ) {
-				$profiler?->record_lookup_query( 'fias', $profiler->elapsed_since_ms( $started ) );
-			}
 			++$this->stats['fias_queries'];
 			foreach ( $locations as $location ) {
 				$cache_key = $this->normalize_guid( $location->fias_id );
@@ -96,11 +92,10 @@ final class RussianPostPickupLocationResolver {
 	 * @param array<string,mixed> $row
 	 * @return array{status:string,strategy:string,location_id:int|null,location:Location|null}
 	 */
-	public function resolve( array $row, ?RussianPostImportBatchProfiler $profiler = null ): array {
+	public function resolve( array $row ): array {
 		$fias = $this->normalize_guid( (string) ( $row['fias_location_guid'] ?? '' ) );
 		if ( '' !== $fias ) {
-			$profiler?->record_lookup( 'fias', $fias );
-			$result = $this->resolve_by_fias( $fias, (string) ( $row['fias_location_guid'] ?? '' ), $profiler );
+			$result = $this->resolve_by_fias( $fias, (string) ( $row['fias_location_guid'] ?? '' ) );
 			if ( 'unique' === $result['status'] ) {
 				return $result;
 			}
@@ -108,8 +103,7 @@ final class RussianPostPickupLocationResolver {
 
 		$postcode = preg_replace( '/\D+/', '', (string) ( $row['postcode'] ?? $row['postal_code'] ?? '' ) ) ?? '';
 		if ( '' !== $postcode && '999999999' !== $postcode ) {
-			$profiler?->record_lookup( 'postcode', $postcode );
-			$result = $this->resolve_by_postal_code( $postcode, $profiler );
+			$result = $this->resolve_by_postal_code( $postcode );
 			if ( 'none' !== $result['status'] ) {
 				return $result;
 			}
@@ -118,8 +112,7 @@ final class RussianPostPickupLocationResolver {
 		$region = trim( (string) ( $row['region_name'] ?? '' ) );
 		$city = trim( (string) ( $row['city_name'] ?? $row['settlement_name'] ?? '' ) );
 		if ( '' !== $region && '' !== $city ) {
-			$profiler?->record_lookup( 'region_city', $this->normalize_text( $region ) . '|' . $this->normalize_text( $city ) );
-			$result = $this->resolve_by_region_city( $region, $city, $profiler );
+			$result = $this->resolve_by_region_city( $region, $city );
 			if ( 'none' !== $result['status'] ) {
 				return $result;
 			}
@@ -138,18 +131,14 @@ final class RussianPostPickupLocationResolver {
 	/**
 	 * @return array{status:string,strategy:string,location_id:int|null,location:Location|null}
 	 */
-	private function resolve_by_fias( string $normalized_fias, string $raw_fias, ?RussianPostImportBatchProfiler $profiler = null ): array {
+	private function resolve_by_fias( string $normalized_fias, string $raw_fias ): array {
 		if ( isset( $this->fias_cache[ $normalized_fias ] ) ) {
 			++$this->stats['cache_hits'];
 			return $this->fias_cache[ $normalized_fias ];
 		}
 		++$this->stats['fias_queries'];
 
-		$started = $profiler?->monotonic_now();
 		$location = $this->locations->find_by_fias_id( $raw_fias );
-		if ( null !== $started ) {
-			$profiler?->record_lookup_query( 'fias', $profiler->elapsed_since_ms( $started ) );
-		}
 		$this->fias_cache[ $normalized_fias ] = $location instanceof Location && null !== $location->id && $location->id > 0
 			? $this->result( 'unique', 'fias', $location )
 			: $this->result( 'none', 'no_match' );
@@ -160,18 +149,14 @@ final class RussianPostPickupLocationResolver {
 	/**
 	 * @return array{status:string,strategy:string,location_id:int|null,location:Location|null}
 	 */
-	private function resolve_by_postal_code( string $postcode, ?RussianPostImportBatchProfiler $profiler = null ): array {
+	private function resolve_by_postal_code( string $postcode ): array {
 		if ( isset( $this->postal_cache[ $postcode ] ) ) {
 			++$this->stats['cache_hits'];
 			return $this->postal_cache[ $postcode ];
 		}
 		++$this->stats['postal_queries'];
 
-		$started = $profiler?->monotonic_now();
 		$candidates = $this->locations_by_postcode( $postcode );
-		if ( null !== $started ) {
-			$profiler?->record_lookup_query( 'postcode', $profiler->elapsed_since_ms( $started ) );
-		}
 		if ( 1 === count( $candidates ) ) {
 			$this->postal_cache[ $postcode ] = $this->result( 'unique', 'postal_code', $candidates[0] );
 		} elseif ( count( $candidates ) > 1 ) {
@@ -186,7 +171,7 @@ final class RussianPostPickupLocationResolver {
 	/**
 	 * @return array{status:string,strategy:string,location_id:int|null,location:Location|null}
 	 */
-	private function resolve_by_region_city( string $region, string $city, ?RussianPostImportBatchProfiler $profiler = null ): array {
+	private function resolve_by_region_city( string $region, string $city ): array {
 		$key = $this->normalize_text( $region ) . '|' . $this->normalize_text( $city );
 		if ( isset( $this->region_city_cache[ $key ] ) ) {
 			++$this->stats['cache_hits'];
@@ -194,11 +179,7 @@ final class RussianPostPickupLocationResolver {
 		}
 		++$this->stats['region_city_queries'];
 
-		$started = $profiler?->monotonic_now();
 		$candidates = $this->locations->search_by_tokens( array( $region, $city ), 20, true, '', 'RU' );
-		if ( null !== $started ) {
-			$profiler?->record_lookup_query( 'region_city', $profiler->elapsed_since_ms( $started ) );
-		}
 		$candidates = array_values(
 			array_filter(
 				$candidates,

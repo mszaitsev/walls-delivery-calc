@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Pickup\RussianPost;
 
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 
@@ -30,7 +31,8 @@ final class RussianPostPickupImporter {
 		private ?ActionScheduler $scheduler = null,
 		private ?RussianPostPickupLocationResolver $location_resolver = null,
 		private ?RussianPostPickupImportLock $import_lock = null,
-		private mixed $execution_budget_factory = null
+		private mixed $execution_budget_factory = null,
+		private ?RussianPostPickupSchedule $pickup_schedule = null
 	) {
 	}
 
@@ -47,16 +49,14 @@ final class RussianPostPickupImporter {
 	}
 
 	public function sync_schedule(): void {
-		if ( ! function_exists( 'wp_next_scheduled' ) || ! function_exists( 'wp_schedule_event' ) ) {
-			return;
-		}
-		$scheduled = wp_next_scheduled( self::SCHEDULE_HOOK );
-		if ( $this->settings->schedule_enabled() && false === $scheduled ) {
-			wp_schedule_event( time() + ( defined( 'HOUR_IN_SECONDS' ) ? HOUR_IN_SECONDS : 3600 ), 'weekly', self::SCHEDULE_HOOK );
-		}
-		if ( ! $this->settings->schedule_enabled() && false !== $scheduled && function_exists( 'wp_clear_scheduled_hook' ) ) {
-			wp_clear_scheduled_hook( self::SCHEDULE_HOOK );
-		}
+		$this->schedule_service()->sync();
+	}
+
+	/** @return array{weekday:int,time:string,explicit:bool} */
+	public function effective_schedule(): array {
+		$existing = function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( self::SCHEDULE_HOOK ) : false;
+
+		return $this->schedule_service()->effective_settings( $existing );
 	}
 
 	/**
@@ -299,22 +299,16 @@ final class RussianPostPickupImporter {
 				throw new \RuntimeException( 'Russian Post pickup import worker lost state ownership between batches.' );
 			}
 			if ( ! $is_active ) {
-				$this->record_completed_batch_profile( $import_id, $batch );
 				$this->record_worker_slice_metrics( 'cancelled', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
 				return array( 'success' => false, 'cancelled' => true, 'stop_reason' => 'cancelled', 'offset' => $payload_offset );
 			}
 			if ( ! $this->lock_service()->owns( $import_id ) ) {
-				$this->record_completed_batch_profile( $import_id, $batch );
 				$this->record_worker_slice_metrics( 'lock_lost', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
 				$result = $this->state_to_result( $this->state?->current() ?? $current, $type, $import_id );
 				$result['errors'][] = 'Russian Post pickup import worker lost its owner lock between batches.';
 				return $this->fail_pipeline( $result );
 			}
-			$profiler = $batch['profiler'] ?? null;
-			$renewed = $profiler instanceof RussianPostImportBatchProfiler
-				? $profiler->measure_query_delta( 'lock_renew_ms', 'other_wdc_queries', fn(): bool => $this->lock_service()->renew( $import_id, 'batch_worker_checkpoint' ) )
-				: $this->lock_service()->renew( $import_id, 'batch_worker_checkpoint' );
-			$this->record_completed_batch_profile( $import_id, $batch );
+			$renewed = $this->lock_service()->renew( $import_id, 'batch_worker_checkpoint' );
 			if ( ! $renewed ) {
 				$current = $this->state?->current() ?? array();
 				if ( $import_id === (string) ( $current['import_id'] ?? '' ) && ! in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
@@ -374,8 +368,7 @@ final class RussianPostPickupImporter {
 		}
 
 		$started = microtime( true );
-		$profiler = new RussianPostImportBatchProfiler( (int) ( $state['batches_processed'] ?? 0 ) + 1, max( 0, $payload_offset ), $slice_started_at );
-		$read = $profiler->measure( 'payload_read_ms', fn(): array => $this->read_next_passport_objects( $payload_file, max( 0, $payload_offset ), self::BATCH_SIZE ) );
+		$read = $this->read_next_passport_objects( $payload_file, max( 0, $payload_offset ), self::BATCH_SIZE );
 		if ( empty( $read['found_array'] ) ) {
 			$result['errors'][] = 'Passport payload does not contain passportElements.';
 			return array( 'success' => false, 'result' => $result );
@@ -387,39 +380,34 @@ final class RussianPostPickupImporter {
 		$skipped = 0;
 		$location_stats = $this->empty_location_match_stats();
 		foreach ( $read['objects'] as $json ) {
-			$item = $profiler->measure( 'parse_ms', fn(): mixed => json_decode( $json, true ) );
+			$item = json_decode( $json, true );
 			if ( ! is_array( $item ) ) {
 				++$skipped;
-				$profiler->record_skipped();
 				$this->add_limited_error( $batch_errors, 'Invalid passport item JSON: ' . json_last_error_msg() );
 				continue;
 			}
 			++$parsed;
-			$row = $profiler->measure( 'normalize_ms', fn(): ?array => $this->normalizer->normalize( $item, $type, (string) ( $state['started_at'] ?? $result['started_at'] ) ) );
+			$row = $this->normalizer->normalize( $item, $type, (string) ( $state['started_at'] ?? $result['started_at'] ) );
 			if ( null === $row ) {
 				++$skipped;
-				$profiler->record_skipped();
 				continue;
 			}
 			$normalized_rows[] = $row;
 		}
 
 		if ( $this->location_resolver instanceof RussianPostPickupLocationResolver ) {
-			$profiler->measure( 'location_match_ms', fn(): mixed => $this->location_resolver->prefetch_fias_for_rows( $normalized_rows, $profiler ) );
+			$this->location_resolver->prefetch_fias_for_rows( $normalized_rows );
 		}
 		$rows = array();
 		foreach ( $normalized_rows as $row ) {
 			if ( $this->location_resolver instanceof RussianPostPickupLocationResolver ) {
-				$match = $profiler->measure( 'location_match_ms', fn(): array => $this->location_resolver->resolve( $row, $profiler ) );
-				$profiler->record_match( $match );
+				$match = $this->location_resolver->resolve( $row );
 				$this->increment_location_match_stats( $location_stats, $match );
 				if ( 'unique' === $match['status'] && (int) ( $match['location_id'] ?? 0 ) > 0 ) {
 					$row['location_id'] = (int) $match['location_id'];
 				}
 			}
-			$profiler->measure( 'staging_prepare_ms', static function () use ( &$rows, $row ): void {
-				$rows[] = $row;
-			} );
+			$rows[] = $row;
 		}
 
 		$staging_table = (string) ( $state['staging_table'] ?? '' );
@@ -427,13 +415,9 @@ final class RussianPostPickupImporter {
 			$result['errors'][] = 'Russian Post pickup staging table is missing from import state.';
 			return array( 'success' => false, 'result' => $result );
 		}
-		$upsert = $this->repository->insert_batch( $rows, $staging_table, $profiler );
-		$profiler->record_skipped( (int) $upsert['skipped'] );
+		$upsert = $this->repository->insert_batch( $rows, $staging_table );
 		$duration_ms = (int) round( ( microtime( true ) - $started ) * 1000 );
 		$errors = array_merge( is_array( $state['errors'] ?? null ) ? $state['errors'] : array(), $batch_errors );
-		if ( $duration_ms > 10000 ) {
-			$this->add_limited_error( $errors, 'Slow upsert batch: ' . $duration_ms . ' ms, batch_size=' . count( $rows ) );
-		}
 
 		$result['parsed'] += $parsed;
 		$result['inserted'] += (int) $upsert['inserted'];
@@ -457,10 +441,9 @@ final class RussianPostPickupImporter {
 		$result['worker_slice_stop_reason'] = '';
 		$result['parser_completed'] = ! empty( $read['eof'] );
 		$result['errors'] = array_slice( array_map( 'strval', $errors ), 0, self::MAX_STORED_ERRORS );
-		$profiler->increment_query( 'state_option_writes' );
-		$profiler->measure( 'checkpoint_ms', fn(): mixed => $this->state?->update( 'upsert', $result ) );
+		$this->state?->update( 'upsert', $result );
 
-		return array( 'success' => true, 'eof' => ! empty( $read['eof'] ), 'offset' => (int) $read['offset'], 'batch_size' => count( $rows ), 'objects' => count( $read['objects'] ), 'profiler' => $profiler );
+		return array( 'success' => true, 'eof' => ! empty( $read['eof'] ), 'offset' => (int) $read['offset'], 'batch_size' => count( $rows ), 'objects' => count( $read['objects'] ) );
 	}
 
 	/**
@@ -524,11 +507,6 @@ final class RussianPostPickupImporter {
 		return $this->lock_service()->is_locked();
 	}
 
-	/** @return array<int,array<string,mixed>> */
-	public function lock_audit_events(): array {
-		return $this->lock_service()->audit_events();
-	}
-
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -537,7 +515,6 @@ final class RussianPostPickupImporter {
 		$is_active = in_array( (string) ( $before['status'] ?? '' ), array( 'queued', 'running' ), true );
 		$import_id = (string) ( $before['import_id'] ?? '' );
 		$lock = $this->lock_service()->diagnostics( $import_id );
-		$this->lock_service()->audit_checkpoint( 'status_refresh', $import_id, 'status_poll_or_render' );
 		if ( $is_active && ! empty( $lock['lock_owned'] ) && '' !== (string) ( $lock['lock_job_id'] ?? '' ) && (int) ( $lock['lock_expires_at'] ?? 0 ) > time() ) {
 			return $before;
 		}
@@ -711,7 +688,6 @@ final class RussianPostPickupImporter {
 				return false;
 			}
 			$queued = true;
-			$this->lock_service()->audit_checkpoint( 'queue_return', $import_id, 'queue_import_success' );
 
 			return true;
 		} catch ( \Throwable $exception ) {
@@ -925,15 +901,8 @@ final class RussianPostPickupImporter {
 		);
 	}
 
-	/** @param array<string,mixed> $batch */
-	private function record_completed_batch_profile( string $import_id, array $batch ): void {
-		$profiler = $batch['profiler'] ?? null;
-		if ( ! $profiler instanceof RussianPostImportBatchProfiler || ! $this->state instanceof RussianPostPickupImportStateService ) {
-			return;
-		}
-		$profiler->increment_query( 'state_option_writes' );
-		$profile = $profiler->finish( (int) ( $batch['offset'] ?? 0 ), (int) ( $batch['objects'] ?? 0 ) );
-		$this->state->record_batch_profile_if_owned( $import_id, $profile );
+	private function schedule_service(): RussianPostPickupSchedule {
+		return $this->pickup_schedule ??= new RussianPostPickupSchedule( $this->settings, new TimezoneService() );
 	}
 
 	private function record_worker_slice_metrics( string $stop_reason, string $started_at = '', float $started = 0.0, int $batches = 0, int $objects = 0 ): void {

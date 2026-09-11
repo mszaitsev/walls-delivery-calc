@@ -530,7 +530,6 @@ Generated for Walls Delivery Calc 1.0.8
 |-- src/Pickup/Providers/PickupCargoConstraints.php
 |-- src/Pickup/Rest/CheckoutPickupPointRestController.php
 |-- src/Pickup/Rest/PickupPointsRestController.php
-|-- src/Pickup/RussianPost/RussianPostImportBatchProfiler.php
 |-- src/Pickup/RussianPost/RussianPostPassportPointNormalizer.php
 |-- src/Pickup/RussianPost/RussianPostPickupDiagnosticsService.php
 |-- src/Pickup/RussianPost/RussianPostPickupImportLock.php
@@ -539,6 +538,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- src/Pickup/RussianPost/RussianPostPickupLocationResolver.php
 |-- src/Pickup/RussianPost/RussianPostPickupPointRepository.php
 |-- src/Pickup/RussianPost/RussianPostPickupPointTypeSettings.php
+|-- src/Pickup/RussianPost/RussianPostPickupSchedule.php
 |-- src/Pickup/RussianPost/RussianPostWorkTimeFormatter.php
 |-- src/Pickup/Schedule/CompactWeeklyScheduleFormatter.php
 |-- src/Pickup/Search/PickupAddressSearchService.php
@@ -840,8 +840,8 @@ Generated for Walls Delivery Calc 1.0.8
 |-- tests/pickup/run-russian-post-cancel-lock-race-smoke.php
 |-- tests/pickup/run-russian-post-cross-job-callback-race-smoke.php
 |-- tests/pickup/run-russian-post-import-optimization-smoke.php
-|-- tests/pickup/run-russian-post-import-profiler-smoke.php
 |-- tests/pickup/run-russian-post-pickup-import-smoke.php
+|-- tests/pickup/run-russian-post-weekly-schedule-smoke.php
 |-- tests/pickup/run-russian-post-wp-file-api-smoke.php
 |-- tests/rules/run-rules-admin-smoke.php
 |-- tests/rules/run-rules-smoke.php

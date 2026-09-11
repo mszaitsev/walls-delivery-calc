@@ -76,7 +76,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 }
 
 use WallsShop\WDC\Locations\Storage\LocationRepository;
-use WallsShop\WDC\Pickup\RussianPost\RussianPostImportBatchProfiler;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupLocationResolver;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
@@ -133,23 +132,20 @@ for ( $index = 1; $index <= 500; ++$index ) {
 	$db->locations[] = rp_optimization_location( $index, $fias, (string) ( 500000 + $index ), 'Регион', 'Город ' . $index );
 	$fias_rows[] = array( 'fias_location_guid' => $fias, 'postcode' => '', 'region_name' => '', 'city_name' => '' );
 }
-$fias_profiler = new RussianPostImportBatchProfiler( 1, 0, '' );
 $fias_resolver = new RussianPostPickupLocationResolver( new LocationRepository( $db ), $db );
-$fias_resolver->prefetch_fias_for_rows( $fias_rows, $fias_profiler );
+$fias_resolver->prefetch_fias_for_rows( $fias_rows );
+$fias_matches = 0;
 foreach ( $fias_rows as $row ) {
-	$fias_profiler->record_lookup( 'fias', (string) $row['fias_location_guid'] );
-	$fias_profiler->record_match( $fias_resolver->resolve( $row ) );
+	$fias_matches += 'fias' === $fias_resolver->resolve( $row )['strategy'] ? 1 : 0;
 }
-$fias_profile = $fias_profiler->finish( 1, 500 );
-rp_optimization_assert( 500 === (int) $fias_profile['match_counts']['matched_fias'], 'All 500 exact FIAS fixtures must retain their location mapping.' );
-rp_optimization_assert( (int) $fias_profile['query_counts']['fias_lookup_queries'] <= 3, '500 exact FIAS values must use at most three bounded prefetch queries.' );
+$fias_stats = $fias_resolver->cache_stats();
+rp_optimization_assert( 500 === $fias_matches, 'All 500 exact FIAS fixtures must retain their location mapping.' );
+rp_optimization_assert( (int) $fias_stats['fias_queries'] <= 3, '500 exact FIAS values must use at most three bounded prefetch queries.' );
 
 $repeated_rows = array_merge( ...array_map( static fn( int $offset ): array => array_slice( $fias_rows, $offset, 10 ), array_fill( 0, 50, 0 ) ) );
-$repeated_profiler = new RussianPostImportBatchProfiler( 2, 0, '' );
 $repeated_resolver = new RussianPostPickupLocationResolver( new LocationRepository( $db ), $db );
-$repeated_resolver->prefetch_fias_for_rows( $repeated_rows, $repeated_profiler );
-$repeated_profile = $repeated_profiler->finish( 1, 500 );
-rp_optimization_assert( 1 === (int) $repeated_profile['query_counts']['fias_lookup_queries'], '500 rows containing ten repeated FIAS keys must use one prefetch query.' );
+$repeated_resolver->prefetch_fias_for_rows( $repeated_rows );
+rp_optimization_assert( 1 === (int) $repeated_resolver->cache_stats()['fias_queries'], '500 rows containing ten repeated FIAS keys must use one prefetch query.' );
 
 $point_repository = new RussianPostPickupPointRepository( $db );
 $staging_rows = array();
@@ -170,11 +166,11 @@ for ( $index = 1; $index <= 500; ++$index ) {
 		'source_hash' => sha1( 'POINT-' . $index ),
 	);
 }
-$write_profiler = new RussianPostImportBatchProfiler( 2, 0, '' );
-$write_stats = $point_repository->insert_batch( $staging_rows, 'wp_wdc_pickup_points_russian_post_stage_test', $write_profiler );
-$write_profile = $write_profiler->finish( 1, 500 );
+$queries_before_write = $db->num_queries;
+$write_stats = $point_repository->insert_batch( $staging_rows, 'wp_wdc_pickup_points_russian_post_stage_test' );
+$write_queries = $db->num_queries - $queries_before_write;
 rp_optimization_assert( 500 === $write_stats['inserted'] && 0 === $write_stats['updated'] && 0 === $write_stats['skipped'], 'All valid staging fixtures must be inserted without changing update/skip counters.' );
-rp_optimization_assert( 5 === (int) $write_profile['query_counts']['staging_write_queries'] && 5 === $db->num_queries, '500 staging rows must use five bounded multi-row INSERT statements.' );
+rp_optimization_assert( 5 === $write_queries, '500 staging rows must use five bounded multi-row INSERT statements.' );
 rp_optimization_assert( 500 === count( $db->tables['wp_wdc_pickup_points_russian_post_stage_test'] ?? array() ), 'Bulk SQL fixture must persist all 500 rows.' );
 foreach ( $staging_rows as $index => $source ) {
 	$stored = $db->tables['wp_wdc_pickup_points_russian_post_stage_test'][ $index ];
@@ -188,10 +184,9 @@ foreach ( $staging_rows as $index => $source ) {
 	}
 }
 
-$duplicate_profiler = new RussianPostImportBatchProfiler( 3, 0, '' );
 $duplicate = $staging_rows[0];
 $duplicate['city_name'] = 'Другая строка не должна заменить первую';
-$duplicate_stats = $point_repository->insert_batch( array( $duplicate ), 'wp_wdc_pickup_points_russian_post_stage_test', $duplicate_profiler );
+$duplicate_stats = $point_repository->insert_batch( array( $duplicate ), 'wp_wdc_pickup_points_russian_post_stage_test' );
 rp_optimization_assert( 0 === $duplicate_stats['inserted'] && 1 === $duplicate_stats['skipped'] && 'Город 1' === $db->tables['wp_wdc_pickup_points_russian_post_stage_test'][0]['city_name'], 'Duplicate point_code must retain the first staged row and count the duplicate as skipped.' );
 
 echo "Russian Post import optimization smoke test passed: FIAS 500=>3 queries max (10 repeated=>1), staging 500=>5 writes, parity preserved.\n";

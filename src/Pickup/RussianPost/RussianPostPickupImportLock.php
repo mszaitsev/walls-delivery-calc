@@ -11,10 +11,8 @@ final class RussianPostPickupImportLock {
 	private const TTL_SECONDS = 10800;
 
 	private \wpdb $wpdb;
-	private RussianPostPickupImportLockAudit $audit;
 
-	public function __construct( ?\wpdb $db = null, ?RussianPostPickupImportLockAudit $audit = null ) {
-		$this->audit = $audit ?? new RussianPostPickupImportLockAudit();
+	public function __construct( ?\wpdb $db = null ) {
 		if ( $db instanceof \wpdb ) {
 			$this->wpdb = $db;
 			return;
@@ -26,10 +24,7 @@ final class RussianPostPickupImportLock {
 
 	public function acquire( string $job_id, string $reason = 'acquire' ): bool {
 		$job_id = trim( $job_id );
-		$current = get_option( self::OPTION_NAME, null );
-		$this->record( 'acquire_attempt', $job_id, $current, $current, null, $reason );
 		if ( '' === $job_id || $this->has_legacy_lock() ) {
-			$this->record( 'acquire_failed', $job_id, $current, $current, false, $reason );
 			return false;
 		}
 
@@ -41,26 +36,19 @@ final class RussianPostPickupImportLock {
 			'expires_at' => $now + self::TTL_SECONDS,
 		);
 		if ( add_option( self::OPTION_NAME, $value, '', 'no' ) ) {
-			$this->record( 'acquire_success', $job_id, $current, $value, true, $reason );
 			return true;
 		}
 
 		$current = get_option( self::OPTION_NAME, array() );
 		if ( ! is_array( $current ) || (int) ( $current['expires_at'] ?? 0 ) > $now ) {
-			$this->record( 'acquire_failed', $job_id, $current, $current, false, $reason );
 			return false;
 		}
 
-		$this->record( 'expired_lock_detected', $job_id, $current, $current, null, $reason );
 		if ( ! $this->compare_and_delete( $current, $job_id, $reason . ':expired_takeover' ) ) {
-			$this->record( 'acquire_failed', $job_id, $current, get_option( self::OPTION_NAME, null ), false, $reason );
 			return false;
 		}
-		$this->record( 'expired_lock_deleted', $job_id, $current, null, true, $reason );
-		$acquired = add_option( self::OPTION_NAME, $value, '', 'no' );
-		$this->record( $acquired ? 'replacement_acquired' : 'acquire_failed', $job_id, null, get_option( self::OPTION_NAME, null ), $acquired, $reason );
 
-		return $acquired;
+		return add_option( self::OPTION_NAME, $value, '', 'no' );
 	}
 
 	public function is_locked(): bool {
@@ -87,24 +75,18 @@ final class RussianPostPickupImportLock {
 
 	public function renew( string $job_id, string $reason = 'renew' ): bool {
 		$current = get_option( self::OPTION_NAME, null );
-		$this->record( 'renew_attempt', $job_id, $current, $current, null, $reason );
 		$now = time();
 		if ( ! is_array( $current ) || (int) ( $current['expires_at'] ?? 0 ) <= $now || ! hash_equals( (string) ( $current['job_id'] ?? '' ), $job_id ) ) {
-			$this->record( 'renew_failed', $job_id, $current, $current, false, $reason );
 			return false;
 		}
 
 		$renewed = $current;
 		$renewed['expires_at'] = $now + self::TTL_SECONDS;
 		if ( (int) $current['expires_at'] >= (int) $renewed['expires_at'] ) {
-			$this->record( 'renew_success', $job_id, $current, $current, true, $reason );
 			return true;
 		}
 
-		$success = $this->compare_and_replace( $current, $renewed );
-		$this->record( $success ? 'renew_success' : 'renew_failed', $job_id, $current, get_option( self::OPTION_NAME, null ), $success, $reason );
-
-		return $success;
+		return $this->compare_and_replace( $current, $renewed );
 	}
 
 	/** @return array{lock_exists:bool,lock_job_id:string,lock_expires_at:int,lock_owned:bool} */
@@ -121,20 +103,15 @@ final class RussianPostPickupImportLock {
 	}
 
 	public function release( string $job_id, string $reason = 'release' ): void {
-		$initial = get_option( self::OPTION_NAME, null );
-		$this->record( 'release_attempt', $job_id, $initial, $initial, null, $reason );
 		for ( $attempt = 0; $attempt < 2; ++$attempt ) {
 			$current = get_option( self::OPTION_NAME, null );
 			if ( is_array( $current ) && '' !== (string) ( $current['job_id'] ?? '' ) && ! hash_equals( (string) $current['job_id'], $job_id ) ) {
-				$this->record( 'owner_mismatch', $job_id, $current, $current, false, $reason );
 				return;
 			}
 			if ( ! is_array( $current ) ) {
-				$this->record( 'release_miss', $job_id, $current, $current, false, $reason );
 				return;
 			}
 			if ( $this->compare_and_delete( $current, $job_id, $reason ) ) {
-				$this->record( 'release_success', $job_id, $current, null, true, $reason );
 				return;
 			}
 
@@ -142,33 +119,17 @@ final class RussianPostPickupImportLock {
 			// this request cached the option. Refresh once, then re-check job_id.
 			$this->clear_option_cache();
 		}
-		$this->record( 'release_miss', $job_id, $initial, get_option( self::OPTION_NAME, null ), false, $reason );
 	}
 
 	public function release_terminal( string $job_id, string $reason = 'terminal_release' ): void {
-		$before = get_option( self::OPTION_NAME, null );
-		$this->record( 'terminal_release_attempt', $job_id, $before, $before, null, $reason );
 		$this->release( $job_id, $reason );
 		if ( $this->has_legacy_lock() ) {
-			$this->record( 'legacy_lock_cleanup_attempt', $job_id, get_option( self::OPTION_NAME, null ), get_option( self::OPTION_NAME, null ), null, $reason );
 			delete_transient( self::LEGACY_TRANSIENT_NAME );
-			$this->record( 'legacy_lock_cleanup_done', $job_id, get_option( self::OPTION_NAME, null ), get_option( self::OPTION_NAME, null ), true, $reason );
 		}
 		$current = get_option( self::OPTION_NAME, null );
 		if ( null !== $current && ! is_array( $current ) ) {
 			$this->compare_and_delete( $current, $job_id, $reason . ':legacy_scalar' );
 		}
-		$this->record( 'terminal_release_done', $job_id, $before, get_option( self::OPTION_NAME, null ), null === get_option( self::OPTION_NAME, null ), $reason );
-	}
-
-	public function audit_checkpoint( string $event, string $job_id, string $reason ): void {
-		$current = get_option( self::OPTION_NAME, null );
-		$this->record( $event, $job_id, $current, $current, $this->owns( $job_id ), $reason );
-	}
-
-	/** @return array<int,array<string,mixed>> */
-	public function audit_events(): array {
-		return $this->audit->events();
 	}
 
 	private function has_legacy_lock(): bool {
@@ -176,17 +137,12 @@ final class RussianPostPickupImportLock {
 	}
 
 	private function compare_and_delete( mixed $expected, string $requested_job_id, string $reason ): bool {
-		$this->record( 'cas_delete_attempt', $requested_job_id, $expected, get_option( self::OPTION_NAME, null ), null, $reason );
 		if ( ! isset( $this->wpdb->options ) || ! method_exists( $this->wpdb, 'prepare' ) || ! method_exists( $this->wpdb, 'query' ) ) {
 			if ( get_option( self::OPTION_NAME, array() ) !== $expected ) {
-				$this->record( 'cas_delete_miss', $requested_job_id, $expected, get_option( self::OPTION_NAME, null ), false, $reason );
 				return false;
 			}
 
-			$deleted = delete_option( self::OPTION_NAME );
-			$this->record( $deleted ? 'cas_delete_success' : 'cas_delete_miss', $requested_job_id, $expected, get_option( self::OPTION_NAME, null ), $deleted, $reason );
-
-			return $deleted;
+			return delete_option( self::OPTION_NAME );
 		}
 
 		$serialized = function_exists( 'maybe_serialize' ) ? maybe_serialize( $expected ) : serialize( $expected );
@@ -201,11 +157,9 @@ final class RussianPostPickupImportLock {
 			throw new \RuntimeException( 'Russian Post pickup import lock compare-delete failed.' );
 		}
 		if ( 1 !== (int) $result ) {
-			$this->record( 'cas_delete_miss', $requested_job_id, $expected, get_option( self::OPTION_NAME, null ), false, $reason );
 			return false;
 		}
 		$this->clear_option_cache();
-		$this->record( 'cas_delete_success', $requested_job_id, $expected, null, true, $reason );
 
 		return true;
 	}
@@ -252,23 +206,6 @@ final class RussianPostPickupImportLock {
 			wp_cache_delete( 'notoptions', 'options' );
 			wp_cache_delete( 'alloptions', 'options' );
 		}
-	}
-
-	private function record( string $event, string $requested_job_id, mixed $before, mixed $after, ?bool $success, string $reason ): void {
-		$this->audit->record(
-			$event,
-			$requested_job_id,
-			array(
-				'current_lock_job_id_before' => $this->lock_job_id( $before ),
-				'current_lock_job_id_after' => $this->lock_job_id( $after ),
-				'success' => $success,
-				'reason' => $reason,
-			)
-		);
-	}
-
-	private function lock_job_id( mixed $value ): string {
-		return is_array( $value ) ? (string) ( $value['job_id'] ?? '' ) : '';
 	}
 
 	private function new_token(): string {

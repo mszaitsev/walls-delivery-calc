@@ -22,6 +22,8 @@ final class RussianPostOtpravkaApiSettings {
 	public const TRACKING_PASSWORD_ENCRYPTED_KEY = 'russian_post_tracking_password_encrypted';
 	public const PICKUP_UNLOAD_TYPE_KEY = 'russian_post_pickup_unload_type';
 	public const PICKUP_SCHEDULE_ENABLED_KEY = 'russian_post_pickup_schedule_enabled';
+	public const PICKUP_SCHEDULE_WEEKDAY_KEY = 'russian_post_pickup_schedule_weekday';
+	public const PICKUP_SCHEDULE_TIME_KEY = 'russian_post_pickup_schedule_time';
 	public const PICKUP_LAST_IMPORT_RESULT_KEY = 'russian_post_pickup_last_import_result';
 	public const PICKUP_LAST_SUCCESS_AT_KEY = 'russian_post_pickup_last_success_at';
 
@@ -48,6 +50,8 @@ final class RussianPostOtpravkaApiSettings {
 				self::TRACKING_PASSWORD_ENCRYPTED_KEY => '',
 				self::PICKUP_UNLOAD_TYPE_KEY => 'ALL',
 				self::PICKUP_SCHEDULE_ENABLED_KEY => false,
+				self::PICKUP_SCHEDULE_WEEKDAY_KEY => 1,
+				self::PICKUP_SCHEDULE_TIME_KEY => '09:00',
 				self::PICKUP_LAST_IMPORT_RESULT_KEY => array(),
 				self::PICKUP_LAST_SUCCESS_AT_KEY => '',
 			),
@@ -109,6 +113,25 @@ final class RussianPostOtpravkaApiSettings {
 		return ! empty( $this->values()[ self::PICKUP_SCHEDULE_ENABLED_KEY ] );
 	}
 
+	public function schedule_weekday(): int {
+		$weekday = (int) ( $this->values()[ self::PICKUP_SCHEDULE_WEEKDAY_KEY ] ?? 1 );
+
+		return $weekday >= 1 && $weekday <= 7 ? $weekday : 1;
+	}
+
+	public function schedule_time(): string {
+		$time = trim( (string) ( $this->values()[ self::PICKUP_SCHEDULE_TIME_KEY ] ?? '09:00' ) );
+
+		return self::is_valid_schedule_time( $time ) ? $time : '09:00';
+	}
+
+	public function has_explicit_schedule(): bool {
+		$stored = $this->stored_values();
+
+		return array_key_exists( self::PICKUP_SCHEDULE_WEEKDAY_KEY, $stored )
+			&& array_key_exists( self::PICKUP_SCHEDULE_TIME_KEY, $stored );
+	}
+
 	public function has_password(): bool {
 		return '' !== (string) ( $this->values()[ self::PASSWORD_ENCRYPTED_KEY ] ?? '' );
 	}
@@ -141,6 +164,7 @@ final class RussianPostOtpravkaApiSettings {
 	 * @param array<string,mixed> $input
 	 */
 	public function save_from_admin( array $input ): void {
+		$had_explicit_schedule = $this->has_explicit_schedule();
 		$values = $this->values();
 		$access_token = sanitize_text_field( wp_unslash( $input['russian_post_otpravka_access_token'] ?? '' ) );
 		if ( '' !== $access_token ) {
@@ -180,6 +204,12 @@ final class RussianPostOtpravkaApiSettings {
 		if ( array_key_exists( 'russian_post_pickup_schedule_enabled', $input ) || 'save_russian_post_pickup' === (string) ( $input['wdc_delivery_services_action'] ?? '' ) ) {
 			$values[ self::PICKUP_SCHEDULE_ENABLED_KEY ] = ! empty( $input['russian_post_pickup_schedule_enabled'] );
 		}
+		if ( 'save_russian_post_pickup' === (string) ( $input['wdc_delivery_services_action'] ?? '' ) ) {
+			$weekday = (int) ( $input[ self::PICKUP_SCHEDULE_WEEKDAY_KEY ] ?? $this->schedule_weekday() );
+			$time = sanitize_text_field( wp_unslash( $input[ self::PICKUP_SCHEDULE_TIME_KEY ] ?? $this->schedule_time() ) );
+			$values[ self::PICKUP_SCHEDULE_WEEKDAY_KEY ] = $weekday >= 1 && $weekday <= 7 ? $weekday : $this->schedule_weekday();
+			$values[ self::PICKUP_SCHEDULE_TIME_KEY ] = self::is_valid_schedule_time( $time ) ? $time : $this->schedule_time();
+		}
 
 		if ( ! empty( $input['russian_post_otpravka_clear_password'] ) ) {
 			$values[ self::PASSWORD_ENCRYPTED_KEY ] = '';
@@ -196,6 +226,9 @@ final class RussianPostOtpravkaApiSettings {
 			$values[ self::TRACKING_PASSWORD_ENCRYPTED_KEY ] = $this->encryption->encrypt( $tracking_password );
 		}
 
+		if ( ! $had_explicit_schedule && 'save_russian_post_pickup' !== (string) ( $input['wdc_delivery_services_action'] ?? '' ) ) {
+			unset( $values[ self::PICKUP_SCHEDULE_WEEKDAY_KEY ], $values[ self::PICKUP_SCHEDULE_TIME_KEY ] );
+		}
 		$this->replace_values( $values );
 	}
 
@@ -203,12 +236,16 @@ final class RussianPostOtpravkaApiSettings {
 	 * @param array<string,mixed> $result
 	 */
 	public function save_import_result( array $result, bool $success ): void {
+		$had_explicit_schedule = $this->has_explicit_schedule();
 		$values = $this->values();
 		$values[ self::PICKUP_LAST_IMPORT_RESULT_KEY ] = $result;
 		if ( $success ) {
 			$values[ self::PICKUP_LAST_SUCCESS_AT_KEY ] = (string) ( $result['finished_at'] ?? ( function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) ) );
 		}
 
+		if ( ! $had_explicit_schedule ) {
+			unset( $values[ self::PICKUP_SCHEDULE_WEEKDAY_KEY ], $values[ self::PICKUP_SCHEDULE_TIME_KEY ] );
+		}
 		$this->replace_values( $values );
 	}
 
@@ -280,8 +317,18 @@ final class RussianPostOtpravkaApiSettings {
 			self::TRACKING_PASSWORD_ENCRYPTED_KEY => 'string',
 			self::PICKUP_UNLOAD_TYPE_KEY => 'string',
 			self::PICKUP_SCHEDULE_ENABLED_KEY => 'bool',
+			self::PICKUP_SCHEDULE_WEEKDAY_KEY => 'number',
+			self::PICKUP_SCHEDULE_TIME_KEY => 'string',
 			self::PICKUP_LAST_IMPORT_RESULT_KEY => 'json',
 			self::PICKUP_LAST_SUCCESS_AT_KEY => 'string',
 		);
+	}
+
+	private static function is_valid_schedule_time( string $time ): bool {
+		if ( 1 !== preg_match( '/^(?:[01][0-9]|2[0-3]):(?:00|15|30|45)$/', $time ) ) {
+			return false;
+		}
+
+		return true;
 	}
 }

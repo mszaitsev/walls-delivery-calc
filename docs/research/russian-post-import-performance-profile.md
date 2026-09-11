@@ -1,9 +1,11 @@
 # Russian Post pickup import performance profiling
 
-Version: 1.0.9
+Version: 1.0.10 (historical profiling report)
 Schema version: 1.0.0
 
 ## Purpose and scope
+
+This document records the temporary 1.0.8 profiler, the resulting production evidence, and the accepted 1.0.9 optimization. The profiler and its admin diagnostics were removed after acceptance in 1.0.10; they are not current runtime functionality.
 
 Release 1.0.8 is a production diagnostic build for intermittent 12–25 second Russian Post pickup batches. It adds observability only. It does not change SQL, indexes, batch size (500), the 18-second/15-unit worker slice, normalization, matching priority, staging writes, locks, scheduling, retries, swap, or database schema.
 
@@ -99,15 +101,8 @@ The leading-wildcard predicates are non-sargable against the current indexes; th
 
 The optimization smoke covers unique and repeated FIAS keys, unique/ambiguous postcode fallback, ambiguous region/city results, missing FIAS fallback, and an inactive exact-FIAS fixture. Reference per-row resolution and prefetched resolution return identical status, strategy, and location ID. A 500-row staging fixture persists every supplied column identically in five writes; a duplicate keeps the first row and increments `skipped`. Profiler meanings and fields are unchanged and now report the reduced physical query counts.
 
-Production validation still needs the same 1.0.8 profile export: output totals, phase totals, query totals, duration samples, slow-batch count, maximum batch duration, total import wall time, and peak memory. In particular, production data must show whether the exact-FIAS and staging reductions remove most slow batches while the unchanged region/city fallback remains the dominant residual spike.
+Production acceptance processed 36,714 objects, wrote 36,700 rows, skipped 14 rows, and produced the same 32,518 OPS / 797 PVZ / 3,385 APS dataset as 1.0.8. Total wall time improved from about 13 minutes to about 9 minutes. FIAS queries fell from 27,358 to 225, staging writes from 36,700 to 368, total profiled queries from 64,810 to 1,252, and cumulative staging write time from 81,398 ms to 19,151 ms. The remaining region/city fallback is intentionally unchanged because the accepted weekly runtime is sufficient.
 
-## Extraction
+## Profiler retirement
 
-The admin Russian Post import page exposes a collapsed **Профилирование batch** section. From WP-CLI, export the complete bounded state without revealing credentials:
-
-```bash
-wp option get wdc_russian_post_pickup_import_state --format=json > /tmp/wdc-rp-profile.json
-wp eval '$s=get_option("wdc_russian_post_pickup_import_state",array()); echo wp_json_encode(array("last_batch_profile"=>$s["last_batch_profile"]??array(),"batch_profile_aggregate"=>$s["batch_profile_aggregate"]??array(),"slow_batch_profiles"=>$s["slow_batch_profiles"]??array()), JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);'
-```
-
-The second command is preferred when sharing diagnostics because it selects only profiling fields.
+Version 1.0.10 removes the temporary `RussianPostImportBatchProfiler`, its persisted phase/query histories, and the admin profiling panel. Optimization regressions now assert bounded FIAS query counts, bounded multi-row writes, result parity, and ambiguity behavior directly. Existing state options are normalized on their next normal save, so retired profiler keys disappear without a schema migration.

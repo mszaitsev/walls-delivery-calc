@@ -1,6 +1,6 @@
 # Dependency Injection
 
-Version: 1.0.9
+Version: 1.0.10
 
 `Plugin.php` is the only composition root. Runtime services receive required collaborators through constructors; carrier-specific settings, clients, mappers, adapters, document providers, and schedulers remain owned by their carrier modules. Checkout and Rule Engine domain services do not locate WooCommerce globals outside the documented boundary adapters.
 
