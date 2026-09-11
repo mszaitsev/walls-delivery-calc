@@ -24,7 +24,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $regions = array();
 		public array $stage = array();
 		public array $stage_history = array();
-		public array $aliases = array();
 		public array $delivery_codes = array();
 		public array $missing_tables = array();
 		public array $stage_columns = array( 'region_code', 'region_name', 'region_type', 'region_fias_id', 'region_kladr_id', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'place_name', 'place_type', 'place_level', 'display_name', 'fias_id', 'gar_object_id', 'kladr_id', 'okato', 'oktmo', 'postal_code' );
@@ -54,13 +53,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 			if ( str_contains( $table, 'wdc_regions' ) ) {
 				$this->regions[ (string) $data['region_code'] ] = $data;
-				return 1;
-			}
-
-			if ( str_contains( $table, 'wdc_location_aliases' ) ) {
-				++$this->insert_id;
-				$data['id'] = $this->insert_id;
-				$this->aliases[ $this->insert_id ] = $data;
 				return 1;
 			}
 
@@ -201,9 +193,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( str_contains( $sql, 'wdc_regions' ) ) {
 				return count( $this->regions );
 			}
-			if ( str_contains( $sql, 'wdc_location_aliases' ) ) {
-				return count( $this->aliases );
-			}
 			if ( str_contains( $sql, 'wdc_location_delivery_codes' ) ) {
 				return count( $this->delivery_codes );
 			}
@@ -247,8 +236,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 			if ( str_contains( $sql, 'wdc_gar_places_stage' ) ) {
 				$this->stage = array();
-			} elseif ( str_contains( $sql, 'wdc_location_aliases' ) ) {
-				$this->aliases = array();
 			} elseif ( str_contains( $sql, 'wdc_location_delivery_codes' ) ) {
 				$this->delivery_codes = array();
 			} elseif ( str_contains( $sql, 'wdc_locations' ) ) {
@@ -270,7 +257,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return match ( $table ) {
 				'wdc_regions' => $this->regions,
 				'wdc_locations' => $this->locations,
-				'wdc_location_aliases' => $this->aliases,
 				'wdc_location_delivery_codes' => $this->delivery_codes,
 				default => array(),
 			};
@@ -379,55 +365,7 @@ function gar_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
-$old_schema_db = new wpdb();
-$old_schema_db->stage_columns = array_values(
-	array_diff(
-		$old_schema_db->stage_columns,
-		array( 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level' )
-	)
-);
-$old_schema_db->location_columns = array_values(
-	array_diff(
-		$old_schema_db->location_columns,
-		array( 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level' )
-	)
-);
-$GLOBALS['wpdb'] = $old_schema_db;
-$migration_0010 = require dirname( __DIR__, 2 ) . '/database/migrations/0010_add_gar_district_columns.php';
-$migration_0010();
-foreach ( array( 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level' ) as $column ) {
-	gar_smoke_assert( in_array( $column, $old_schema_db->stage_columns, true ), '0010 migration must add missing stage district columns.' );
-	gar_smoke_assert( in_array( $column, $old_schema_db->location_columns, true ), '0010 migration must add missing location district columns.' );
-}
-foreach ( array( 'district_fias_id', 'district_gar_object_id' ) as $index ) {
-	gar_smoke_assert( in_array( $index, $old_schema_db->indexes['wdc_gar_places_stage'] ?? array(), true ), '0010 migration must add stage district indexes.' );
-}
-foreach ( array( 'ix_district_fias_id', 'ix_district_gar_object_id', 'ix_region_district_place' ) as $index ) {
-	gar_smoke_assert( in_array( $index, $old_schema_db->indexes['wdc_locations'] ?? array(), true ), '0010 migration must add location district indexes.' );
-}
-$old_region_type_db = new wpdb();
-$old_region_type_db->location_columns = array_values( array_diff( $old_region_type_db->location_columns, array( 'region_type' ) ) );
-$GLOBALS['wpdb'] = $old_region_type_db;
-$migration_0011 = require dirname( __DIR__, 2 ) . '/database/migrations/0011_add_location_region_type.php';
-$migration_0011();
-gar_smoke_assert( in_array( 'region_type', $old_region_type_db->location_columns, true ), '0011 migration must add missing location region_type column.' );
-gar_smoke_assert( in_array( 'ix_region_type', $old_region_type_db->indexes['wdc_locations'] ?? array(), true ), '0011 migration must add region_type index.' );
-$migration_0011();
-gar_smoke_assert( in_array( 'region_type', $old_region_type_db->location_columns, true ) && in_array( 'ix_region_type', $old_region_type_db->indexes['wdc_locations'] ?? array(), true ), '0011 migration must be safe to run twice.' );
 
-$existing_region_type_db = new wpdb();
-$existing_region_type_db->indexes['wdc_locations'] = array( 'ix_region_type' );
-$GLOBALS['wpdb'] = $existing_region_type_db;
-$migration_0011();
-gar_smoke_assert( in_array( 'region_type', $existing_region_type_db->location_columns, true ) && in_array( 'ix_region_type', $existing_region_type_db->indexes['wdc_locations'] ?? array(), true ), '0011 migration must not fail if column and index already exist.' );
-
-$duplicate_region_type_db = new wpdb();
-$duplicate_region_type_db->location_columns = array_values( array_diff( $duplicate_region_type_db->location_columns, array( 'region_type' ) ) );
-$duplicate_region_type_db->duplicate_column_on_add = true;
-$duplicate_region_type_db->duplicate_index_on_add = true;
-$GLOBALS['wpdb'] = $duplicate_region_type_db;
-$migration_0011();
-gar_smoke_assert( true, '0011 migration must tolerate duplicate column/index SQL errors.' );
 
 $outdated_db = new wpdb();
 $outdated_db->stage_columns = array_values( array_diff( $outdated_db->stage_columns, array( 'district_name' ) ) );

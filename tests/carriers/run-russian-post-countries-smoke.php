@@ -182,9 +182,7 @@ function WC(): object {
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
-$migration = require dirname( __DIR__, 2 ) . '/database/migrations/0016_create_russian_post_country_mappings.php';
-$migration();
-country_smoke_assert( [] !== $GLOBALS['rp_country_tables_created'] && str_contains( $GLOBALS['rp_country_tables_created'][0], 'wdc_russian_post_country_mappings' ), 'Migration creates mapping table.' );
+country_smoke_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' ), 'wdc_russian_post_country_mappings' ), 'The initial schema creates the country mapping table.' );
 
 $settings_repo = new SettingsRepository();
 $rp_settings = new RussianPostSettings( $settings_repo );

@@ -6,7 +6,6 @@ namespace WallsShop\WDC\Carriers\Dpd\Geography;
 use Throwable;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
-use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -15,8 +14,7 @@ final class WpDpdDaDataDeliveryClient implements DpdDaDataDeliveryClientInterfac
 
 	public function __construct(
 		private AddressSuggestionSettings $settings,
-		private DaDataTokenPool $token_pool,
-		private Logger $logger
+		private DaDataTokenPool $token_pool
 	) {
 	}
 
@@ -42,7 +40,6 @@ final class WpDpdDaDataDeliveryClient implements DpdDaDataDeliveryClientInterfac
 		}
 
 		try {
-			$this->logger->debug( 'DaData delivery lookup request started.', array( 'endpoint' => 'findById/delivery', 'token_id' => $token_id ) );
 			$response = wp_remote_post(
 				self::ENDPOINT,
 				array(

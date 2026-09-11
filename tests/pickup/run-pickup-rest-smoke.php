@@ -392,7 +392,7 @@ $settings->replace(
 	)
 );
 $address_settings = new AddressSuggestionSettings( $settings, $encryption, $token_pool );
-$address_client = new DaDataSuggestionClient( $address_settings, $token_pool, new Logger() );
+$address_client = new DaDataSuggestionClient( $address_settings, $token_pool );
 $address_search = new PickupAddressSearchService( $repo, $address_client, $token_pool, $address_settings );
 $controller = new PickupPointsRestController( $repo, $type_settings, $address_search );
 $controller->register();

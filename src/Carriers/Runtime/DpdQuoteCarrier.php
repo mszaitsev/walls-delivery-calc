@@ -72,7 +72,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 		$result = $this->tariffs->calculate( $receiver_location_id, $params );
 		if ( ! $result->success ) {
 			$this->logger->warning(
-				'DPD checkout quote returned empty.',
+				'DPD tariff calculation failed.',
 				array(
 					'reason' => 'tariff_calculation_failed',
 					'errors' => $result->errors,
@@ -123,23 +123,6 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 		$filter_result = $this->filter_rates_by_price_and_delivery_days( $rates );
 		$rates = $filter_result['rates'];
 		$removed_by_filter = $filter_result['removed'];
-
-		if ( array() === $rates ) {
-			$this->logger->warning(
-				'DPD checkout quote returned empty.',
-				array(
-					'reason' => 'no_tariff_options_available',
-					'raw_count' => count( $result->options ),
-					'skipped_disallowed_count' => $skipped_disallowed,
-					'skipped_no_cost_count' => $skipped_no_cost,
-					'filter_removed_count' => count( $removed_by_filter ),
-					'receiver_location_id' => $receiver_location_id,
-					'receiver_city_id' => (string) ( $result->meta['receiver_city_id'] ?? '' ),
-					'delivery_terminal_code' => (string) ( $result->meta['delivery_terminal_code'] ?? '' ),
-					'delivery_terminal_source' => (string) ( $result->meta['delivery_terminal_source'] ?? '' ),
-				)
-			);
-		}
 
 		return new DeliveryQuote(
 			$this->quote_id( $request, 'checkout', $params, $result->meta, $delivery_type ),
@@ -203,8 +186,6 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	 * @param array<string,mixed> $diagnostics
 	 */
 	private function empty_quote( QuoteRequest $request, string $reason, array $diagnostics = array(), array $params = array(), array $meta = array(), string $delivery_type = DeliveryType::PICKUP ): DeliveryQuote {
-		$this->logger->warning( 'DPD checkout quote returned empty.', array_merge( array( 'reason' => $reason ), $diagnostics ) );
-
 		return new DeliveryQuote( $this->quote_id( $request, $reason, $params, $meta, $delivery_type ), self::KEY, $request->destination, $request->package, array(), false, $reason, $reason, false, 'api', array_merge( array( 'fallback_reason' => $reason, 'delivery_type' => $delivery_type ), $meta, $diagnostics ) );
 	}
 

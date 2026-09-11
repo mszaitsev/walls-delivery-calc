@@ -278,7 +278,6 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
-use WallsShop\WDC\Infrastructure\Queue\ObsoleteScheduledTaskCleanup;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\CheckoutDeliveryMessageSettings;
 use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
@@ -465,6 +464,13 @@ final class Plugin {
 
 	public function register(): void {
 		$this->register_services();
+		register_activation_hook( $this->environment->plugin_file(), array( $this, 'activate' ) );
+		register_deactivation_hook( $this->environment->plugin_file(), array( $this, 'deactivate' ) );
+
+		if ( ! $this->run_migrations_safely() ) {
+			return;
+		}
+
 		$this->register_hooks();
 	}
 
@@ -634,7 +640,7 @@ final class Plugin {
 		$this->container->register( JetLogisticGeographyOverrideRepository::class, fn(): JetLogisticGeographyOverrideRepository => new JetLogisticGeographyOverrideRepository() );
 		$this->container->register( JetLogisticGeographyMatcher::class, fn(): JetLogisticGeographyMatcher => new JetLogisticGeographyMatcher( $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticRegionNameNormalizer::class ) ) );
 		$this->container->register( JetLogisticCountrySyncService::class, fn(): JetLogisticCountrySyncService => new JetLogisticCountrySyncService( $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( SettingsRepository::class ) ) );
-		$this->container->register( JetLogisticGeographyImportService::class, fn(): JetLogisticGeographyImportService => new JetLogisticGeographyImportService( $this->container->get( JetLogisticCitiesCsvParser::class ), $this->container->get( JetLogisticGeographyMatcher::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ) ) );
+		$this->container->register( JetLogisticGeographyImportService::class, fn(): JetLogisticGeographyImportService => new JetLogisticGeographyImportService( $this->container->get( JetLogisticCitiesCsvParser::class ), $this->container->get( JetLogisticGeographyMatcher::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( JetLogisticStatusMappingRepository::class, fn(): JetLogisticStatusMappingRepository => new JetLogisticStatusMappingRepository() );
 		$this->container->register( JetLogisticStatusMapper::class, fn(): JetLogisticStatusMapper => new JetLogisticStatusMapper( $this->container->get( JetLogisticStatusMappingRepository::class ) ) );
 		$this->container->register( JetLogisticStatusEventResolver::class, fn(): JetLogisticStatusEventResolver => new JetLogisticStatusEventResolver( $this->container->get( JetLogisticStatusMapper::class ) ) );
@@ -679,7 +685,7 @@ final class Plugin {
 		$this->container->register( DpdGeographyStageRepository::class, fn(): DpdGeographyStageRepository => new DpdGeographyStageRepository() );
 		$this->container->register( DpdGeographyImportService::class, fn(): DpdGeographyImportService => new DpdGeographyImportService( $this->container->get( DpdGeographyCsvParser::class ), $this->container->get( DpdGeographyMatcher::class ), $this->container->get( DpdGeographyImportStateService::class ), $this->container->get( DpdGeographyStageRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( DpdGeographyImportLockService::class ), $this->container->get( LocationWriteLock::class ) ) );
 		$this->container->register( DpdGeographyFtpClient::class, fn(): DpdGeographyFtpClient => new DpdGeographyFtpClient( $this->container->get( DpdSettings::class ) ) );
-		$this->container->register( DpdDaDataDeliveryClientInterface::class, fn(): DpdDaDataDeliveryClientInterface => new WpDpdDaDataDeliveryClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( DpdDaDataDeliveryClientInterface::class, fn(): DpdDaDataDeliveryClientInterface => new WpDpdDaDataDeliveryClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ) ) );
 		$this->container->register( DpdDaDataDeliveryFallbackService::class, fn(): DpdDaDataDeliveryFallbackService => new DpdDaDataDeliveryFallbackService( $this->container->get( LocationRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( DpdDaDataDeliveryClientInterface::class ) ) );
 		$this->container->register( DpdPickupPointRepository::class, fn(): DpdPickupPointRepository => new DpdPickupPointRepository() );
 		$this->container->register( DpdPickupPointNormalizer::class, fn(): DpdPickupPointNormalizer => new DpdPickupPointNormalizer() );
@@ -693,7 +699,7 @@ final class Plugin {
 		$this->container->register( DpdTariffOptionNormalizer::class, fn(): DpdTariffOptionNormalizer => new DpdTariffOptionNormalizer() );
 		$this->container->register( DpdTerminalCodeTariffRequestBuilder::class, fn(): DpdTerminalCodeTariffRequestBuilder => new DpdTerminalCodeTariffRequestBuilder() );
 		$this->container->register( DpdTariffCalculationService::class, fn(): DpdTariffCalculationService => new DpdTariffCalculationService( $this->container->get( DpdApiClient::class ), $this->container->get( DpdCityResolver::class ), $this->container->get( LocationRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffRequestBuilder::class ), $this->container->get( DpdTariffOptionNormalizer::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( DpdTerminalCodeTariffRequestBuilder::class ) ) );
-		$this->container->register( RussianPostCourierTariffProbeService::class, fn(): RussianPostCourierTariffProbeService => new RussianPostCourierTariffProbeService( $this->container->get( Logger::class ) ) );
+		$this->container->register( RussianPostCourierTariffProbeService::class, fn(): RussianPostCourierTariffProbeService => new RussianPostCourierTariffProbeService() );
 		$this->container->register( RussianPostOtpravkaApiSettings::class, fn(): RussianPostOtpravkaApiSettings => new RussianPostOtpravkaApiSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiClient::class, fn(): RussianPostOtpravkaApiClient => new RussianPostOtpravkaApiClient( $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
 		$this->container->register( RussianPostTrackingApiClient::class, fn(): RussianPostTrackingApiClient => new RussianPostTrackingApiClient( $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
@@ -870,8 +876,8 @@ final class Plugin {
 		$this->container->register( DaDataTokenPool::class, fn(): DaDataTokenPool => new DaDataTokenPool( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
 		$this->container->register( AddressSuggestionSettings::class, fn(): AddressSuggestionSettings => new AddressSuggestionSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ), $this->container->get( DaDataTokenPool::class ) ) );
 		$this->container->register( AddressSuggestionNormalizer::class, fn(): AddressSuggestionNormalizer => new AddressSuggestionNormalizer() );
-		$this->container->register( DaDataSuggestionClient::class, fn(): DaDataSuggestionClient => new DaDataSuggestionClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ) ) );
-		$this->container->register( DaDataPostcodeClient::class, fn(): DaDataPostcodeClient => new DaDataPostcodeClient( $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ), $this->container->get( AddressSuggestionSettings::class )->timeout() ) );
+		$this->container->register( DaDataSuggestionClient::class, fn(): DaDataSuggestionClient => new DaDataSuggestionClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ) ) );
+		$this->container->register( DaDataPostcodeClient::class, fn(): DaDataPostcodeClient => new DaDataPostcodeClient( $this->container->get( DaDataTokenPool::class ), $this->container->get( AddressSuggestionSettings::class )->timeout() ) );
 		$this->container->register( RussianPostCourierCalcPostcodeFillStateService::class, fn(): RussianPostCourierCalcPostcodeFillStateService => new RussianPostCourierCalcPostcodeFillStateService( $this->container->get( LocationRepository::class ), $this->container->get( RussianPostCourierTariffProbeService::class ), null, null, null, $this->container->get( Logger::class ) ) );
 		$this->container->register( AddressSuggestionClientInterface::class, fn(): AddressSuggestionClientInterface => $this->container->get( DaDataSuggestionClient::class ) );
 		$this->container->register( AddressSuggestionService::class, fn(): AddressSuggestionService => new AddressSuggestionService( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionNormalizer::class ) ) );
@@ -899,7 +905,7 @@ final class Plugin {
 		);
 		$this->container->register( CheckoutAddressValidation::class, fn(): CheckoutAddressValidation => new CheckoutAddressValidation( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( WooCommerceRateMapper::class, fn(): WooCommerceRateMapper => new WooCommerceRateMapper() );
-		$this->container->register( WooCommercePackageMapper::class, fn(): WooCommercePackageMapper => new WooCommercePackageMapper( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( RussianPhoneNormalizer::class ), $this->container->get( CheckoutLogger::class ), $this->container->get( CheckoutLocationSearch::class ) ) );
+		$this->container->register( WooCommercePackageMapper::class, fn(): WooCommercePackageMapper => new WooCommercePackageMapper( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( RussianPhoneNormalizer::class ), $this->container->get( CheckoutLocationSearch::class ) ) );
 		$this->container->register(
 			ShippingMethodRegistrar::class,
 			fn(): ShippingMethodRegistrar => new ShippingMethodRegistrar(
@@ -956,7 +962,6 @@ final class Plugin {
 		$this->container->register( LocationIncrementalUpdateService::class, fn(): LocationIncrementalUpdateService => new LocationIncrementalUpdateService( null, $this->container->get( LocationIncrementalCandidateEnricher::class ), $this->container->get( DeliveryQuoteCacheManager::class ) ) );
 		$this->container->register( LocationsSnapshotExporter::class, fn(): LocationsSnapshotExporter => new LocationsSnapshotExporter() );
 		$this->container->register( LocationsSnapshotImporter::class, fn(): LocationsSnapshotImporter => new LocationsSnapshotImporter() );
-		$this->container->register( ObsoleteScheduledTaskCleanup::class, fn(): ObsoleteScheduledTaskCleanup => new ObsoleteScheduledTaskCleanup( $this->container->get( ActionScheduler::class ) ) );
 		$this->container->register( YearGenerator::class, fn(): YearGenerator => new YearGenerator() );
 		$this->container->register( TimezoneService::class, fn(): TimezoneService => new TimezoneService() );
 		$this->container->register( DeliveryDateFormatter::class, fn(): DeliveryDateFormatter => new DeliveryDateFormatter() );
@@ -1212,8 +1217,6 @@ final class Plugin {
 		$this->container->get( HPOSCompatibility::class )->register();
 
 		add_action( 'plugins_loaded', array( $this, 'boot_modules' ), 20 );
-		register_activation_hook( $this->environment->plugin_file(), array( $this, 'activate' ) );
-		register_deactivation_hook( $this->environment->plugin_file(), array( $this, 'deactivate' ) );
 		if ( $this->platform_runtime_enabled() ) {
 			$this->register_checkout_runtime_hooks();
 		}
@@ -1302,7 +1305,6 @@ final class Plugin {
 		$this->container->get( CalendarService::class )->ensure_initial_years();
 		$this->container->get( ActionScheduler::class );
 		$this->container->get( CalendarScheduler::class )->register();
-		$this->container->get( ObsoleteScheduledTaskCleanup::class )->register();
 	}
 
 	public function activate(): void {

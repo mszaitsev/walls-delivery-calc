@@ -37,6 +37,7 @@ function dpd_shipment_assert( bool $condition, string $message ): void {
 }
 
 function current_time( string $type ): string { return '2026-06-18 12:00:00'; }
+function wp_date( string $format, ?int $timestamp = null ): string { return gmdate( $format, $timestamp ?? strtotime( '2026-06-18 12:00:00 UTC' ) ); }
 function wp_salt( string $scheme = '' ): string { return 'dpd-shipment-smoke-' . $scheme; }
 function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_dpd_shipment_options'][ $key ] ?? $default; }
 function update_option( string $key, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_dpd_shipment_options'][ $key ] = $value; return true; }
@@ -231,6 +232,7 @@ dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'wdc-dpd-date-ro
 dpd_shipment_assert( array( DeliveryType::PICKUP, DeliveryType::COURIER ) === array_column( $draft['services'], 'delivery_type' ), 'DPD modal must allow pickup/courier delivery type switch.' );
 dpd_shipment_assert( array( 'ECN', 'CSM' ) === array_column( $draft['services'][0]['tariffs'], 'object_code' ), 'DPD modal must allow active tariff switch.' );
 
+$future_pickup_date = gmdate( 'Y-m-d', strtotime( '+1 day' ) );
 $request = $factory->create_request_from_admin_data(
 	$pickup_order,
 	array(
@@ -241,14 +243,14 @@ $request = $factory->create_request_from_admin_data(
 		'pickup_point_code' => 'MSK-RECEIVER-2',
 		'pickup_terminal_code' => 'NSK-SENDER-2',
 		'tariff_object' => 'CSM',
-		'date_pickup' => '2026-06-22',
+		'date_pickup' => $future_pickup_date,
 		'sender_contact_fio' => 'Курьер Иванов',
 	)
 );
 $preview = $adapter->build_safe_payload_preview( $request );
 $body = $preview['body']['request']['order'] ?? array();
 $header = $preview['body']['request']['header'] ?? array();
-dpd_shipment_assert( '2026-06-22' === (string) ( $header['datePickup'] ?? '' ), 'DPD dry-run payload must include request.header.datePickup.' );
+dpd_shipment_assert( $future_pickup_date === (string) ( $header['datePickup'] ?? '' ), 'DPD dry-run payload must include request.header.datePickup.' );
 dpd_shipment_assert( ! isset( $body['comment'] ), 'DPD dry-run payload must not contain comment.' );
 dpd_shipment_assert( 'CSM' === (string) ( $body['serviceCode'] ?? '' ), 'DPD pickup preview must use modal-selected serviceCode.' );
 dpd_shipment_assert( '49455627' === (string) ( $header['senderAddress']['cityId'] ?? '' ), 'DPD pickup preview must contain pickup cityId.' );
@@ -284,7 +286,7 @@ $normalized = array(
 );
 $courier_request = $factory->create_request_from_admin_data(
 	$courier_order,
-	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000', 'date_pickup' => '2026-06-22', 'sender_contact_fio' => 'Курьер Иванов', 'courier_instructions' => 'Позвонить за час' )
+	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000', 'date_pickup' => $future_pickup_date, 'sender_contact_fio' => 'Курьер Иванов', 'courier_instructions' => 'Позвонить за час' )
 );
 $courier_payload = $adapter->build_safe_payload_preview( $courier_request )['body']['request'] ?? array();
 $courier_body = $courier_payload['order'] ?? array();
@@ -292,10 +294,10 @@ $courier_header = $courier_payload['header'] ?? array();
 dpd_shipment_assert( 'NSK-SENDER' === (string) ( $courier_header['senderAddress']['terminalCode'] ?? '' ) && ! isset( $courier_body['receiverAddress']['terminalCode'] ), 'DPD courier preview must contain pickup terminalCode and no delivery terminalCode.' );
 dpd_shipment_assert( ! isset( $courier_body['receiverAddress']['addressString'] ) && 'Тестовая' === (string) ( $courier_body['receiverAddress']['street'] ?? '' ) && '9' === (string) ( $courier_body['receiverAddress']['house'] ?? '' ), 'DPD courier payload must use structured address fields for Russia.' );
 dpd_shipment_assert( 'Позвонить за час' === (string) ( $courier_body['receiverAddress']['instructions'] ?? '' ) && ! isset( $courier_body['comment'] ), 'DPD courier instructions must go to receiverAddress.instructions only.' );
-dpd_shipment_assert( str_contains( $draft_source, 'Оригинальный адрес покупателя' ) && str_contains( $draft_source, 'Нормализованный адрес DPD' ), 'DPD courier modal must expose address normalization fields.' );
-dpd_shipment_assert( str_contains( $draft_source, 'ФИО курьера' ) && str_contains( $draft_source, 'data-wdc-dpd-contact-fio' ) && str_contains( $draft_source, 'data-wdc-dpd-contact-history' ), 'DPD modal must expose courier contactFio with selectable history.' );
-dpd_shipment_assert( str_contains( $draft_source, 'Комментарии курьеру' ) && str_contains( $draft_source, 'maxlength' ) && str_contains( $draft_source, 'courier_instructions' ), 'DPD modal must expose 250-char courier instructions field.' );
-dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-dpd-address-field' ) && str_contains( $draft_source, 'street' ) && str_contains( $draft_source, 'house' ), 'DPD modal must include hidden structured address fields.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'Оригинальный адрес покупателя' ) && str_contains( $dpd_modal_extension_source, 'Нормализованный адрес DPD' ), 'DPD courier modal must expose address normalization fields.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'ФИО курьера' ) && str_contains( $dpd_modal_extension_source, 'data-wdc-dpd-contact-fio' ) && str_contains( $dpd_modal_extension_source, 'data-wdc-dpd-contact-history' ), 'DPD modal must expose courier contactFio with selectable history.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'Комментарии курьеру' ) && str_contains( $dpd_modal_extension_source, 'maxlength' ) && str_contains( $dpd_modal_extension_source, 'courier_instructions' ), 'DPD modal must expose 250-char courier instructions field.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'data-wdc-dpd-address-field' ) && str_contains( $dpd_modal_extension_source, 'street' ) && str_contains( $dpd_modal_extension_source, 'house' ), 'DPD modal must include hidden structured address fields.' );
 
 $settings_repo->set( DpdSettings::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY, '' );
 $warning_request = ( new OrderShipmentDraftFactory( new DeliveryServiceRepository(), new ShipmentServiceSettings(), null, null, null, null, null, $settings, $pickup_service ) )->create_request_from_admin_data( $pickup_order, array( 'places' => array( array( 'weight_g' => '1000', 'length_cm' => '10', 'width_cm' => '10', 'height_cm' => '10' ) ), 'recipient_phone' => '+79990000000' ) );
@@ -311,13 +313,12 @@ dpd_shipment_assert( in_array( 'Добавьте хотя бы одно груз
 dpd_shipment_assert( in_array( 'Адрес DPD курьер нужно обработать перед предпросмотром payload.', $builder->validate( $factory->create_request_from_admin_data( $courier_order, array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'recipient_phone' => '+79990000000' ) ) ), true ), 'DPD courier preview must require address normalization.' );
 $js_source = wdc_shipment_admin_js_bundle_source();
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-weight-hint' ) && str_contains( $js_source, 'hint.hidden = places.length !== 1' ), 'Single-place weight hint must be common and hidden for multi-place mode.' );
-dpd_shipment_assert( str_contains( $js_source, 'cityCodeRow.hidden = isDpd || !cityCode' ), 'DPD courier modal must not display CDEK city code after address normalization.' );
-dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-cdek-city-code-row <?php echo ( $is_cdek' ), 'CDEK courier modal must still display CDEK city code when normalization has it.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'data-wdc-cdek-city-code-row hidden' ) && str_contains( $js_source, 'cityCodeRow.hidden = !cityCode' ), 'The shared normalization row must start hidden and be revealed only when a CDEK city code exists.' );
 dpd_shipment_assert( str_contains( $js_source, 'function openNativeDatePicker' ) && str_contains( $js_source, 'input.showPicker()' ) && str_contains( $js_source, '[data-wdc-dpd-date-pickup]' ), 'DPD date input must try to open native date picker on interaction.' );
 dpd_shipment_assert( str_contains( $js_source, 'visiblePreviewPayload' ) && str_contains( $js_source, 'delete clone.dry_run' ) && str_contains( $js_source, 'delete clone.live_api_call' ), 'DPD visible preview must strip legacy debug meta.' );
 dpd_shipment_assert( str_contains( $js_source, 'syncDpdAddressFields' ) && str_contains( $js_source, 'data-wdc-dpd-contact-remove' ), 'DPD UI must sync DaData fields and allow removing one contactFio history entry.' );
 dpd_shipment_assert( str_contains( $js_source, 'initializeForm(findShipmentForm(modal), true)' ) && str_contains( $js_source, 'requestPreview(form);' ), 'DPD modal opening must trigger an initial preview request.' );
-dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-dpd-courier-instructions-row' ) && str_contains( $js_source, "row.hidden = deliveryType !== 'courier'" ), 'DPD courier instructions must be hidden for pickup and shown for courier.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'data-wdc-dpd-courier-instructions-row' ) && str_contains( $js_source, "row.hidden = deliveryType !== 'courier'" ), 'DPD courier instructions must be hidden for pickup and shown for courier.' );
 dpd_shipment_assert( str_contains( $js_source, 'const contactReady =' ) && ! str_contains( $js_source, '!contactReady || !placesReady' ), 'DPD create availability must not reference an undefined contactReady variable.' );
 dpd_shipment_assert( str_contains( $js_source, 'syncDpdAddressFields(form, snapshot)' ) && strpos( $js_source, 'syncDpdAddressFields(form, snapshot)' ) < strpos( $js_source, 'requestPreview(form);', strpos( $js_source, 'syncDpdAddressFields(form, snapshot)' ) ), 'Successful DPD courier normalization must sync hidden fields before refreshing preview.' );
 dpd_shipment_assert( str_contains( $js_source, "event.target.matches('[data-wdc-dpd-contact-fio]')" ) && str_contains( $js_source, 'window.clearTimeout(previous)' ) && str_contains( $js_source, 'requestPreview(form);' ), 'DPD sender contactFio input/blur must refresh preview automatically.' );
@@ -334,6 +335,6 @@ dpd_shipment_assert( in_array( 'Дата отправки DPD не может б
 $create_result = $adapter->create( $request );
 dpd_shipment_assert( ! $create_result->success && 'dpd_api_unavailable' === $create_result->error_code, 'DPD create shipment action must require configured API client.' );
 $registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-dpd_shipment_assert( $registry->has( DpdSettings::CARRIER_KEY ) && ! $registry->get( DpdSettings::CARRIER_KEY )->supports_status_auto_sync(), 'DPD adapter must be registered for manual create and must not support auto status sync.' );
+dpd_shipment_assert( $registry->has( DpdSettings::CARRIER_KEY ) && $registry->get( DpdSettings::CARRIER_KEY )->supports_status_auto_sync(), 'DPD adapter must be registered for manual create and current status autosync.' );
 
 echo "DPD shipment preparation smoke passed\n";

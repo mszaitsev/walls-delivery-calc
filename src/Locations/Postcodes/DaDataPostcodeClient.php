@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Locations\Postcodes;
 
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
-use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -13,7 +12,6 @@ final class DaDataPostcodeClient {
 
 	public function __construct(
 		private DaDataTokenPool $token_pool,
-		private Logger $logger,
 		private int $timeout = 3
 	) {
 	}
@@ -49,7 +47,6 @@ final class DaDataPostcodeClient {
 			}
 
 			$token_id = (string) ( $token['id'] ?? '' );
-			$this->logger->debug( 'DaData postcode request started.', array( 'endpoint' => 'findById/address', 'token_id' => $token_id ) );
 			$this->token_pool->set_last_used_token_id( $token_id );
 
 			try {

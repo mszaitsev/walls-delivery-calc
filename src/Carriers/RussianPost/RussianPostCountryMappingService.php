@@ -32,8 +32,6 @@ final class RussianPostCountryMappingService {
 			'unmatched_api_countries' => array(),
 			'errors'           => array(),
 		);
-		$this->logger->info( 'Russian Post country mapping refresh started.' );
-
 		$result = $this->client->fetch_countries();
 		if ( empty( $result['success'] ) || ! is_array( $result['raw'] ?? null ) ) {
 			$stats['errors'][] = (string) ( $result['error_code'] ?? 'api_error' );
@@ -113,7 +111,16 @@ final class RussianPostCountryMappingService {
 		}
 		$stats['unmatched_api_countries'] = $this->unmatched_api_payload( $items, $used_api_keys );
 
-		$this->logger->info( 'Russian Post country mapping refresh completed.', $stats );
+		$this->logger->info(
+			'Russian Post country mapping refresh completed.',
+			array(
+				'total' => $stats['total'],
+				'matched' => $stats['matched'],
+				'unmatched' => $stats['unmatched'],
+				'inserted' => $stats['inserted'],
+				'updated' => $stats['updated'],
+			)
+		);
 
 		return $stats;
 	}

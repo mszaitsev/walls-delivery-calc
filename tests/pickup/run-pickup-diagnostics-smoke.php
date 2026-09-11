@@ -222,59 +222,6 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
 $GLOBALS['wpdb'] = new wpdb();
 
-$migration_0022 = require dirname( __DIR__, 2 ) . '/database/migrations/0022_add_russian_post_pickup_location_id.php';
-$migration_0023 = require dirname( __DIR__, 2 ) . '/database/migrations/0023_drop_unused_locations_postcode.php';
-$pickup_table = 'wp_wdc_pickup_points_russian_post';
-$locations_table = 'wp_wdc_locations';
-
-$migration_0022();
-pickup_diagnostics_assert( array() === $GLOBALS['wpdb']->queries, 'Migration 0022 must do nothing safely if Russian Post pickup table is missing.' );
-pickup_diagnostics_assert( 0 === $GLOBALS['wpdb']->suppress_errors_calls, 'Migration 0022 must not call suppress_errors().' );
-
-$GLOBALS['wpdb'] = new wpdb();
-$GLOBALS['wpdb']->existing_tables[ $pickup_table ] = true;
-$migration_0022();
-pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->columns[ $pickup_table ]['location_id'] ), 'Migration 0022 must add location_id if column is absent.' );
-pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->indexes[ $pickup_table ]['idx_location_id'] ), 'Migration 0022 must add idx_location_id if index is absent.' );
-
-$GLOBALS['wpdb'] = new wpdb();
-$GLOBALS['wpdb']->existing_tables[ $pickup_table ] = true;
-$GLOBALS['wpdb']->columns[ $pickup_table ]['location_id'] = true;
-$migration_0022();
-$add_column_queries = array_values( array_filter( $GLOBALS['wpdb']->queries, static fn( string $query ): bool => str_contains( $query, 'ADD COLUMN location_id' ) ) );
-pickup_diagnostics_assert( array() === $add_column_queries, 'Migration 0022 must skip ADD COLUMN when location_id exists.' );
-pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->indexes[ $pickup_table ]['idx_location_id'] ), 'Migration 0022 must still add idx_location_id when column exists and index is absent.' );
-
-$GLOBALS['wpdb'] = new wpdb();
-$GLOBALS['wpdb']->schema_return_mode = 'object';
-$GLOBALS['wpdb']->existing_tables[ $pickup_table ] = true;
-$GLOBALS['wpdb']->columns[ $pickup_table ]['location_id'] = true;
-$GLOBALS['wpdb']->indexes[ $pickup_table ]['idx_location_id'] = true;
-$migration_0022();
-pickup_diagnostics_assert( array() === $GLOBALS['wpdb']->queries, 'Migration 0022 must skip ADD KEY when idx_location_id exists and handle object-like SHOW results.' );
-
-$GLOBALS['wpdb'] = new wpdb();
-$GLOBALS['wpdb']->schema_return_mode = 'array';
-$GLOBALS['wpdb']->existing_tables[ $locations_table ] = true;
-$GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] = true;
-$migration_0023();
-pickup_diagnostics_assert( empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] ) && ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] ), 'Migration 0023 must create postal_code for old schemas before dropping legacy postcode.' );
-$old_schema_queries = implode( "\n", $GLOBALS['wpdb']->queries );
-pickup_diagnostics_assert( str_contains( $old_schema_queries, 'ADD COLUMN postal_code' ) && str_contains( $old_schema_queries, 'UPDATE wp_wdc_locations SET postal_code = postcode' ) && str_contains( $old_schema_queries, 'DROP COLUMN postcode' ), 'Migration 0023 must add postal_code, preserve postcode values, then drop legacy postcode.' );
-
-$GLOBALS['wpdb'] = new wpdb();
-$GLOBALS['wpdb']->existing_tables[ $locations_table ] = true;
-$GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] = true;
-$GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] = true;
-$migration_0023();
-pickup_diagnostics_assert( empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] ) && ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] ), 'Migration 0023 must drop postcode when postal_code and postcode both exist.' );
-
-$GLOBALS['wpdb'] = new wpdb();
-$GLOBALS['wpdb']->existing_tables[ $locations_table ] = true;
-$GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] = true;
-$migration_0023();
-pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] ) && ! str_contains( implode( "\n", $GLOBALS['wpdb']->queries ), 'DROP COLUMN postcode' ), 'Migration 0023 must do nothing destructive when only postal_code exists.' );
-
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 1, 'fias_id' => '11111111-1111-1111-1111-111111111111', 'postal_code' => '630000', 'region_name' => 'Novosibirsk region', 'city_name' => 'Novosibirsk', 'settlement_name' => 'Novosibirsk', 'display_name' => 'Novosibirsk', 'latitude' => 55.0302, 'longitude' => 82.9204, 'active' => 1, 'country_code' => 'RU', 'searchable_text' => 'Novosibirsk region Novosibirsk' ),
@@ -408,19 +355,15 @@ pickup_diagnostics_assert( str_contains( $select_source, 'NULL AS distance_to_lo
 $locations_by_postcode_source = substr( $diagnostics_source, (int) strpos( $diagnostics_source, 'private function locations_by_postcode' ), 1200 );
 pickup_diagnostics_assert( str_contains( $locations_by_postcode_source, 'postal_code' ) && ! str_contains( $locations_by_postcode_source, 'WHERE active = 1 AND postcode' ), 'diagnostics locations_by_postcode must use canonical locations.postal_code.' );
 
-$locations_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0002_create_locations_table.php' );
-pickup_diagnostics_assert( str_contains( $locations_migration_source, 'postal_code varchar' ) && ! str_contains( $locations_migration_source, 'postcode varchar' ), 'fresh locations schema must create postal_code instead of legacy postcode.' );
+$locations_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' );
+pickup_diagnostics_assert( str_contains( $locations_migration_source, 'postal_code varchar(32) NOT NULL' ), 'Fresh locations schema must create canonical postal_code storage.' );
 $coordinate_enricher_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Locations/LocationCoordinateEnricher.php' );
 pickup_diagnostics_assert( ! str_contains( $coordinate_enricher_source, "\$location['postcode']" ) && ! str_contains( $coordinate_enricher_source, 'locations.postcode' ) && ! str_contains( $coordinate_enricher_source, 'l.postcode' ), 'Location code must not expect legacy locations.postcode.' );
 
 $location_repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Storage/LocationRepository.php' );
-$gar_import_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/GarPlacesCsvImporter.php' );
-$snapshot_exporter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationsSnapshotExporter.php' );
-$snapshot_importer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationsSnapshotImporter.php' );
 pickup_diagnostics_assert(
-	! str_contains( $location_repository_source . $gar_import_source . $snapshot_exporter_source . $snapshot_importer_source, 'wdc_location_aliases' )
-	&& str_contains( $location_repository_source, 'searchable_text' ),
-	'Canonical search/import/snapshot contracts must not depend on the retired alias table.'
+	str_contains( $location_repository_source, 'searchable_text' ),
+	'Canonical location search must use searchable_text.'
 );
 
 echo "Pickup diagnostics smoke test passed.\n";

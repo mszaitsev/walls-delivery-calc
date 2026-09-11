@@ -3,8 +3,6 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\RussianPost;
 
-use WallsShop\WDC\Infrastructure\Logging\Logger;
-
 defined( 'ABSPATH' ) || exit;
 
 final class RussianPostCourierTariffProbeService {
@@ -14,9 +12,6 @@ final class RussianPostCourierTariffProbeService {
 	private const UNAVAILABLE_ERROR_CODES = array( '2005', '2007', '2008', '2009', '2010' );
 
 	private float $last_request_at = 0.0;
-
-	public function __construct( private Logger $logger ) {
-	}
 
 	/**
 	 * @return array{success:bool,unavailable:bool,api_error:bool,failed:bool,http_code:int|null,postal_code:string,paynds:int|null,error_code:string,error_message:string,raw:array|string|null}
@@ -216,10 +211,6 @@ final class RussianPostCourierTariffProbeService {
 	 * @return array{success:bool,unavailable:bool,api_error:bool,failed:bool,http_code:int|null,postal_code:string,paynds:int|null,error_code:string,error_message:string,raw:array|string|null}
 	 */
 	private function result( bool $success, bool $api_error, ?int $http_code, string $postal_code, ?int $paynds, string $error_code, string $error_message, array|string|null $raw, bool $unavailable = false ): array {
-		if ( ! $success && $api_error ) {
-			$this->logger->debug( 'Russian Post courier tariff probe failed.', array( 'postal_code' => $postal_code, 'error_code' => $error_code, 'error_message' => $error_message ) );
-		}
-
 		return array(
 			'success' => $success,
 			'unavailable' => $unavailable,

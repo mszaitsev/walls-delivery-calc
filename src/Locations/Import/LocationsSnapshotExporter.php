@@ -28,7 +28,7 @@ final class LocationsSnapshotExporter {
 		$this->wpdb = $db ?? $wpdb;
 	}
 
-	public function export_to_file( string $path, string $version = '0.15.10', int $page_size = 1000 ): int {
+	public function export_to_file( string $path, string $version = '1.0.0', int $page_size = 1000 ): int {
 		$handle = fopen( $path, 'wb' );
 		if ( false === $handle ) {
 			throw new RuntimeException( 'Snapshot file cannot be opened for writing.' );
@@ -86,7 +86,7 @@ final class LocationsSnapshotExporter {
 		return $rows;
 	}
 
-	public function stream_download( string $version = '0.15.10' ): void {
+	public function stream_download( string $version = '1.0.0' ): void {
 		$file = wp_tempnam( 'wdc-locations-snapshot-' );
 		if ( ! is_string( $file ) || '' === $file ) {
 			throw new RuntimeException( 'Unable to create temporary snapshot file.' );
@@ -102,7 +102,7 @@ final class LocationsSnapshotExporter {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function create_job( string $path, string $version = '0.15.10' ): array {
+	public function create_job( string $path, string $version = '1.0.0' ): array {
 		return array(
 			'job_id'        => md5( $path . microtime( true ) ),
 			'path'          => $path,
@@ -139,7 +139,7 @@ final class LocationsSnapshotExporter {
 					$this->encode(
 						array(
 							'type'       => 'meta',
-							'version'    => (string) ( $job['version'] ?? '0.15.10' ),
+							'version'    => (string) ( $job['version'] ?? '1.0.0' ),
 							'tables'     => $this->tables,
 							'options'    => $this->options,
 							'created_at' => current_time( 'mysql' ),

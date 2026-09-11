@@ -62,21 +62,22 @@ final class DpdPickupPointAutoSync {
 	public function run_cron( string $time = '' ): void {
 		$time = $this->settings->sanitize_pickup_autosync_time( $time );
 		if ( ! $this->settings->pickup_autosync_enabled() || '' === $time || ! in_array( $time, $this->settings->pickup_autosync_times(), true ) ) {
-			$this->log( 'info', 'DPD pickup autosync skipped by settings.', array( 'time' => $time ) );
 			return;
 		}
 
 		$report = $this->importer->import_all( self::CONTEXT );
-		$this->log(
-			array() === $report->errors ? 'info' : 'warning',
-			'DPD pickup autosync finished.',
-			array(
-				'time' => $time,
-				'status' => '' !== $report->status ? $report->status : ( array() === $report->errors ? 'success' : 'error' ),
-				'saved' => $report->saved_count,
-				'errors' => count( $report->errors ),
-			)
-		);
+		if ( array() !== $report->errors ) {
+			$this->log(
+				'warning',
+				'DPD pickup autosync failed.',
+				array(
+					'time' => $time,
+					'status' => '' !== $report->status ? $report->status : 'error',
+					'saved' => $report->saved_count,
+					'errors' => count( $report->errors ),
+				)
+			);
+		}
 	}
 
 	/** @return array<string,string> */

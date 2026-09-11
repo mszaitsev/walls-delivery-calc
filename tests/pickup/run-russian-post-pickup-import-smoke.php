@@ -251,9 +251,8 @@ $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 501, 'fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'postal_code' => '630001', 'region_name' => 'РќРЎРћ', 'city_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє', 'settlement_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє', 'display_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє', 'active' => 1, 'country_code' => 'RU', 'searchable_text' => 'РќРЎРћ РќРѕРІРѕСЃРёР±РёСЂСЃРє' ),
 );
 $pickup_location_resolver = new RussianPostPickupLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), $GLOBALS['wpdb'] );
-$migration = require dirname( __DIR__, 2 ) . '/database/migrations/0021_create_russian_post_pickup_points_table.php';
-$migration();
-rp_pickup_assert( array_key_exists( 'wp_wdc_pickup_points_russian_post', $GLOBALS['wpdb']->tables ), 'Migration must create Russian Post carrier-specific table.' );
+$repo->create_schema_if_needed();
+rp_pickup_assert( array_key_exists( 'wp_wdc_pickup_points_russian_post', $GLOBALS['wpdb']->tables ), 'Repository schema owner must create the Russian Post carrier-specific table.' );
 $schema = $repo->schema_sql();
 rp_pickup_assert( ! str_contains( $schema, 'raw_reference' ) && ! str_contains( $schema, 'work_time_json' ) && str_contains( $schema, 'work_time TEXT NULL' ), 'Russian Post pickup schema must store compact work_time without raw JSON fields.' );
 $removed_fields = array( 'brand_name', 'ecom_options_json', 'services_json', 'phones_json', 'images_json', 'weight_limit_grams', 'size_limit_json', 'accepts_cash', 'accepts_card', 'partial_redemption', 'return_available', 'fitting_available', 'contents_checking', 'functionality_checking', 'raw_reference', 'work_time_json' );

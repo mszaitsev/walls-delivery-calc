@@ -335,12 +335,7 @@ $api = file_get_contents( $root . '/src/Carriers/OzonDelivery/Api/OzonDeliveryAp
 $importer = file_get_contents( $root . '/src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupImportService.php' ) ?: '';
 $repository = file_get_contents( $root . '/src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupRepository.php' ) ?: '';
 $parser_source = file_get_contents( $root . '/src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupParser.php' ) ?: '';
-$migration = file_get_contents( $root . '/database/migrations/0052_create_ozon_delivery_pickup_catalog.php' ) ?: '';
-$progress_migration = file_get_contents( $root . '/database/migrations/0053_add_ozon_delivery_pickup_progress_timestamp.php' ) ?: '';
-$schedule_migration = file_get_contents( $root . '/database/migrations/0054_change_ozon_delivery_pickup_schedule_storage.php' ) ?: '';
-$geo_migration_source = file_get_contents( $root . '/database/migrations/0055_add_ozon_delivery_pickup_geo_lookup_index.php' ) ?: '';
-$resilience_migration_source = file_get_contents( $root . '/database/migrations/0057_add_ozon_pickup_import_resilience_diagnostics.php' ) ?: '';
-$two_phase_migration_source = file_get_contents( $root . '/database/migrations/0058_add_ozon_pickup_two_phase_import.php' ) ?: '';
+$initial_schema = file_get_contents( $root . '/database/migrations/0001_initial_schema.php' ) ?: '';
 
 oz_pickup_assert( str_contains( $api, "'/v1/delivery-point/list'" ) && str_contains( $api, "'/v1/delivery-point/info'" ) && str_contains( $api, "'limit' => 100" ) && str_contains( $api, 'catch ( OzonDeliveryApiException $exception )' ) && str_contains( $api, "trim( \$path, '/' )" ) && str_contains( $api, '$exception->safe_code' ) && str_contains( $api, '$exception->retryable' ) && str_contains( $api, '$exception->metadata' ), 'official read-only pickup API contract and endpoint-aware HTTP exception wrapping are required.' );
 oz_pickup_assert( str_contains( $importer, 'run_discovery_step' ) && str_contains( $importer, 'run_enrichment_step' ) && str_contains( $importer, 'pending_ids' ) && str_contains( $importer, 'mark_ready_if_complete' ) && ! str_contains( $importer, "array( 'state' => 'ready' )" ) && str_contains( $importer, 'pickup_enrichment_incomplete' ), 'importer must use the guarded ready transition before activation.' );
@@ -351,48 +346,24 @@ oz_pickup_assert( str_contains( $importer, 'MAX_RETRIES = 3' ) && str_contains( 
 oz_pickup_assert( str_contains( $repository, 'wdc_ozon_delivery_pickup_ids' ) && str_contains( $repository, 'INSERT IGNORE' ) && str_contains( $repository, 'status=%s' ) && str_contains( $repository, "'pending'" ) && str_contains( $repository, "'enriched'" ) && str_contains( $repository, "'rejected'" ) && str_contains( $repository, 'enrichment_processed_count' ), 'repository must persist frozen IDs relationally and terminalize enrichment rows idempotently.' );
 oz_pickup_assert( str_contains( $repository, 'commit_discovery_page' ) && str_contains( $repository, 'commit_enrichment_batch' ) && str_contains( $repository, "'START TRANSACTION'" ) && str_contains( $repository, "'ROLLBACK'" ) && str_contains( $repository, "'COMMIT'" ) && str_contains( $repository, "'building'" ) && str_contains( $repository, "'enrichment'" ), 'discovery/enrichment commits must be transactional and must re-read generation state/phase before committing.' );
 oz_pickup_assert( str_contains( $repository, 'cancel_building_generation' ) && str_contains( $repository, "'cancelled'" ) && str_contains( $repository, 'cleanup_generation_rows' ) && str_contains( $repository, 'generation_can_fail' ) && str_contains( $repository, 'generation_is_building' ), 'manual cancellation must become terminal, clean partial rows, and protect against late retry/fail writes.' );
-oz_pickup_assert( str_contains( $migration, 'dbDelta' ) && str_contains( $migration, 'CREATE TABLE' ) && str_contains( $migration, 'schedule_json' ) && str_contains( $progress_migration, 'progress_updated_at' ) && str_contains( $schedule_migration, 'ADD COLUMN schedule' ) && str_contains( $schedule_migration, 'DROP COLUMN schedule_json' ) && ! str_contains( $schedule_migration, 'UPDATE ' ) && str_contains( $parser_source, "'schedule' =>" ) && ! str_contains( $parser_source, 'schedule_json' ), '0052 -> 0053 -> 0054 must replace legacy schedule storage without backfill.' );
-oz_pickup_assert( str_contains( $geo_migration_source, 'return static function (): void' ) && str_contains( $geo_migration_source, 'global $wpdb' ) && str_contains( $geo_migration_source, 'SHOW INDEX FROM {$quoted}' ) && str_contains( $geo_migration_source, 'ADD KEY active_geo_lookup (generation_id,is_active,latitude,longitude)' ) && str_contains( $geo_migration_source, 'postcondition' ), '0055 must follow the no-argument migration callback contract and verify the geo index postcondition.' );
-oz_pickup_assert( str_contains( $resilience_migration_source, "'retry_count'" ) && str_contains( $resilience_migration_source, "'safe_error_operation'" ) && str_contains( $resilience_migration_source, "'failed_cursor'" ) && str_contains( $resilience_migration_source, 'postcondition' ), '0057 must add retry and safe final-failure diagnostic fields with postconditions.' );
-oz_pickup_assert( str_contains( $two_phase_migration_source, 'wdc_ozon_delivery_pickup_ids' ) && str_contains( $two_phase_migration_source, 'generation_point' ) && str_contains( $two_phase_migration_source, 'generation_status_id' ) && str_contains( $two_phase_migration_source, "'phase'" ) && str_contains( $two_phase_migration_source, "'discovered_count'" ) && str_contains( $two_phase_migration_source, "'enrichment_processed_count'" ) && str_contains( $two_phase_migration_source, 'postcondition' ), '0058 must add the staging ID table and phase/progress generation columns with postconditions.' );
+oz_pickup_assert( str_contains( $initial_schema, 'schedule text NOT NULL' ) && ! str_contains( $initial_schema, 'schedule_json' ) && str_contains( $initial_schema, 'progress_updated_at' ) && str_contains( $parser_source, "'schedule' =>" ) && ! str_contains( $parser_source, 'schedule_json' ), 'The initial schema and parser must use only final Ozon schedule storage.' );
+oz_pickup_assert( str_contains( $initial_schema, 'active_geo_lookup' ) && str_contains( $initial_schema, 'retry_count' ) && str_contains( $initial_schema, 'safe_error_operation' ) && str_contains( $initial_schema, 'failed_cursor' ), 'The initial schema must include final Ozon geo and resilient failure diagnostics.' );
+oz_pickup_assert( str_contains( $initial_schema, 'wdc_ozon_delivery_pickup_ids' ) && str_contains( $initial_schema, 'generation_point' ) && str_contains( $initial_schema, 'generation_status_id' ) && str_contains( $initial_schema, 'discovered_count' ) && str_contains( $initial_schema, 'enrichment_processed_count' ), 'The initial schema must include final two-phase Ozon storage.' );
 oz_pickup_assert( ! str_contains( $repository, 'create_schema' ) && ! str_contains( $repository, 'dbDelta' ) && ! str_contains( $repository, 'CREATE TABLE' ) && ! str_contains( $repository, 'ALTER TABLE' ), 'Ozon repository must not contain runtime DDL.' );
 
-$geo_migration = require $root . '/database/migrations/0055_add_ozon_delivery_pickup_geo_lookup_index.php';
-oz_pickup_assert( is_callable( $geo_migration ) && 0 === ( new ReflectionFunction( $geo_migration ) )->getNumberOfRequiredParameters(), '0055 callback must be callable without arguments.' );
-$GLOBALS['wpdb'] = new OzonPickupGeoIndexMigrationWpdb( false );
-$geo_migration();
-oz_pickup_assert( 1 === $GLOBALS['wpdb']->alter_count && $GLOBALS['wpdb']->index_exists, '0055 must create the missing active_geo_lookup index.' );
-$GLOBALS['wpdb'] = new OzonPickupGeoIndexMigrationWpdb( true );
-$geo_migration();
-oz_pickup_assert( 0 === $GLOBALS['wpdb']->alter_count, '0055 must not alter the table when active_geo_lookup already exists.' );
-$GLOBALS['wpdb'] = new OzonPickupGeoIndexMigrationWpdb( false, true );
-try {
-	$geo_migration();
-	throw new RuntimeException( 'failed ALTER accepted' );
-} catch ( RuntimeException $exception ) {
-	oz_pickup_assert( 'Ozon pickup geo lookup index migration failed.' === $exception->getMessage(), '0055 must throw on ALTER failure.' );
-}
-$GLOBALS['wpdb'] = new OzonPickupGeoIndexMigrationWpdb( false, false, true );
-try {
-	$geo_migration();
-	throw new RuntimeException( 'missing postcondition accepted' );
-} catch ( RuntimeException $exception ) {
-	oz_pickup_assert( 'Ozon pickup geo lookup index migration postcondition failed.' === $exception->getMessage(), '0055 must throw when the index is still missing after ALTER.' );
-}
-
-$GLOBALS['wdc_options'] = array( 'wdc_db_version' => '0.141.4' );
+$GLOBALS['wdc_options'] = array( 'wdc_db_version' => '1.0.0' );
 $migration_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-ozon-pickup-migration-' . uniqid();
 mkdir( $migration_dir );
-file_put_contents( $migration_dir . DIRECTORY_SEPARATOR . '0055_add_ozon_delivery_pickup_geo_lookup_index.php', "<?php\nreturn static function (): void { if ( '1' === get_option( 'wdc_0055_fail_once', '1' ) ) { update_option( 'wdc_0055_fail_once', '0', false ); throw new RuntimeException( 'fail once' ); } };\n" );
+file_put_contents( $migration_dir . DIRECTORY_SEPARATOR . '0002_future_schema.php', "<?php\nreturn static function (): void { if ( '1' === get_option( 'wdc_future_fail_once', '1' ) ) { update_option( 'wdc_future_fail_once', '0', false ); throw new RuntimeException( 'fail once' ); } };\n" );
 try {
-	( new MigrationManager( '0.141.5-test', $migration_dir ) )->run();
+	( new MigrationManager( '1.0.1-test', $migration_dir ) )->run();
 	throw new RuntimeException( 'failed migration was marked applied' );
 } catch ( RuntimeException $exception ) {
-	oz_pickup_assert( 'fail once' === $exception->getMessage() && ! in_array( '0055_add_ozon_delivery_pickup_geo_lookup_index.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.141.4' === get_option( 'wdc_db_version', '' ), 'MigrationManager must not mark 0055 applied or advance db version after callback failure.' );
+	oz_pickup_assert( 'fail once' === $exception->getMessage() && ! in_array( '0002_future_schema.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '1.0.0' === get_option( 'wdc_db_version', '' ), 'MigrationManager must not mark a failed future migration applied or advance db version.' );
 }
-( new MigrationManager( '0.141.5-test', $migration_dir ) )->run();
-oz_pickup_assert( in_array( '0055_add_ozon_delivery_pickup_geo_lookup_index.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.141.5-test' === get_option( 'wdc_db_version', '' ), 'MigrationManager must rerun failed 0055 and mark it applied only after success.' );
-@unlink( $migration_dir . DIRECTORY_SEPARATOR . '0055_add_ozon_delivery_pickup_geo_lookup_index.php' );
+( new MigrationManager( '1.0.1-test', $migration_dir ) )->run();
+oz_pickup_assert( in_array( '0002_future_schema.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '1.0.1-test' === get_option( 'wdc_db_version', '' ), 'MigrationManager must rerun failed future migration and mark it applied only after success.' );
+@unlink( $migration_dir . DIRECTORY_SEPARATOR . '0002_future_schema.php' );
 @rmdir( $migration_dir );
 
 echo "Ozon Delivery pickup import smoke passed.\n";

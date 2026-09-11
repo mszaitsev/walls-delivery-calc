@@ -5,7 +5,6 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
-use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -25,7 +24,6 @@ final class WooCommercePackageMapper {
 		private ?SettingsRepository $settings = null,
 		private ?LocationRepository $location_repository = null,
 		private ?RussianPhoneNormalizer $phones = null,
-		private ?CheckoutLogger $logger = null,
 		private ?CheckoutLocationSearch $location_search = null
 	) {
 		$this->phones = $phones ?? new RussianPhoneNormalizer();
@@ -88,8 +86,6 @@ final class WooCommercePackageMapper {
 			$context,
 			$all_cart_items_total
 		);
-		$this->log_quote_request_context( $request, $location_context );
-
 		return $request;
 	}
 
@@ -607,32 +603,6 @@ final class WooCommercePackageMapper {
 
 	private function positive_location_id( mixed $value ): int {
 		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
-	}
-
-	/** @param array<string,mixed> $location_context */
-	private function log_quote_request_context( QuoteRequest $request, array $location_context ): void {
-		if ( ! $this->logger instanceof CheckoutLogger ) {
-			return;
-		}
-		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
-		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
-		$location_id = (string) ( $request->customer_context['location_id'] ?? $context['location_id'] ?? $context['id'] ?? '' );
-		$selected_location_id = (string) ( $request->customer_context['selected_location_id'] ?? '' );
-		$this->logger->debug(
-			'Checkout quote request location context resolved.',
-			array(
-				'checkout_country_code' => $request->country_code,
-				'checkout_city_text' => $request->destination->city,
-				'selected_location_id' => $selected_location_id,
-				'location_id' => $location_id,
-				'location_context_source' => (string) ( $location_context['source'] ?? 'missing' ),
-				'resolved_location_id' => '' !== trim( $selected_location_id ) ? $selected_location_id : $location_id,
-				'resolved_display_name' => (string) ( $location_context['display_name'] ?? $city['display_name'] ?? $context['display_name'] ?? '' ),
-				'resolved_place_name' => (string) ( $location_context['place_name'] ?? $city['place_name'] ?? $city['settlement_name'] ?? $context['settlement_name'] ?? $context['city_name'] ?? '' ),
-				'resolved_place_type' => (string) ( $location_context['place_type'] ?? $city['place_type'] ?? $city['settlement_type'] ?? '' ),
-				'resolved_place_level' => (string) ( $location_context['place_level'] ?? $city['place_level'] ?? '' ),
-			)
-		);
 	}
 
 	private function dpd_selected_terminal_code(): string {

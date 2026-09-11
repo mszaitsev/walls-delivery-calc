@@ -44,12 +44,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wdc_yandex_delivery_pickup_v2_schema'] = '';
 
-$migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0035_create_yandex_delivery_pickups_v2.php' );
+$migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' );
 $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2Repository.php' );
 $import_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2ImportService.php' );
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 
-yd_pickup_v2_assert( str_contains( $migration_source, 'YandexDeliveryPickupPointV2Repository' ), 'Migration must use the v2 repository.' );
+yd_pickup_v2_assert( str_contains( $migration_source, 'YandexDeliveryPickupPointV2Repository' ), 'The initial schema must use the v2 repository.' );
 yd_pickup_v2_assert( str_contains( $repository_source, 'wdc_yandex_delivery_pickup_points_v2' ), 'Repository must use a separate v2 table.' );
 yd_pickup_v2_assert( ! str_contains( $repository_source, 'payment_methods' ), 'V2 repository must not store payment_methods.' );
 yd_pickup_v2_assert( ! str_contains( $repository_source, 'pickup_services' ), 'V2 repository must not store pickup_services.' );

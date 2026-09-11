@@ -72,7 +72,6 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		}
 
 		$to = $this->locations->resolve( $request );
-		$this->logger->debug( 'CDEK location resolved.', $this->sanitize_location_result( $to ) );
 		if ( empty( $to['success'] ) ) {
 			return $this->empty_quote( $request, 'destination_city_not_resolved', $to );
 		}
@@ -99,7 +98,6 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				$tariff_candidates = $this->merge_tariff_candidates( $tariff_candidates, $single_tariffs, $single_candidate, $single_result );
 			} catch ( CdekApiException $exception ) {
 				$details = array_merge( $exception->details(), array( 'delivery_type' => $delivery_type, 'calculation_pass' => 'single_package' ) );
-				$this->logger->warning( 'CDEK single-package tarifflist failed.', $details );
 			}
 		}
 		$tariffs = array_map( static fn( array $candidate ): array => is_array( $candidate['tariff'] ?? null ) ? $candidate['tariff'] : array(), $tariff_candidates );
@@ -138,13 +136,6 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'skipped_unknown_count' => $skipped_unknown,
 			'skipped_other_type_count' => $skipped_other_type,
 		);
-		$this->logger->debug( 'CDEK tariff filter completed.', $filter_diagnostics );
-		if ( array() !== $tariffs && array() === $rates ) {
-			$this->logger->warning( 'CDEK tariff response has no matching tariffs for delivery type.', $filter_diagnostics );
-		}
-		if ( array() === $rates ) {
-			$this->logger->warning( 'CDEK quote returned empty.', array_merge( array( 'reason' => 'no_tariffs_available' ), $filter_diagnostics ) );
-		}
 
 		return new DeliveryQuote(
 			$this->quote_id( $request, $delivery_type ),
@@ -165,7 +156,6 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	 * @param array<string,mixed> $diagnostics
 	 */
 	private function empty_quote( QuoteRequest $request, string $reason, array $diagnostics = array() ): DeliveryQuote {
-		$this->logger->warning( 'CDEK quote returned empty.', array_merge( array( 'reason' => $reason ), $this->sanitize_empty_quote_diagnostics( $diagnostics ) ) );
 		return new DeliveryQuote( $this->quote_id( $request, $reason ), self::KEY, $request->destination, $request->package, array(), false, $reason, $reason, false, 'api', array_merge( array( 'fallback_reason' => $reason ), $diagnostics ) );
 	}
 

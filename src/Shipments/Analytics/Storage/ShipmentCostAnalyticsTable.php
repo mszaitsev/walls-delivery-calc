@@ -7,7 +7,6 @@ defined( 'ABSPATH' ) || exit;
 
 final class ShipmentCostAnalyticsTable {
 	public const TABLE_SUFFIX = 'wdc_shipment_cost_analytics';
-	public const MIGRATION = '0041_create_shipment_cost_analytics_table.php';
 
 	public function name(): string {
 		global $wpdb;

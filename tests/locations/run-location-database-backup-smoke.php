@@ -160,12 +160,6 @@ refused( fn() => $service->create() ); check( $before === $db->tables, 'Count mi
 [$db, $service, $lock, $names] = fixture();
 $db->tables[$names[0] . '_backup_20260907_080000'] = $db->tables[$names[0]];
 check( '20260907_080000' === $service->status()['timestamp'], 'Location-only legacy backup is restorable' ); $service->restore();
-$legacy = $db->prefix . 'wdc_location_aliases_backup_20260907_080000';
-$db->tables[$legacy] = array( 'schema' => 'incompatible legacy schema', 'rows' => array() );
-$service->restore();
-check( isset( $db->tables[$legacy] ) && ! isset( $db->tables[$db->prefix . 'wdc_location_aliases'] ), 'Legacy companion ignored; restore never recreates live alias table' );
-$service->create();
-check( isset( $db->tables[$legacy] ), 'Legacy alias backup remains inert after new backup' );
 [$db, $service, $lock, $names] = fixture(); old_snapshot( $db, $names, '20260907_080000' ); $db->fail = 'DROP TABLE';
 check( ! empty( $service->create()['warnings'] ), 'Old cleanup failure is reported' );
 check( '20260908_220530' === $service->status()['timestamp'], 'New valid backup survives old DROP failure' );
@@ -241,7 +235,7 @@ refused( fn() => $missing->download() );
 $guard = new \WallsShop\WDC\Locations\Services\LocationMaintenanceJobGuard();
 [$db, $service] = fixture();
 $lock = new LocationWriteLock( $db );
-foreach ( array( 'staging', 'candidate_seed', 'enrich_coordinates', 'waiting_dadata_limit', 'aliases_build', 'applying', 'cleanup' ) as $phase ) {
+foreach ( array( 'staging', 'candidate_seed', 'enrich_coordinates', 'waiting_dadata_limit', 'applying', 'cleanup' ) as $phase ) {
     update_option( $guard::UPDATE_OPTION, array( 'job_id' => 'owner', 'phase' => $phase ) );
     refused( fn() => $service->create(), 423 );
     refused( fn() => $service->restore(), 423 );

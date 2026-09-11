@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 define( 'ABSPATH', __DIR__ . '/../../' );
+require_once __DIR__ . '/../../src/Core/Autoloader.php';
+( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', __DIR__ . '/../../src' ) )->register();
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -50,6 +52,7 @@ require_once __DIR__ . '/../../src/Locations/Storage/LocationRepository.php';
 require_once __DIR__ . '/../../src/Locations/Storage/LocationDeliveryCodeRepository.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/DpdSettings.php';
 require_once __DIR__ . '/../../src/Carriers/YandexDelivery/YandexDeliverySettings.php';
+require_once __DIR__ . '/../../src/Infrastructure/Settings/PlatformRuntimeSettings.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/DpdCredentials.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/DpdEndpoints.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/DpdException.php';

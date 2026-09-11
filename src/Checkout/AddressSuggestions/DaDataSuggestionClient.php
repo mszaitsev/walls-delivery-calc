@@ -3,8 +3,6 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\AddressSuggestions;
 
-use WallsShop\WDC\Infrastructure\Logging\Logger;
-
 defined( 'ABSPATH' ) || exit;
 
 final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
@@ -12,8 +10,7 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 
 	public function __construct(
 		private AddressSuggestionSettings $settings,
-		private DaDataTokenPool $token_pool,
-		private Logger $logger
+		private DaDataTokenPool $token_pool
 	) {
 	}
 
@@ -44,7 +41,6 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 				return $this->failure( 'dadata_daily_limit_exhausted', 'All DaData tokens are exhausted for today.', 0 );
 			}
 
-			$this->logger->debug( 'DaData suggestions request started.', array( 'host' => 'suggestions.dadata.ru', 'endpoint' => 'suggest/address', 'stage' => $stage, 'token_id' => (string) $token['id'] ) );
 			$this->token_pool->set_last_used_token_id( (string) $token['id'] );
 
 			try {
@@ -82,7 +78,6 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 			$raw_body    = function_exists( 'wp_remote_retrieve_body' ) ? (string) wp_remote_retrieve_body( $response ) : (string) ( $response['body'] ?? '' );
 			$decoded     = '' !== trim( $raw_body ) ? json_decode( $raw_body, true ) : null;
 
-			$this->logger->debug( 'DaData suggestions response received.', array( 'status_code' => $status_code, 'stage' => $stage, 'token_id' => (string) $token['id'] ) );
 
 			if ( $this->is_limit_response( $status_code, $raw_body, $decoded ) ) {
 				$this->token_pool->record_request_attempt( (string) $token['id'], $stage, $query, true, true, $status_code, 'dadata_daily_limit_exhausted' );

@@ -87,7 +87,6 @@ final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteC
 			$pickup_base = $raw_pickup->add( $insurance );
 			$courier_base = $raw_pickup->add( $effective_delivery_component )->add( $insurance );
 			$almaty_free_courier_applied = $this->settings->almaty_free_courier() && $this->is_almaty_destination( $destination );
-			$this->log_quote_success( $payload, $result, $pickup_base, $courier_base, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $local_terminal, $request );
 			$rates = array(
 				$this->pickup_rate( $result, $destination, $local_terminal, $pickup_base, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request ),
 				$this->courier_rate( $result, $destination, $local_terminal, $courier_base, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request ),
@@ -269,53 +268,9 @@ final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteC
 			}
 		}
 		if ( 'jet_destination_location_missing' === $code ) {
-			$this->logger->debug( 'Jet Logistic quote precondition is incomplete.', $context );
 			return;
 		}
 		$this->logger->warning( 'Jet Logistic quote failed.', $context );
-	}
-
-	/** @param array<string,mixed> $payload */
-	private function log_quote_success( array $payload, object $result, Money $pickup_base, Money $courier_base, Money $insurance, Money $effective_delivery_component, bool $almaty_free_courier_applied, bool $local_terminal, QuoteRequest $request ): void {
-		if ( ! $this->logger instanceof Logger ) {
-			return;
-		}
-		$this->logger->debug(
-			'Jet Logistic quote calculated.',
-			array(
-				'request_city_from' => (string) ( $payload['cityfrom'] ?? '' ),
-				'request_city_to' => (string) ( $payload['cityto'] ?? '' ),
-				'request_weight_kg' => (string) ( $payload['ves'] ?? '' ),
-				'request_volume_m3' => (string) ( $payload['obm3'] ?? '' ),
-				'request_max_side_m' => (string) ( $payload['dlina'] ?? '' ),
-				'request_places' => (string) ( $payload['mest'] ?? '' ),
-				'request_goods_cost_rub' => (string) ( $payload['cost'] ?? '' ),
-				'request_sdoc' => (string) ( is_array( $payload['dops'] ?? null ) ? ( $payload['dops']['D_SDOC'] ?? '' ) : '' ),
-				'response_price_zabor' => (string) $result->price_zabor,
-				'response_price_terminal' => (string) $result->price_terminal,
-				'response_price_delivery' => (string) $result->price_delivery,
-				'response_price_dop' => (string) $result->price_dop,
-				'response_city_from' => $result->city_from,
-				'response_city_terminal_from' => $result->city_terminal_from,
-				'response_city_terminal_to' => $result->city_terminal_to,
-				'response_city_to' => $result->city_to,
-				'response_day_from' => null === $result->day_from ? '' : (string) $result->day_from,
-				'response_day_to' => null === $result->day_to ? '' : (string) $result->day_to,
-				'response_valuta' => $result->valuta,
-				'response_valuta_name' => $result->valuta_name,
-				'insurance_percent' => (string) $this->settings->insurance_percent(),
-				'insurance_min_rub' => (string) $this->settings->insurance_min_rub(),
-				'insurance_rub' => (string) $insurance->get_rubles(),
-				'goods_cost_rub' => (string) $request->package->cart_total->get_rubles(),
-				'effective_price_delivery_rub' => (string) $effective_delivery_component->get_rubles(),
-				'almaty_free_courier_applied' => $almaty_free_courier_applied ? 'yes' : 'no',
-				'calculated_pickup_base_rub' => (string) $pickup_base->get_rubles(),
-				'calculated_courier_base_rub' => (string) $courier_base->get_rubles(),
-				'calculated_pickup_rub' => (string) $pickup_base->get_rubles(),
-				'calculated_courier_rub' => (string) $courier_base->get_rubles(),
-				'local_terminal' => $local_terminal ? 'yes' : 'no',
-			)
-		);
 	}
 
 	private function quote_id( QuoteRequest $request, string $suffix ): string {

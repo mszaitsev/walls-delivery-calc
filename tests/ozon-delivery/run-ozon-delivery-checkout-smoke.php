@@ -380,16 +380,8 @@ $two_places_request = ( new WooCommercePackageMapper( null, $session, null, $loc
 $two_places_request = oz_checkout_with_delivery_type( $two_places_request, DeliveryType::PICKUP );
 $logs_before_success = count( $GLOBALS['oz_checkout_logs'] );
 $two_places_quote = $runtime_carrier->quote( $two_places_request );
-$success_log = $GLOBALS['oz_checkout_logs'][ $logs_before_success ] ?? array();
-$success_context = is_array( $success_log['context'] ?? null ) ? $success_log['context'] : array();
-oz_checkout_assert( $logs_before_success + 1 === count( $GLOBALS['oz_checkout_logs'] ) && 'info' === (string) ( $success_log['level'] ?? '' ) && 'Ozon Delivery checkout quote calculated.' === (string) ( $success_log['message'] ?? '' ), 'A successful Ozon quote must add exactly one INFO diagnostic record.' );
-oz_checkout_assert( 1 === count( $two_places_quote->rates ) && 2 === (int) ( $success_context['packages_count'] ?? 0 ) && 2 === count( is_array( $success_context['places'] ?? null ) ? $success_context['places'] : array() ) && 2 === count( is_array( $success_context['postings'] ?? null ) ? $success_context['postings'] : array() ), 'Success context must keep packages_count, expanded places and normalized postings consistent.' );
-oz_checkout_assert( '1990.00' === (string) ( $success_context['total_declared_value_rub'] ?? '' ) && '995.00' === (string) ( $success_context['declared_value_per_posting_rub'] ?? '' ) && '212.00' === (string) ( $success_context['delivery_total_rub'] ?? '' ) && '20.00' === (string) ( $success_context['insurance_total_rub'] ?? '' ) && '232.00' === (string) ( $success_context['total_rub'] ?? '' ), 'Success context must use normalized declared-value and delivery/insurance totals from the quote result.' );
-foreach ( is_array( $success_context['postings'] ?? null ) ? $success_context['postings'] : array() as $posting ) {
-	oz_checkout_assert( '106.00' === (string) ( $posting['delivery_cost_rub'] ?? '' ) && '10.00' === (string) ( $posting['insurance_cost_rub'] ?? '' ) && '116.00' === (string) ( $posting['total_cost_rub'] ?? '' ) && 5 === (int) ( $posting['delivery_days'] ?? 0 ), 'Success context must expose safe normalized costs for each posting.' );
-}
-$success_context_json = wp_json_encode( $success_context ) ?: '';
-oz_checkout_assert( ! str_contains( $success_context_json, '+7913' ) && ! str_contains( $success_context_json, 'ozon-long-smoke' ) && ! str_contains( $success_context_json, 'Длинный тестовый товар' ) && ! str_contains( $success_context_json, 'Красный проспект' ) && ! str_contains( $success_context_json, 'secret' ), 'Success context must not contain phone, SKU, product, address or credentials.' );
+oz_checkout_assert( $logs_before_success === count( $GLOBALS['oz_checkout_logs'] ), 'A successful Ozon checkout quote must not emit production logs.' );
+oz_checkout_assert( 1 === count( $two_places_quote->rates ) && 2 === (int) ( $two_places_quote->rates[0]->meta['packages_count'] ?? 0 ), 'Successful two-place Ozon quote must retain its business result without relying on log context.' );
 $session->save_rates( array( OzonDeliveryCarrier::RATE_ID => oz_checkout_stored_rate( $ozon_rate ) ) );
 $provider = new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) );
 $resolver = new CheckoutPickupPointProviderQueryResolver( $session );

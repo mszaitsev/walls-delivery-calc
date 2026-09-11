@@ -1,24 +1,16 @@
 # Rules
 
-Version: 0.155.9
+Version: 1.0.0
 
-0.155.6 adds a full-cart application condition to the Rule Engine. Existing persisted `condition_type=order_total` is not renamed and still evaluates the current WooCommerce shipping package total after sale prices/coupons; only its UI label changes from `Сумма заказа` to `Сумма доставляемых товаров`. New persisted `condition_type=cart_total` is labeled `Сумма всей корзины` and evaluates `RuleEvaluationContext::all_cart_items_total()`, which includes all cart item lines after sale prices/coupons and excludes shipping, fees, and taxes. Non-Woo contexts keep the typed fallback `all_cart_items_total() = order_total`.
+The Rule Engine distinguishes the current shipping package item total (`order_total`) from the full cart item total (`cart_total`). Both use post-discount product totals and exclude shipping, fees, and taxes; outside WooCommerce checkout, the typed full-cart value falls back to the package total.
 
-0.155.5 clarifies money bases for the `Изменить цену` action. Persisted `percent_of_order` remains the WooCommerce shipping package total (`contents_cost`) and is presented as `% от физ. товаров`; persisted `percent_of_order_and_delivery` remains package total plus current delivery price and is presented as `% от физ. товаров и доставки`. New `percent_of_cart` and `percent_of_cart_and_delivery` use the full cart item total after sale prices and WooCommerce coupons, including virtual/downloadable items, and exclude shipping, fees, and taxes. Outside Woo checkout, missing full-cart context falls back to `order_total` for backward compatibility.
+Price-change operations expose package and full-cart percentage bases, with optional inclusion of the current delivery price. Persisted package-based identifiers keep their established semantics.
 
-Rules live under `src/Rules`. The rule engine evaluates delivery conditions and operations used by checkout and delivery services.
+Rules live under `src/Rules`. The rule engine evaluates delivery conditions and operations used by checkout and delivery services. Repositories own persistence; application behavior belongs in `RuleEngine`, `RuleEvaluator`, `ConditionEvaluator`, and `RuleSimulator`.
 
-Repositories store rule data. Application logic belongs in services such as `RuleEngine`, `RuleEvaluator`, `ConditionEvaluator`, and `RuleSimulator`.
+Rule Engine domain/services do not call WooCommerce globals. WooCommerce totals enter through `WooCommercePackageMapper`, `QuoteRequest`, and `RuleEvaluationContext`.
 
-Rule Engine domain/services do not call WooCommerce globals. WooCommerce-specific totals are mapped at the checkout boundary into `QuoteRequest::all_cart_items_total()` and then into `RuleEvaluationContext::all_cart_items_total()`.
-
-Rules may change price, delivery days/date, availability, labels/comments, or delivery-service behavior. Rule evaluation should leave an audit trail sufficient for admin review and order snapshots.
-
-Manual delivery pricing is calculated before Rule Engine evaluation. The manual tariff minimum for `per_kg` is part of the manual base formula, while the DeliveryService minimum price and round-up-to-ruble settings remain generic post-processing after rules. Rule Engine must not contain manual-specific pricing branches.
-
-Delivery-day rules run after checkout normalizes raw carrier lead time into calendar days. The canonical order is carrier raw lead time -> resolved shop processing working days -> shop processing calendar -> carrier working-day conversion -> delivery date rules -> planned date. Fixed mode uses the global `shop_processing_working_days` setting; dynamic mode resolves the same shop-processing slot from the cached WooCommerce order queue. Older manual processing-day additions in rules should be removed manually by an administrator to avoid double-increasing delivery time.
-
-PEK light-cargo bag/plombing surcharges are store-owned base-price adjustments, not Rule Engine rules. For PEK, `api_base_price_rub` already includes the configured non-zero bag and/or plombing surcharge before rules run, while the pure carrier `costTotal` is stored separately as `pek_carrier_base_price_rub`/`pek_carrier_price_kopecks`. Formula visualization may add `Добавлен мешок и пломбировка`, `Добавлен мешок`, or `Добавлена пломбировка` before rule operations, including when no regular rule applies. These comments are not added to `applied_rules`, and `price_delta_rub` is calculated from the adjusted base so PEK store surcharges are not counted as rule effects.
+Rules may change price, delivery days/date, availability, labels/comments, or delivery-service behavior. Evaluation leaves an audit trail suitable for admin review and order snapshots. Manual delivery pricing is calculated before rules; generic minimum-price and ruble-rounding policy remains post-processing.
 
 ## Service Rule Simulation
 

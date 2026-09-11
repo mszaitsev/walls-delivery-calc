@@ -178,7 +178,6 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 					$this->request_builder->last_diagnostics(),
 					array( 'courier_pricing_source' => 'checkout_address', 'courier_fallback_used' => false, 'courier_primary_error_code' => $this->error_code( $exception ) )
 				);
-				$this->log_courier_primary_error( $exception, $request );
 			}
 		} else {
 			$primary_error = new YandexDeliveryApiException( 'Недостаточно адреса для расчета курьера Яндекс.Доставки.', array( 'error_code' => 'courier_address_missing' ) );
@@ -367,25 +366,6 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 		}
 
 		return DeliveryType::COURIER === $delivery_type ? 'Не удалось рассчитать курьерскую доставку Яндекс.Доставки.' : 'Не удалось рассчитать доставку Яндекс.Доставки до ПВЗ.';
-	}
-
-	private function log_courier_primary_error( Throwable $exception, QuoteRequest $request ): void {
-		if ( ! $this->logger instanceof Logger ) {
-			return;
-		}
-		$details = $exception instanceof YandexDeliveryApiException ? $exception->details() : array();
-		$this->logger->warning(
-			'Yandex Delivery primary courier pricing failed; pickup-address fallback will be attempted.',
-			$this->settings->sanitize_for_diagnostics(
-				array(
-					'delivery_type' => DeliveryType::COURIER,
-					'error' => $exception->getMessage(),
-					'error_code' => $this->error_code( $exception ),
-					'location_id' => $this->destination_location_id( $request ),
-					'details' => $details,
-				)
-			)
-		);
 	}
 
 	private function log_pricing_error( string $delivery_type, Throwable $exception, QuoteRequest $request ): void {

@@ -53,14 +53,15 @@ final class DpdEventSyncService {
 				} else {
 					$result->confirm_status = $confirm ? 'missing_doc_id' : 'disabled';
 				}
-				$this->log( 'info', 'DPD getEvents batch processed.', array( 'docId' => $doc_id, 'resultComplete' => $result_complete, 'events' => count( $events ), 'updated' => $result->updated, 'unchanged' => $result->unchanged, 'unmatched' => $result->unmatched, 'confirm' => $result->confirm_status, 'batch' => $batch ) );
 				if ( ! $confirm || $result_complete ) { break; }
 				if ( self::MAX_PACKAGES === $batch ) { $result->success = false; $result->message = 'DPD events batch limit reached; запустите обновление ещё раз.'; $result->extra['warning'] = 'batch_limit'; }
 			}
 		} finally {
 			$duration_ms = max( 0, (int) round( ( microtime( true ) - $started_ms ) * 1000 ) );
 			$result->extra['duration_ms'] = $duration_ms;
-			$this->log( 'info', 'DPD getEvents sync finished.', array( 'packages' => $result->packages, 'events' => $result->events, 'updated' => $result->updated, 'unchanged' => $result->unchanged, 'unmatched' => $result->unmatched, 'confirm' => $result->confirm_status, 'success' => $result->success ? 'yes' : 'no', 'duration_ms' => $duration_ms ) );
+			if ( ! $result->success ) {
+				$this->log( 'warning', 'DPD getEvents sync failed.', array( 'packages' => $result->packages, 'events' => $result->events, 'updated' => $result->updated, 'unmatched' => $result->unmatched, 'confirm' => $result->confirm_status, 'duration_ms' => $duration_ms ) );
+			}
 			$this->release_lock( $token );
 		}
 		return $result;

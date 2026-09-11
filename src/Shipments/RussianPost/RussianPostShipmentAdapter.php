@@ -176,7 +176,6 @@ final class RussianPostShipmentAdapter implements CarrierShipmentAdapterInterfac
 		}
 
 		$order_nums = $this->payload_order_nums( $orders );
-		$this->log_create_attempt( $request, $orders, $order_nums );
 		$unexpected_order_nums = $this->unexpected_order_nums( $request, $order_nums );
 		if ( array() !== $unexpected_order_nums ) {
 			$this->log_blocked_order_nums( $request, $orders, $order_nums, $unexpected_order_nums );
@@ -323,28 +322,6 @@ final class RussianPostShipmentAdapter implements CarrierShipmentAdapterInterfac
 			array_filter(
 				$order_nums,
 				static fn ( string $order_num ): bool => $order_num !== $expected && 1 !== preg_match( '/^' . preg_quote( $expected, '/' ) . '-\d+$/', $order_num )
-			)
-		);
-	}
-
-	/**
-	 * @param array<int,array<string,mixed>> $orders
-	 * @param array<int,string> $order_nums
-	 */
-	private function log_create_attempt( ShipmentCreateRequest $request, array $orders, array $order_nums ): void {
-		if ( ! $this->logger instanceof Logger ) {
-			return;
-		}
-		$this->logger->info(
-			'Russian Post shipment create payload prepared',
-			array(
-				'order_id' => $request->order_id,
-				'request_order_id' => $request->order_id,
-				'order_num' => $this->request_order_num( $request ),
-				'payload_rows' => count( $orders ),
-				'order_nums' => $order_nums,
-				'method' => 'PUT',
-				'path' => '/2.0/user/backlog',
 			)
 		);
 	}

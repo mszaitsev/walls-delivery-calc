@@ -1,1322 +1,896 @@
-Folder PATH listing
-Volume serial number is A0AC-74BD
-C:.
-|   .gitignore
-|   README.md
-|   tree.txt
-|   uninstall.php
-|   walls-delivery-calc.php
-|
-+---.agents
-+---assets
-|   +---admin
-|   |   |   .gitkeep
-|   |   |   calendar-admin.css
-|   |   |   calendar-admin.js
-|   |   |   delivery-services-shop-processing.js
-|   |   |   dpd-geography-import.js
-|   |   |   locations-admin.css
-|   |   |   locations-incremental-update.js
-|   |   |   manual-delivery-services.js
-|   |   |   order-delivery-recalculation.css
-|   |   |   order-delivery-recalculation.js
-|   |   |   ozon-delivery-pickup-sync.js
-|   |   |   rules-admin.css
-|   |   |   rules-admin.js
-|   |   |   russian-post-pickup-import.js
-|   |   |   shipment-cost-analytics.js
-|   |   |   shipments-admin.css
-|   |   |   shipments-admin.js
-|   |   |   yandex-delivery-pickup-v2-runner.js
-|   |   |
-|   |   \---shipments
-|   |       |   shipment-allocation.js
-|   |       |   shipment-core.js
-|   |       |   shipment-events.js
-|   |       |   shipment-picker.js
-|   |       |   shipment-polling.js
-|   |       |   shipment-preview.js
-|   |       |   shipment-status.js
-|   |       |
-|   |       \---extensions
-|   |               cdek.js
-|   |               dpd.js
-|   |               ozon-delivery.js
-|   |               pek.js
-|   |               russian-post.js
-|   |               yandex.js
-|   |
-|   +---frontend
-|   |   |   .gitkeep
-|   |   |   checkout-address-fields.js
-|   |   |   checkout-address-suggestions.css
-|   |   |   checkout-address-suggestions.js
-|   |   |   checkout-city-selector.css
-|   |   |   checkout-city-selector.js
-|   |   |   checkout-rates.css
-|   |   |   checkout-sort.js
-|   |   |   courier-address-summary.js
-|   |   |   domestic-tariff-selector.css
-|   |   |   domestic-tariff-selector.js
-|   |   |   pickup-foundation.css
-|   |   |
-|   |   \---pickup-map
-|   |       |   wdc-pickup-api.js
-|   |       |   wdc-pickup-checkout.js
-|   |       |   wdc-pickup-map.css
-|   |       |   wdc-pickup-map.js
-|   |       |   wdc-pickup-modal.js
-|   |       |
-|   |       \---providers
-|   |               wdc-map-provider-leaflet.js
-|   |               wdc-map-provider-yandex.js
-|   |
-|   \---vendor
-|       \---leaflet
-|           |   leaflet.css
-|           |   leaflet.js
-|           |
-|           \---images
-|                   layers-2x.png
-|                   layers.png
-|                   marker-icon-2x.png
-|                   marker-icon.png
-|                   marker-shadow.png
-|
-+---database
-|   \---migrations
-|           .gitkeep
-|           0001_create_calendar_days_table.php
-|           0002_create_locations_table.php
-|           0003_create_location_aliases_table.php
-|           0004_create_rules_table.php
-|           0005_create_rule_conditions_table.php
-|           0006_create_pickup_points_table.php
-|           0007_create_gar_changes_table.php
-|           0008_create_gar_places_import_tables.php
-|           0009_add_location_alias_unique_key.php
-|           0010_add_gar_district_columns.php
-|           0011_add_location_region_type.php
-|           0013_add_rule_condition_group_logic.php
-|           0014_add_rule_operation_text.php
-|           0015_add_rule_condition_group_expression.php
-|           0016_create_russian_post_country_mappings.php
-|           0017_add_russian_post_country_match_source.php
-|           0018_create_delivery_services_tables.php
-|           0019_add_delivery_service_include_packaging_weight.php
-|           0020_add_delivery_service_customer_comments.php
-|           0021_create_russian_post_pickup_points_table.php
-|           0022_add_russian_post_pickup_location_id.php
-|           0023_drop_unused_locations_postcode.php
-|           0024_add_locations_active_country_index.php
-|           0025_add_locations_russianpost_courier_calc_postal_code.php
-|           0026_unify_russian_post_domestic_service.php
-|           0027_create_cdek_tariffs_table.php
-|           0028_add_cdek_tariff_limits.php
-|           0029_add_cdek_tariff_delivery_mode.php
-|           0030_create_location_delivery_codes.php
-|           0031_create_dpd_pickup_points_table.php
-|           0035_create_yandex_delivery_pickups_v2.php
-|           0036_create_yandex_delivery_geo_v2_table.php
-|           0037_add_coverage_radius_to_yandex_delivery_geo_v2.php
-|           0038_create_yandex_location_mapping_v2.php
-|           0039_create_yandex_region_mapping_v2.php
-|           0040_create_yandex_location_manual_overrides_v2.php
-|           0041_create_shipment_cost_analytics_table.php
-|           0042_seed_cdek_eaeu_countries.php
-|           0043_allow_external_locations_without_gar_fias.php
-|           0044_create_jet_logistic_geography_tables.php
-|           0045_create_jet_logistic_status_mappings.php
-|           0046_add_import_token_to_jet_logistic_cities.php
-|           0047_simplify_jet_logistic_status_mappings.php
-|           0048_create_pek_location_mappings.php
-|           0049_create_pek_terminals.php
-|           0050_repair_pek_foundation_schema.php
-|           0051_migrate_pek_mapping_precision_column.php
-|           0052_create_ozon_delivery_pickup_catalog.php
-|           0053_add_ozon_delivery_pickup_progress_timestamp.php
-|           0054_change_ozon_delivery_pickup_schedule_storage.php
-|           0055_add_ozon_delivery_pickup_geo_lookup_index.php
-|           0056_add_jet_logistic_default_status_mappings.php
-|           0057_add_ozon_pickup_import_resilience_diagnostics.php
-|           0058_add_ozon_pickup_two_phase_import.php
-|           0059_add_ozon_pickup_generation_lock_owner.php
-|           0060_create_manual_delivery_geography.php
-|           0061_make_manual_delivery_geography_country_aware.php
-|           0062_create_manual_delivery_weight_ranges.php
-|           0063_create_manual_delivery_pickup_points.php
-|           0064_drop_location_aliases.php
-|
-+---docs
-|   |   README.md
-|   |
-|   +---architecture
-|   |       dependency-injection.md
-|   |       plugin-architecture.md
-|   |       shipment-framework.md
-|   |
-|   +---development
-|   |       chat-start.md
-|   |       codex-prompt-template.md
-|   |       coding-rules.md
-|   |       development-workflow.md
-|   |       new-carrier-guide.md
-|   |       testing-and-regression.md
-|   |
-|   +---dpd
-|   |       ws-integration-guide.docx
-|   |
-|   +---operations
-|   |       cron-and-background-jobs.md
-|   |       installation-and-runtime.md
-|   |       project-status.md
-|   |       technical-debt.md
-|   |       troubleshooting.md
-|   |
-|   +---reference
-|   |       walls-delivery-calc-tech-spec.md
-|   |
-|   +---research
-|   |       fias-auto-update-history.md
-|   |
-|   \---subsystems
-|           checkout.md
-|           locations.md
-|           packaging.md
-|           rules.md
-|           shipments.md
-|
-+---src
-|   |   Export-GarPlaces.ps1
-|   |
-|   +---Admin
-|   |       AdminMenu.php
-|   |       AdminNotices.php
-|   |       ScheduledTaskCatalog.php
-|   |       SettingsAdminPage.php
-|   |
-|   +---Calendar
-|   |   |   .gitkeep
-|   |   |   CalendarTypes.php
-|   |   |
-|   |   +---Admin
-|   |   |       CalendarAdminPage.php
-|   |   |
-|   |   +---Services
-|   |   |       CalendarScheduler.php
-|   |   |       CalendarService.php
-|   |   |       DeliveryDateCalculator.php
-|   |   |       DeliveryDateFormatter.php
-|   |   |       TimezoneService.php
-|   |   |       YearGenerator.php
-|   |   |
-|   |   +---Storage
-|   |   |       CalendarRepository.php
-|   |   |
-|   |   \---ValueObjects
-|   |           .gitkeep
-|   |
-|   +---Carriers
-|   |   |   .gitkeep
-|   |   |
-|   |   +---Cdek
-|   |   |   |   CdekCredentials.php
-|   |   |   |   CdekLocationResolver.php
-|   |   |   |   CdekSettings.php
-|   |   |   |
-|   |   |   +---Api
-|   |   |   |       CdekApiClient.php
-|   |   |   |       CdekApiException.php
-|   |   |   |       CdekApiResponse.php
-|   |   |   |       CdekHttpClientInterface.php
-|   |   |   |       CdekOAuthTokenService.php
-|   |   |   |       WpCdekHttpClient.php
-|   |   |   |
-|   |   |   \---Tariffs
-|   |   |           CdekTariffRepository.php
-|   |   |           CdekTariffSyncService.php
-|   |   |
-|   |   +---Contracts
-|   |   |       CarrierAdapterInterface.php
-|   |   |       CarrierQuoteCacheContextProviderInterface.php
-|   |   |
-|   |   +---Dpd
-|   |   |   |   DpdApiClient.php
-|   |   |   |   DpdCityResolver.php
-|   |   |   |   DpdCredentials.php
-|   |   |   |   DpdDuplicateCityResolver.php
-|   |   |   |   DpdEndpoints.php
-|   |   |   |   DpdErrorMapper.php
-|   |   |   |   DpdException.php
-|   |   |   |   DpdGeographyDiagnosticService.php
-|   |   |   |   DpdSettings.php
-|   |   |   |   DpdSoapClient.php
-|   |   |   |   DpdSoapClientInterface.php
-|   |   |   |   DpdSoapRequest.php
-|   |   |   |   DpdSoapResponse.php
-|   |   |   |
-|   |   |   +---Geography
-|   |   |   |       DpdDaDataDeliveryClientInterface.php
-|   |   |   |       DpdDaDataDeliveryFallbackService.php
-|   |   |   |       DpdGeographyCsvParser.php
-|   |   |   |       DpdGeographyFtpClient.php
-|   |   |   |       DpdGeographyImportLockService.php
-|   |   |   |       DpdGeographyImportReport.php
-|   |   |   |       DpdGeographyImportService.php
-|   |   |   |       DpdGeographyImportStateService.php
-|   |   |   |       DpdGeographyLookupKeys.php
-|   |   |   |       DpdGeographyMatchContext.php
-|   |   |   |       DpdGeographyMatcher.php
-|   |   |   |       DpdGeographyStageRepository.php
-|   |   |   |       DpdLocationIndex.php
-|   |   |   |       WpDpdDaDataDeliveryClient.php
-|   |   |   |
-|   |   |   +---Pickup
-|   |   |   |       DpdPickupPointAutoSync.php
-|   |   |   |       DpdPickupPointImportReport.php
-|   |   |   |       DpdPickupPointImportService.php
-|   |   |   |       DpdPickupPointNormalizer.php
-|   |   |   |       DpdPickupPointRepository.php
-|   |   |   |       DpdPickupPointScheduleFormatter.php
-|   |   |   |       DpdPickupPointService.php
-|   |   |   |
-|   |   |   +---Shipments
-|   |   |   |       DpdShipmentDateResolver.php
-|   |   |   |       DpdShipmentPayloadBuilder.php
-|   |   |   |
-|   |   |   \---Tariff
-|   |   |           DpdPackagingBuilderFactory.php
-|   |   |           DpdTariffCalculationService.php
-|   |   |           DpdTariffOptionNormalizer.php
-|   |   |           DpdTariffParcel.php
-|   |   |           DpdTariffRequest.php
-|   |   |           DpdTariffRequestBuilder.php
-|   |   |           DpdTariffResult.php
-|   |   |           DpdTerminalCodeTariffRequest.php
-|   |   |           DpdTerminalCodeTariffRequestBuilder.php
-|   |   |
-|   |   +---JetLogistic
-|   |   |   |   JetLogisticCredentials.php
-|   |   |   |   JetLogisticSettings.php
-|   |   |   |
-|   |   |   +---Admin
-|   |   |   |       JetLogisticGeographyAdminPage.php
-|   |   |   |       JetLogisticStatusAdminPage.php
-|   |   |   |
-|   |   |   +---Api
-|   |   |   |       JetLogisticApiClient.php
-|   |   |   |       JetLogisticApiDiagnosticService.php
-|   |   |   |       JetLogisticApiException.php
-|   |   |   |       JetLogisticHttpClientInterface.php
-|   |   |   |       WpJetLogisticHttpClient.php
-|   |   |   |
-|   |   |   +---Checkout
-|   |   |   |       JetLogisticCustomerComments.php
-|   |   |   |
-|   |   |   +---Geography
-|   |   |   |       JetLogisticCitiesCsvClient.php
-|   |   |   |       JetLogisticCitiesCsvParser.php
-|   |   |   |       JetLogisticCityNameNormalizer.php
-|   |   |   |       JetLogisticCountrySyncService.php
-|   |   |   |       JetLogisticGeographyImportService.php
-|   |   |   |       JetLogisticGeographyMatcher.php
-|   |   |   |       JetLogisticGeographyOverrideRepository.php
-|   |   |   |       JetLogisticGeographyRepository.php
-|   |   |   |       JetLogisticRegionNameNormalizer.php
-|   |   |   |
-|   |   |   +---Quote
-|   |   |   |       JetLogisticCalculationResult.php
-|   |   |   |       JetLogisticQuoteRequestBuilder.php
-|   |   |   |       JetLogisticQuoteResponseParser.php
-|   |   |   |
-|   |   |   \---Status
-|   |   |           JetLogisticStatusEventResolver.php
-|   |   |           JetLogisticStatusMapper.php
-|   |   |           JetLogisticStatusMappingRepository.php
-|   |   |           JetLogisticStatusService.php
-|   |   |
-|   |   +---Manual
-|   |   |       ManualDeliveryGeographyMatcher.php
-|   |   |       ManualDeliveryGeographyRepository.php
-|   |   |       ManualDeliveryPricingCalculator.php
-|   |   |       ManualDeliveryPricingConfig.php
-|   |   |       ManualDeliveryPricingResult.php
-|   |   |       ManualDeliveryPricingService.php
-|   |   |       ManualDeliverySettings.php
-|   |   |       ManualDeliveryWeightRange.php
-|   |   |       ManualDeliveryWeightRangeRepository.php
-|   |   |       ManualPickupPointProvider.php
-|   |   |       ManualPickupPointRepository.php
-|   |   |
-|   |   +---OzonDelivery
-|   |   |   |   OzonDeliveryCredentials.php
-|   |   |   |   OzonDeliverySettings.php
-|   |   |   |
-|   |   |   +---Admin
-|   |   |   |       OzonDeliveryAdminPage.php
-|   |   |   |       OzonDeliveryQuoteDiagnosticService.php
-|   |   |   |
-|   |   |   +---Api
-|   |   |   |       OzonDeliveryAccessTokenService.php
-|   |   |   |       OzonDeliveryApiClient.php
-|   |   |   |       OzonDeliveryApiException.php
-|   |   |   |       OzonDeliveryApiResponse.php
-|   |   |   |       OzonDeliveryConnectionDiagnosticService.php
-|   |   |   |       OzonDeliveryHttpClientInterface.php
-|   |   |   |       OzonDeliveryMessageSanitizer.php
-|   |   |   |       OzonDeliveryToken.php
-|   |   |   |       OzonDeliveryTokenCache.php
-|   |   |   |       WpOzonDeliveryHttpClient.php
-|   |   |   |
-|   |   |   +---Pickup
-|   |   |   |       OzonDeliveryPickupImportLock.php
-|   |   |   |       OzonDeliveryPickupImportService.php
-|   |   |   |       OzonDeliveryPickupParser.php
-|   |   |   |       OzonDeliveryPickupPointProvider.php
-|   |   |   |       OzonDeliveryPickupRepository.php
-|   |   |   |       OzonDeliveryPickupScheduleFormatter.php
-|   |   |   |       OzonDeliveryPickupScheduler.php
-|   |   |   |
-|   |   |   +---Quote
-|   |   |   |       OzonDeliveryCourierAddressMapper.php
-|   |   |   |       OzonDeliveryCourierLocation.php
-|   |   |   |       OzonDeliveryCourierLocationResolver.php
-|   |   |   |       OzonDeliveryPackagingBuilderFactory.php
-|   |   |   |       OzonDeliveryQuoteException.php
-|   |   |   |       OzonDeliveryQuoteParser.php
-|   |   |   |       OzonDeliveryQuoteRequestBuilder.php
-|   |   |   |       OzonDeliveryQuoteResult.php
-|   |   |   |       OzonDeliveryQuoteService.php
-|   |   |   |
-|   |   |   +---Returns
-|   |   |   |       OzonDeliveryReturnInfoParser.php
-|   |   |   |       OzonDeliveryReturnLifecycleResolver.php
-|   |   |   |       OzonDeliveryReturnSearchParser.php
-|   |   |   |       OzonDeliveryReturnService.php
-|   |   |   |
-|   |   |   \---Shipments
-|   |   |           OzonDeliveryCourierAddressNormalizer.php
-|   |   |           OzonDeliveryShipmentActionPolicy.php
-|   |   |           OzonDeliveryShipmentAdapter.php
-|   |   |           OzonDeliveryShipmentAllocationValueResolver.php
-|   |   |           OzonDeliveryShipmentCreateRequestBuilder.php
-|   |   |           OzonDeliveryShipmentCreateResponseParser.php
-|   |   |           OzonDeliveryShipmentCreationStatusPolicy.php
-|   |   |           OzonDeliveryShipmentDescriptionBuilder.php
-|   |   |           OzonDeliveryShipmentDocumentProvider.php
-|   |   |           OzonDeliveryShipmentExternalIdResolver.php
-|   |   |           OzonDeliveryShipmentInfoParser.php
-|   |   |           OzonDeliveryShipmentModalExtension.php
-|   |   |           OzonDeliveryShipmentPersistenceMapper.php
-|   |   |           OzonDeliveryShipmentPreflightQuoteService.php
-|   |   |           OzonDeliveryShipmentService.php
-|   |   |           OzonDeliveryShipmentStatusMapper.php
-|   |   |           OzonDeliveryShipmentStatusMapping.php
-|   |   |
-|   |   +---Pek
-|   |   |   |   PekCountryPolicy.php
-|   |   |   |   PekCredentials.php
-|   |   |   |   PekRuPhoneNormalizer.php
-|   |   |   |   PekSettings.php
-|   |   |   |
-|   |   |   +---Admin
-|   |   |   |       PekAdminNoticeStore.php
-|   |   |   |       PekAdminPage.php
-|   |   |   |       PekDestinationPickupDiagnosticService.php
-|   |   |   |       PekDestinationPickupDiagnosticStore.php
-|   |   |   |       PekQuoteDiagnosticService.php
-|   |   |   |       PekQuoteDiagnosticStore.php
-|   |   |   |       PekStatusAdminPage.php
-|   |   |   |
-|   |   |   +---Api
-|   |   |   |       PekApiClient.php
-|   |   |   |       PekApiException.php
-|   |   |   |       PekConnectionDiagnosticService.php
-|   |   |   |       PekHttpClientInterface.php
-|   |   |   |       PekRequestBudget.php
-|   |   |   |       PekSenderWarehouseSearchCache.php
-|   |   |   |       PekSenderWarehouseService.php
-|   |   |   |       WpPekHttpClient.php
-|   |   |   |
-|   |   |   +---Checkout
-|   |   |   |       PekCheckoutQuoteContextResolver.php
-|   |   |   |
-|   |   |   +---Geography
-|   |   |   |       PekAddressBuilder.php
-|   |   |   |       PekLocationMappingRepository.php
-|   |   |   |       PekLocationResolver.php
-|   |   |   |
-|   |   |   +---Installation
-|   |   |   |       PekSchemaIntegrityService.php
-|   |   |   |
-|   |   |   +---Pickup
-|   |   |   |       PekCargoConstraintsConverter.php
-|   |   |   |       PekCheckoutPickupPointFormatter.php
-|   |   |   |       PekDestinationTerminalRequest.php
-|   |   |   |       PekDestinationTerminalSearchCache.php
-|   |   |   |       PekPickupPointProvider.php
-|   |   |   |       PekTerminalRepository.php
-|   |   |   |       PekTerminalService.php
-|   |   |   |
-|   |   |   \---Quote
-|   |   |           PekLightCargoSurchargePolicy.php
-|   |   |           PekLightCargoSurchargeResult.php
-|   |   |           PekQuoteCargoBuilder.php
-|   |   |           PekQuoteMessageSanitizer.php
-|   |   |           PekQuoteOptions.php
-|   |   |           PekQuotePlannedDateTimeResolver.php
-|   |   |           PekQuoteRequestBuilder.php
-|   |   |           PekQuoteResponseParser.php
-|   |   |           PekQuoteResult.php
-|   |   |           PekQuoteService.php
-|   |   |
-|   |   +---Registry
-|   |   |       CarrierRegistry.php
-|   |   |
-|   |   +---Runtime
-|   |   |       CarrierRuntimeContext.php
-|   |   |       CdekCarrier.php
-|   |   |       DpdQuoteCarrier.php
-|   |   |       JetLogisticCarrier.php
-|   |   |       ManualDeliveryCarrier.php
-|   |   |       OzonDeliveryCarrier.php
-|   |   |       PekCarrier.php
-|   |   |       RussianPostDomesticCarrier.php
-|   |   |       RussianPostInternationalCarrier.php
-|   |   |       SelfPickupCarrier.php
-|   |   |       YandexDeliveryCarrier.php
-|   |   |
-|   |   +---RussianPost
-|   |   |   |   DomesticTariffVariant.php
-|   |   |   |   RussianPostApiClient.php
-|   |   |   |   RussianPostCountryDirectory.php
-|   |   |   |   RussianPostCountryMapping.php
-|   |   |   |   RussianPostCountryMappingRepository.php
-|   |   |   |   RussianPostCountryMappingService.php
-|   |   |   |   RussianPostCourierTariffProbeService.php
-|   |   |   |   RussianPostDomesticApiClient.php
-|   |   |   |   RussianPostDomesticSettings.php
-|   |   |   |   RussianPostDomesticTariffVariantResolver.php
-|   |   |   |   RussianPostSettings.php
-|   |   |   |
-|   |   |   +---Admin
-|   |   |   |       RussianPostCountriesAdminPage.php
-|   |   |   |       RussianPostPickupDiagnosticsTab.php
-|   |   |   |
-|   |   |   +---Otpravka
-|   |   |   |       RussianPostOtpravkaApiClient.php
-|   |   |   |       RussianPostOtpravkaApiSettings.php
-|   |   |   |
-|   |   |   \---Tracking
-|   |   |           RussianPostTrackingApiClient.php
-|   |   |
-|   |   +---SelfPickup
-|   |   |       SelfPickupDiscountPolicy.php
-|   |   |       SelfPickupDiscountResult.php
-|   |   |       SelfPickupDiscountService.php
-|   |   |       SelfPickupSettings.php
-|   |   |
-|   |   \---YandexDelivery
-|   |       |   YandexDeliveryCredentials.php
-|   |       |   YandexDeliveryEndpoints.php
-|   |       |   YandexDeliverySettings.php
-|   |       |
-|   |       +---Api
-|   |       |       WpYandexDeliveryHttpClient.php
-|   |       |       YandexDeliveryApiClient.php
-|   |       |       YandexDeliveryApiException.php
-|   |       |       YandexDeliveryApiResponse.php
-|   |       |       YandexDeliveryConnectionDiagnosticService.php
-|   |       |       YandexDeliveryHttpClientInterface.php
-|   |       |
-|   |       +---GeoV2
-|   |       |       YandexDeliveryGeoV2BuilderRunnerService.php
-|   |       |       YandexDeliveryGeoV2BuilderService.php
-|   |       |       YandexDeliveryGeoV2Repository.php
-|   |       |
-|   |       +---LocationMappingV2
-|   |       |       YandexDeliveryGeoPipelineV2Runner.php
-|   |       |       YandexGeoV2RegionEnrichmentRunner.php
-|   |       |       YandexGeoV2RegionEnrichmentService.php
-|   |       |       YandexLocationManualOverrideV2Repository.php
-|   |       |       YandexLocationMapperV2Service.php
-|   |       |       YandexLocationMappingV2NameNormalizer.php
-|   |       |       YandexLocationMappingV2Repository.php
-|   |       |       YandexLocationMappingV2Runner.php
-|   |       |       YandexRegionMappingV2Repository.php
-|   |       |
-|   |       +---Pickup
-|   |       |       YandexDeliveryCheckoutPickupPointFormatter.php
-|   |       |       YandexDeliveryPickupPointV2ImportService.php
-|   |       |       YandexDeliveryPickupPointV2JsonStreamReader.php
-|   |       |       YandexDeliveryPickupPointV2Repository.php
-|   |       |       YandexDeliveryPickupPointV2RunnerService.php
-|   |       |       YandexDeliveryPickupPointV2ScheduleFormatter.php
-|   |       |
-|   |       +---Pricing
-|   |       |       YandexDeliveryPricingRequestBuilder.php
-|   |       |       YandexDeliveryPricingResponseParser.php
-|   |       |       YandexDeliveryPricingResult.php
-|   |       |
-|   |       \---Shipment
-|   |               YandexDeliveryBinaryDocument.php
-|   |               YandexDeliveryConfirmedRequest.php
-|   |               YandexDeliveryEarliestOfferSelector.php
-|   |               YandexDeliveryOffer.php
-|   |               YandexDeliveryOfferCollection.php
-|   |               YandexDeliveryRequestHistory.php
-|   |               YandexDeliveryRequestInfo.php
-|   |               YandexDeliveryShipmentClient.php
-|   |               YandexDeliveryShipmentPayloadBuilder.php
-|   |               YandexDeliveryShipmentRegistrationResult.php
-|   |               YandexDeliveryShipmentRegistrationService.php
-|   |               YandexDeliveryShipmentState.php
-|   |
-|   +---Checkout
-|   |   +---Address
-|   |   |       AddressLineParser.php
-|   |   |       CheckoutAddressNormalizer.php
-|   |   |       CheckoutAddressRuntime.php
-|   |   |       FiasAddressNormalizer.php
-|   |   |
-|   |   +---AddressSuggestions
-|   |   |       AddressSuggestionAjax.php
-|   |   |       AddressSuggestionClientInterface.php
-|   |   |       AddressSuggestionNormalizer.php
-|   |   |       AddressSuggestionService.php
-|   |   |       AddressSuggestionSettings.php
-|   |   |       DaDataSuggestionClient.php
-|   |   |       DaDataTokenPool.php
-|   |   |       FallbackSuggestionClient.php
-|   |   |
-|   |   +---Cache
-|   |   |       DeliveryQuoteCacheManager.php
-|   |   |       QuoteCache.php
-|   |   |
-|   |   +---Comments
-|   |   |       DeliveryCustomerCommentNormalizer.php
-|   |   |       DeliveryCustomerCommentRenderer.php
-|   |   |       DeliveryCustomerCommentSnapshotBuilder.php
-|   |   |
-|   |   +---Locations
-|   |   |       CheckoutCityResolver.php
-|   |   |       CheckoutLocationAjax.php
-|   |   |       CheckoutLocationProfileMatcher.php
-|   |   |       CheckoutLocationSearch.php
-|   |   |       CheckoutLocationSearchParser.php
-|   |   |       LocationCoordinateEnricher.php
-|   |   |
-|   |   +---Runtime
-|   |   |       CarrierExecutionGuard.php
-|   |   |       CheckoutCalculationResult.php
-|   |   |       CheckoutLogger.php
-|   |   |       CheckoutOrchestrator.php
-|   |   |       DeliveryLeadTimeNormalizer.php
-|   |   |       FallbackRateFactory.php
-|   |   |       RuleAppliedRateBuilder.php
-|   |   |       ShopProcessingDaysResolver.php
-|   |   |
-|   |   +---Sorting
-|   |   |       RateSorter.php
-|   |   |
-|   |   +---Validation
-|   |   |       CheckoutAddressValidation.php
-|   |   |
-|   |   \---WooCommerce
-|   |           CheckoutAddressRenderer.php
-|   |           CheckoutCartTotalsResolver.php
-|   |           CheckoutDebugPanel.php
-|   |           CheckoutDeliveryMessages.php
-|   |           CheckoutDeliveryTypeSelector.php
-|   |           CheckoutFieldConfigurator.php
-|   |           CheckoutLocationFingerprint.php
-|   |           CheckoutRateRenderer.php
-|   |           CheckoutSessionManager.php
-|   |           CheckoutSortSelector.php
-|   |           CheckoutValidation.php
-|   |           CourierRateSupport.php
-|   |           NewShippingMethod.php
-|   |           OrderDeliveryCustomerCommentsDisplay.php
-|   |           OrderShippingMetaPersister.php
-|   |           PickupFamilyResolver.php
-|   |           PickupMapCheckout.php
-|   |           PickupPointOrderDisplay.php
-|   |           PickupPointRenderer.php
-|   |           ShippingMethodRegistrar.php
-|   |           WooCommercePackageMapper.php
-|   |           WooCommerceRateMapper.php
-|   |           WooCommerceRateMetaNormalizer.php
-|   |           WooCommerceSessionBootstrapper.php
-|   |
-|   +---Core
-|   |       Autoloader.php
-|   |       bootstrap.php
-|   |       Container.php
-|   |       Plugin.php
-|   |       PluginConstants.php
-|   |       PluginEnvironment.php
-|   |       RequirementsChecker.php
-|   |
-|   +---DeliveryServices
-|   |   |   DeliveryService.php
-|   |   |   DeliveryServiceCountryRepository.php
-|   |   |   DeliveryServiceManager.php
-|   |   |   DeliveryServiceRegistry.php
-|   |   |   DeliveryServiceRepository.php
-|   |   |   DeliveryServiceSettingsRepository.php
-|   |   |
-|   |   +---Admin
-|   |   |       DeliveryServicesAdminPage.php
-|   |   |
-|   |   \---Application
-|   |           DeliveryServiceKeyRenameService.php
-|   |
-|   +---Domain
-|   |   |   .gitkeep
-|   |   |
-|   |   +---Address
-|   |   |       Address.php
-|   |   |       AddressNormalizationResult.php
-|   |   |
-|   |   +---Calendar
-|   |   |       CalendarDay.php
-|   |   |       PlannedDeliveryDate.php
-|   |   |
-|   |   +---Carrier
-|   |   |       CarrierCapabilities.php
-|   |   |       CarrierIdentity.php
-|   |   |
-|   |   +---Common
-|   |   |       DateRange.php
-|   |   |       DeliveryDaysFormatter.php
-|   |   |       Money.php
-|   |   |       MoneyParser.php
-|   |   |
-|   |   +---Package
-|   |   |       Package.php
-|   |   |       PackageItem.php
-|   |   |       ShipmentPlace.php
-|   |   |
-|   |   +---Phone
-|   |   |       RussianPhoneNormalizer.php
-|   |   |
-|   |   +---Pickup
-|   |   |       PickupPoint.php
-|   |   |       PickupPointSelection.php
-|   |   |
-|   |   +---Quote
-|   |   |       DeliveryQuote.php
-|   |   |       DeliveryRate.php
-|   |   |       DeliveryType.php
-|   |   |       QuoteRequest.php
-|   |   |
-|   |   +---Shipment
-|   |   |       Shipment.php
-|   |   |       ShipmentCreateRequest.php
-|   |   |       ShipmentCreateResult.php
-|   |   |
-|   |   \---Status
-|   |           DeliveryStatus.php
-|   |           StatusEvent.php
-|   |           StatusMapping.php
-|   |
-|   +---Infrastructure
-|   |   +---Database
-|   |   |       MigrationManager.php
-|   |   |
-|   |   +---Logging
-|   |   |       Logger.php
-|   |   |       LogRedactor.php
-|   |   |
-|   |   +---Queue
-|   |   |       ActionScheduler.php
-|   |   |       ObsoleteScheduledTaskCleanup.php
-|   |   |
-|   |   +---Security
-|   |   |       EncryptionService.php
-|   |   |
-|   |   \---Settings
-|   |           CheckoutDeliveryMessageSettings.php
-|   |           PlatformRuntimeSettings.php
-|   |           SettingsRepository.php
-|   |
-|   +---Locations
-|   |   |   .gitkeep
-|   |   |
-|   |   +---Admin
-|   |   |       LocationAdminJsonResponse.php
-|   |   |       LocationDatabaseBackupAdmin.php
-|   |   |       LocationsAdminPage.php
-|   |   |
-|   |   +---Coordinates
-|   |   |       LocationCoordinatesDadataBatchUpdater.php
-|   |   |
-|   |   +---Fias
-|   |   |       FiasCredentials.php
-|   |   |       FiasEndpoints.php
-|   |   |       FiasHttpClient.php
-|   |   |       FiasLogger.php
-|   |   |       FiasRateLimiter.php
-|   |   |
-|   |   +---Import
-|   |   |       GarImportResult.php
-|   |   |       GarPlacesCsvImporter.php
-|   |   |       LocationImportService.php
-|   |   |       LocationIncrementalCandidateEnricher.php
-|   |   |       LocationIncrementalUpdateService.php
-|   |   |       LocationsSnapshotExporter.php
-|   |   |       LocationsSnapshotImporter.php
-|   |   |
-|   |   +---Normalization
-|   |   |       AddressNormalizerInterface.php
-|   |   |       FallbackAddressNormalizer.php
-|   |   |
-|   |   +---Postcodes
-|   |   |       DaDataPostcodeClient.php
-|   |   |       RussianPostCourierCalcPostcodeFillStateService.php
-|   |   |
-|   |   +---Services
-|   |   |       CheckoutPostcode.php
-|   |   |       KeyboardLayoutTransformer.php
-|   |   |       LocationCountryIndexService.php
-|   |   |       LocationDatabaseBackupService.php
-|   |   |       LocationDisplayNameFormatter.php
-|   |   |       LocationMaintenanceJobGuard.php
-|   |   |       LocationSearchService.php
-|   |   |
-|   |   +---Storage
-|   |   |       LocationDeliveryCodeRepository.php
-|   |   |       LocationRepository.php
-|   |   |       LocationWriteLock.php
-|   |   |       PlaceRegionMatchResult.php
-|   |   |       RegionRepository.php
-|   |   |
-|   |   \---ValueObjects
-|   |           Location.php
-|   |           Region.php
-|   |
-|   +---Orders
-|   |   +---Admin
-|   |   |       OrderDeliveryMetabox.php
-|   |   |       OrderDeliveryRateRenderer.php
-|   |   |       OrderDeliveryRecalculationAdminController.php
-|   |   |
-|   |   \---Application
-|   |           DeliveryCalculationDataBuilder.php
-|   |           OrderDeliveryAddressNormalizationService.php
-|   |           OrderDeliveryRecalculationService.php
-|   |           OrderDeliveryReplacementService.php
-|   |           OrderQuoteRequestMapper.php
-|   |           ShopProcessingOrderQueueCounter.php
-|   |
-|   +---Packaging
-|   |       PackagingApplicationResult.php
-|   |       PackagingBuilder.php
-|   |       PackagingBuilderConfig.php
-|   |       PackagingException.php
-|   |       PackagingParcel.php
-|   |       PackagingResult.php
-|   |       PackagingWeightCalculator.php
-|   |
-|   +---Pickup
-|   |   +---Cdek
-|   |   |       CdekDeliveryPointService.php
-|   |   |
-|   |   +---Presentation
-|   |   |       PickupPointCardRenderer.php
-|   |   |       PickupPointPresentationResolver.php
-|   |   |
-|   |   +---Providers
-|   |   |       CarrierPickupPointProviderInterface.php
-|   |   |       CarrierPickupPointProviderRegistry.php
-|   |   |       CarrierPickupPointQuery.php
-|   |   |       CarrierPickupPointSelectionQuery.php
-|   |   |       CheckoutPickupPointProviderQueryResolver.php
-|   |   |       PickupCargoConstraints.php
-|   |   |
-|   |   +---Rest
-|   |   |       CheckoutPickupPointRestController.php
-|   |   |       PickupPointsRestController.php
-|   |   |
-|   |   +---RussianPost
-|   |   |       RussianPostPassportPointNormalizer.php
-|   |   |       RussianPostPickupDiagnosticsService.php
-|   |   |       RussianPostPickupImporter.php
-|   |   |       RussianPostPickupImportStateService.php
-|   |   |       RussianPostPickupLocationResolver.php
-|   |   |       RussianPostPickupPointRepository.php
-|   |   |       RussianPostPickupPointTypeSettings.php
-|   |   |       RussianPostWorkTimeFormatter.php
-|   |   |
-|   |   +---Schedule
-|   |   |       CompactWeeklyScheduleFormatter.php
-|   |   |
-|   |   +---Search
-|   |   |       PickupAddressSearchService.php
-|   |   |
-|   |   +---Services
-|   |   |       PickupPointLocationResolver.php
-|   |   |
-|   |   \---Storage
-|   |           PickupPointRepository.php
-|   |
-|   +---Rules
-|   |   |   .gitkeep
-|   |   |
-|   |   +---Admin
-|   |   |       RuleAdminContext.php
-|   |   |       RuleConditionUiSchema.php
-|   |   |       RulesAdminPage.php
-|   |   |
-|   |   +---Domain
-|   |   |       Rule.php
-|   |   |       RuleAuditEntry.php
-|   |   |       RuleCondition.php
-|   |   |       RuleEngineResult.php
-|   |   |       RuleEvaluationContext.php
-|   |   |       RuleEvaluationResult.php
-|   |   |
-|   |   +---Services
-|   |   |       ConditionEvaluator.php
-|   |   |       RuleEngine.php
-|   |   |       RuleEvaluator.php
-|   |   |       RuleFormulaFormatter.php
-|   |   |       RuleSimulator.php
-|   |   |
-|   |   +---Storage
-|   |   |       RuleRepository.php
-|   |   |
-|   |   \---ValueObjects
-|   |           RuleActionTypes.php
-|   |           RuleConditionTypes.php
-|   |           RuleOperationBases.php
-|   |           RuleOperationTypes.php
-|   |           RuleOperators.php
-|   |
-|   +---Shipments
-|   |   |   .gitkeep
-|   |   |
-|   |   +---Admin
-|   |   |   |   OrderShipmentsMetabox.php
-|   |   |   |   ShipmentCostAnalyticsAdminSection.php
-|   |   |   |   ShipmentStatusesAdminPage.php
-|   |   |   |
-|   |   |   \---Ajax
-|   |   |           ShipmentActualCostAjaxController.php
-|   |   |           ShipmentAddressAjaxController.php
-|   |   |           ShipmentAdminAjaxService.php
-|   |   |           ShipmentAdminCarrierUiPayloadBuilder.php
-|   |   |           ShipmentCreateAjaxController.php
-|   |   |           ShipmentDocumentsAjaxController.php
-|   |   |           ShipmentLifecycleAjaxController.php
-|   |   |           ShipmentManualAttachAjaxController.php
-|   |   |           ShipmentPreviewAjaxController.php
-|   |   |           ShipmentProductsAjaxController.php
-|   |   |           ShipmentRemovalAjaxController.php
-|   |   |           ShipmentStatusAjaxController.php
-|   |   |
-|   |   +---Allocation
-|   |   |       ShipmentAllocation.php
-|   |   |       ShipmentAllocationBuilder.php
-|   |   |       ShipmentAllocationItem.php
-|   |   |       ShipmentAllocationPlace.php
-|   |   |
-|   |   +---Analytics
-|   |   |   |   CreatedShipmentIdentity.php
-|   |   |   |   CreatedShipmentIdentityResolver.php
-|   |   |   |   OrderAnalyticsShipmentSelector.php
-|   |   |   |   OrderSelectedDeliveryIdentity.php
-|   |   |   |   OrderSelectedDeliveryIdentityResolver.php
-|   |   |   |   SelectedAnalyticsShipment.php
-|   |   |   |   ShipmentCostAnalyticsFilter.php
-|   |   |   |   ShipmentCostAnalyticsIndexer.php
-|   |   |   |   ShipmentCostAnalyticsQuery.php
-|   |   |   |   ShipmentCostAnalyticsRecordBuilder.php
-|   |   |   |   ShipmentCostAnalyticsResult.php
-|   |   |   |   ShipmentCostAnalyticsRow.php
-|   |   |   |   ShipmentCostAnalyticsService.php
-|   |   |   |   ShipmentCostAnalyticsSummary.php
-|   |   |   |   ShipmentCostThresholdPolicy.php
-|   |   |   |
-|   |   |   \---Storage
-|   |   |           ShipmentCostAnalyticsRecord.php
-|   |   |           ShipmentCostAnalyticsRepository.php
-|   |   |           ShipmentCostAnalyticsTable.php
-|   |   |
-|   |   +---Application
-|   |   |       CarrierShipmentAdapterRegistry.php
-|   |   |       OrderShipmentDraftFactory.php
-|   |   |       OrderStructuredAddress.php
-|   |   |       OrderStructuredAddressReader.php
-|   |   |       RussianPostShipmentActualCostExtractor.php
-|   |   |       RussianPostShipmentActualCostLookupService.php
-|   |   |       ShipmentActualCost.php
-|   |   |       ShipmentActualCostResolver.php
-|   |   |       ShipmentActualCostService.php
-|   |   |       ShipmentBacklogService.php
-|   |   |       ShipmentCreationAttemptService.php
-|   |   |       ShipmentCreationService.php
-|   |   |       ShipmentMetaboxButtonPolicy.php
-|   |   |       ShipmentModalRequestMapper.php
-|   |   |       ShipmentOrderStatusMappingService.php
-|   |   |       ShipmentPreparationData.php
-|   |   |       ShipmentServiceSettings.php
-|   |   |       ShipmentStatusAutoSyncCron.php
-|   |   |       ShipmentStatusAutoSyncService.php
-|   |   |       ShipmentStatusUpdateService.php
-|   |   |
-|   |   +---Cdek
-|   |   |       CdekBarcodePrintService.php
-|   |   |       CdekCreateRequestBuilder.php
-|   |   |       CdekOrderStatusService.php
-|   |   |       CdekRecipientAddressPreparationService.php
-|   |   |       CdekShipmentAdapter.php
-|   |   |       CdekShipmentDocumentProvider.php
-|   |   |       CdekShipmentModalExtension.php
-|   |   |       CdekShipmentPersistenceMapper.php
-|   |   |       CdekStatusMappingService.php
-|   |   |
-|   |   +---Contracts
-|   |   |       CarrierShipmentAdapterInterface.php
-|   |   |       CarrierShipmentLifecycleContinuationInterface.php
-|   |   |       CarrierShipmentPersistenceMapperInterface.php
-|   |   |
-|   |   +---Documents
-|   |   |       CarrierShipmentDocumentProviderInterface.php
-|   |   |       ShipmentBinaryDocument.php
-|   |   |       ShipmentDocumentAction.php
-|   |   |       ShipmentDocumentDownloadService.php
-|   |   |       ShipmentDocumentProviderRegistry.php
-|   |   |
-|   |   +---Dpd
-|   |   |       DpdEventNormalizer.php
-|   |   |       DpdEventSyncResult.php
-|   |   |       DpdEventSyncService.php
-|   |   |       DpdOrderRegistrationService.php
-|   |   |       DpdShipmentAdapter.php
-|   |   |       DpdShipmentButtonPolicy.php
-|   |   |       DpdShipmentDocumentProvider.php
-|   |   |       DpdShipmentDocumentService.php
-|   |   |       DpdShipmentEnrichmentService.php
-|   |   |       DpdShipmentModalExtension.php
-|   |   |       DpdShipmentPersistenceMapper.php
-|   |   |       DpdShipmentRepository.php
-|   |   |       DpdStatusMapping.php
-|   |   |
-|   |   +---JetLogistic
-|   |   |       JetLogisticShipmentAdapter.php
-|   |   |       JetLogisticShipmentService.php
-|   |   |
-|   |   +---Lifecycle
-|   |   |       ShipmentLifecycleResult.php
-|   |   |
-|   |   +---Manual
-|   |   |       ManualShipmentAdapter.php
-|   |   |       ManualShipmentService.php
-|   |   |
-|   |   +---Modal
-|   |   |       CarrierShipmentModalExtensionInterface.php
-|   |   |       ShipmentModalExtensionRegistry.php
-|   |   |
-|   |   +---Pek
-|   |   |       PekManualAttachContextResolver.php
-|   |   |       PekPrivateAccessTokenService.php
-|   |   |       PekSenderCounterpartService.php
-|   |   |       PekShipmentAdapter.php
-|   |   |       PekShipmentButtonPolicy.php
-|   |   |       PekShipmentCargoBuilder.php
-|   |   |       PekShipmentCorrelationResolver.php
-|   |   |       PekShipmentCourierAddressResolver.php
-|   |   |       PekShipmentCreateResponseParser.php
-|   |   |       PekShipmentDeclaredValueResolver.php
-|   |   |       PekShipmentDestinationResolver.php
-|   |   |       PekShipmentDocumentProvider.php
-|   |   |       PekShipmentDocumentService.php
-|   |   |       PekShipmentModalExtension.php
-|   |   |       PekShipmentPersistenceMapper.php
-|   |   |       PekShipmentProductWeightResolver.php
-|   |   |       PekShipmentRecipientBuilder.php
-|   |   |       PekShipmentRequestBuilder.php
-|   |   |       PekShipmentSenderWarehouseResolver.php
-|   |   |       PekShipmentService.php
-|   |   |       PekShipmentStatusResponseNormalizer.php
-|   |   |       PekShipmentStatusService.php
-|   |   |       PekSmsReleaseAvailabilityService.php
-|   |   |       PekSmsReleaseResult.php
-|   |   |       PekStatusMapping.php
-|   |   |
-|   |   +---Presentation
-|   |   |       ShipmentActualCostComparisonService.php
-|   |   |       ShipmentActualCostPresentation.php
-|   |   |       ShipmentBaseApiCostResolver.php
-|   |   |
-|   |   +---RussianPost
-|   |   |       RussianPostAddressNormalizer.php
-|   |   |       RussianPostCreateRequestBuilder.php
-|   |   |       RussianPostShipmentAdapter.php
-|   |   |       RussianPostShipmentDocumentProvider.php
-|   |   |       RussianPostShipmentDocumentService.php
-|   |   |       RussianPostShipmentModalExtension.php
-|   |   |       RussianPostShipmentPersistenceMapper.php
-|   |   |       RussianPostShipmentProductMapper.php
-|   |   |       RussianPostTrackingStatusMapper.php
-|   |   |
-|   |   +---Storage
-|   |   |       OrderShipmentRepository.php
-|   |   |
-|   |   \---YandexDelivery
-|   |           YandexShipmentAdapter.php
-|   |           YandexShipmentButtonPolicy.php
-|   |           YandexShipmentDocumentProvider.php
-|   |           YandexShipmentDocumentService.php
-|   |           YandexShipmentLabelPolicy.php
-|   |           YandexShipmentModalExtension.php
-|   |           YandexShipmentPersistenceMapper.php
-|   |           YandexShipmentRegistrationService.php
-|   |           YandexShipmentRepository.php
-|   |           YandexStatusMapping.php
-|   |
-|   \---WooCommerce
-|           HPOSCompatibility.php
-|
-\---tests
-    +---address
-    |       run-address-smoke.php
-    |       run-dadata-suggestions-smoke.php
-    |
-    +---architecture
-    |       run-plugin-architecture-smoke.php
-    |
-    +---calendar
-    |       run-calendar-smoke.php
-    |
-    +---carriers
-    |       run-russian-post-countries-smoke.php
-    |       run-russian-post-domestic-api-probe.php
-    |       run-russian-post-domestic-smoke.php
-    |       run-russian-post-smoke.php
-    |
-    +---cdek
-    |       run-cdek-eaeu-smoke.php
-    |       run-cdek-foundation-smoke.php
-    |       run-cdek-order-creation-smoke.php
-    |       run-cdek-pickup-points-smoke.php
-    |       run-cdek-tariff-calculation-smoke.php
-    |       run-cdek-tariffs-sync-smoke.php
-    |
-    +---checkout
-    |       run-checkout-address-autocomplete-browser-smoke.js
-    |       run-checkout-address-autocomplete-smoke.js
-    |       run-checkout-address-fields-smoke.js
-    |       run-checkout-address-fields-smoke.php
-    |       run-checkout-city-selector-smoke.js
-    |       run-checkout-delivery-messages-smoke.php
-    |       run-checkout-location-picker-smoke.php
-    |       run-checkout-rate-sorting-smoke.php
-    |       run-checkout-selection-smoke.php
-    |       run-checkout-smoke.php
-    |       run-pickup-map-lifecycle-smoke.js
-    |       run-pickup-provider-routing-smoke.js
-    |       run-pickup-provider-routing-smoke.php
-    |       run-runtime-stabilization-smoke.php
-    |       run-shop-processing-days-smoke.php
-    |       run-woocommerce-checkout-smoke.php
-    |
-    +---delivery-services
-    |       run-delivery-services-smoke.php
-    |
-    +---domain
-    |       run-domain-smoke.php
-    |
-    +---dpd
-    |       run-dpd-autosync-smoke.php
-    |       run-dpd-checkout-pickup-selection-smoke.php
-    |       run-dpd-checkout-runtime-smoke.php
-    |       run-dpd-city-resolver-smoke.php
-    |       run-dpd-create-order-smoke.php
-    |       run-dpd-dadata-fallback-smoke.php
-    |       run-dpd-documents-smoke.php
-    |       run-dpd-event-sync-smoke.php
-    |       run-dpd-foundation-smoke.php
-    |       run-dpd-geography-import-runner-smoke.js
-    |       run-dpd-geography-import-smoke.php
-    |       run-dpd-location-index-smoke.php
-    |       run-dpd-order-recalculation-smoke.php
-    |       run-dpd-parcel-builder-smoke.php
-    |       run-dpd-pickup-autosync-smoke.php
-    |       run-dpd-pickup-points-smoke.php
-    |       run-dpd-shipment-buttons-smoke.php
-    |       run-dpd-shipment-lifecycle-smoke.php
-    |       run-dpd-shipment-preparation-smoke.php
-    |       run-dpd-status-mapping-smoke.php
-    |       run-dpd-tariff-calculation-smoke.php
-    |       run-dpd-terminalcode-runtime-pricing-smoke.php
-    |       run-dpd-woocommerce-status-audit-smoke.php
-    |
-    +---fias
-    |       run-fias-smoke.php
-    |
-    +---infrastructure
-    |       run-action-scheduler-lifecycle-smoke.php
-    |
-    +---fixtures
-    |   |   gar_places_sample.csv
-    |   |   TestDemoCarrier.php
-    |   |   TestPickupProvider.php
-    |   |
-    |   \---demo
-    |           fias-prepared-sample.json
-    |           locations-demo.json
-    |           pickup-points-demo.json
-    |           rules-demo.json
-    |
-    +---jet-logistic
-    |       run-jet-logistic-smoke.php
-    |
-    +---locations
-    |       run-dadata-postcode-fill-smoke.php
-    |       run-gar-import-smoke.php
-    |       run-location-alias-removal-migration-smoke.php
-    |       run-location-database-backup-smoke.php
-    |       run-location-delivery-codes-smoke.php
-    |       run-location-display-name-smoke.php
-    |       run-locations-incremental-update-smoke.php
-    |       run-locations-incremental-update-ui-smoke.js
-    |       run-locations-smoke.php
-    |       run-russianpost-courier-postcode-fill-smoke.php
-    |
-    +---manual-delivery
-    |       run-manual-delivery-foundation-smoke.php
-    |       run-manual-delivery-shipments-smoke.php
-    |
-    +---orders
-    |       run-delivery-calculation-data-builder-smoke.php
-    |       run-order-delivery-calculation-meta-smoke.php
-    |       run-order-delivery-recalculation-smoke.php
-    |
-    +---ozon-delivery
-    |       run-ozon-delivery-admin-smoke.php
-    |       run-ozon-delivery-authorization-smoke.php
-    |       run-ozon-delivery-checkout-smoke.php
-    |       run-ozon-delivery-foundation-smoke.php
-    |       run-ozon-delivery-modal-limits-smoke.php
-    |       run-ozon-delivery-pickup-admin-smoke.php
-    |       run-ozon-delivery-pickup-cancellation-race-smoke.php
-    |       run-ozon-delivery-pickup-import-smoke.php
-    |       run-ozon-delivery-pickup-owner-smoke.php
-    |       run-ozon-delivery-pickup-progress-smoke.php
-    |       run-ozon-delivery-pickup-provider-smoke.php
-    |       run-ozon-delivery-pickup-ready-transition-race-smoke.php
-    |       run-ozon-delivery-pickup-schedule-smoke.php
-    |       run-ozon-delivery-pickup-scheduler-smoke.php
-    |       run-ozon-delivery-pickup-two-phase-smoke.php
-    |       run-ozon-delivery-quote-smoke.php
-    |       run-ozon-delivery-return-smoke.php
-    |       run-ozon-delivery-shipment-smoke.php
-    |
-    +---packaging
-    |       run-packaging-smoke.php
-    |
-    +---pek
-    |   |   run-pek-admin-routing-smoke.php
-    |   |   run-pek-admin-ui-smoke.php
-    |   |   run-pek-checkout-runtime-smoke.php
-    |   |   run-pek-foundation-smoke.php
-    |   |   run-pek-geography-smoke.php
-    |   |   run-pek-international-runtime-smoke.php
-    |   |   run-pek-pickup-provider-smoke.php
-    |   |   run-pek-quote-foundation-smoke.php
-    |   |   run-pek-schema-integrity-smoke.php
-    |   |   run-pek-shipment-cancellation-smoke.php
-    |   |   run-pek-shipment-create-smoke.php
-    |   |   run-pek-shipment-documents-smoke.php
-    |   |   run-pek-shipment-integration-smoke.php
-    |   |   run-pek-shipment-modal-smoke.php
-    |   |   run-pek-shipment-picker-smoke.php
-    |   |   run-pek-shipment-status-smoke.php
-    |   |   run-pek-warehouse-datetime-smoke.php
-    |   |
-    |   \---fixtures
-    |           confirmed-counterparties-mixed-response.json
-    |           confirmed-counterparties-physical-only-response.json
-    |           confirmed-counterparties-response.json
-    |           connected-services-response.json
-    |           order-print-response.json
-    |           preregistration-submit-courier.json
-    |           preregistration-submit-pickup.json
-    |           preregistration-submit-response.json
-    |           private-token-response.json
-    |
-    +---pickup
-    |       run-carrier-pickup-provider-registry-smoke.php
-    |       run-pickup-checkout-smoke.php
-    |       run-pickup-diagnostics-smoke.php
-    |       run-pickup-rest-smoke.php
-    |       run-pickup-smoke.php
-    |       run-russian-post-pickup-import-smoke.php
-    |
-    +---rules
-    |       run-rules-admin-smoke.php
-    |       run-rules-smoke.php
-    |
-    +---runtime
-    |       run-no-legacy-smoke.php
-    |
-    +---scheduled-tasks
-    |       run-scheduled-task-timezone-smoke.php
-    |
-    +---self-pickup
-    |       run-self-pickup-smoke.php
-    |
-    +---shipments
-    |   |   actual-cost-test-helpers.php
-    |   |   admin-js-bundle-source.php
-    |   |   run-carrier-adapter-registry-smoke.php
-    |   |   run-russian-post-cancel-shipment-smoke.php
-    |   |   run-russian-post-documents-smoke.php
-    |   |   run-russian-post-shipment-price-smoke.php
-    |   |   run-russian-post-shipments-smoke.php
-    |   |   run-shipment-actual-cost-presentation-smoke.php
-    |   |   run-shipment-actual-cost-service-smoke.php
-    |   |   run-shipment-admin-ajax-smoke.php
-    |   |   run-shipment-admin-js-structure-smoke.php
-    |   |   run-shipment-allocation-smoke.php
-    |   |   run-shipment-cost-analytics-indexer-smoke.php
-    |   |   run-shipment-cost-analytics-query-smoke.php
-    |   |   run-shipment-cost-analytics-smoke.php
-    |   |   run-shipment-cost-analytics-storage-smoke.php
-    |   |   run-shipment-cost-threshold-policy-smoke.php
-    |   |   run-shipment-creation-attempt-smoke.php
-    |   |   run-shipment-document-actions-smoke.php
-    |   |   run-shipment-lifecycle-contract-smoke.php
-    |   |   run-shipment-modal-extensions-smoke.php
-    |   |   run-shipment-persistence-mappers-smoke.php
-    |   |   run-shipment-regression-profile-smoke.php
-    |   |   run-shipment-regression-profile.php
-    |   |   run-shipment-status-smoke.php
-    |   |   shipment-cost-analytics-test-helpers.php
-    |   |
-    |   \---regression
-    |           shipment-regression-manifest.php
-    |           ShipmentRegressionRunner.php
-    |
-    +---statuses
-    |       run-order-status-mapping-smoke.php
-    |       run-status-autosync-smoke.php
-    |
-    \---yandex-delivery
-            run-yandex-delivery-checkout-rates-smoke.php
-            run-yandex-delivery-foundation-smoke.php
-            run-yandex-delivery-geo-pipeline-v2-smoke.php
-            run-yandex-delivery-geo-v2-builder-smoke.php
-            run-yandex-delivery-geo-v2-region-enrichment-smoke.php
-            run-yandex-delivery-location-mapping-v2-smoke.php
-            run-yandex-delivery-pickup-selection-smoke.php
-            run-yandex-delivery-pickup-v2-foundation-smoke.php
-            run-yandex-delivery-pickup-v2-runner-smoke.php
-            run-yandex-delivery-pricing-calculator-smoke.php
-            run-yandex-delivery-region-mapping-v2-smoke.php
-            run-yandex-delivery-shipment-framework-smoke.php
-            run-yandex-delivery-shipment-http-smoke.php
-            run-yandex-delivery-shipment-payload-smoke.php
-            run-yandex-delivery-source-station-smoke.php
+Repository file tree
+Generated for Walls Delivery Calc 1.0.0
+
+.
+|-- tree.txt
+|-- .gitignore
+|-- assets/admin/.gitkeep
+|-- assets/admin/calendar-admin.css
+|-- assets/admin/calendar-admin.js
+|-- assets/admin/delivery-services-shop-processing.js
+|-- assets/admin/dpd-geography-import.js
+|-- assets/admin/locations-admin.css
+|-- assets/admin/locations-incremental-update.js
+|-- assets/admin/manual-delivery-services.js
+|-- assets/admin/order-delivery-recalculation.css
+|-- assets/admin/order-delivery-recalculation.js
+|-- assets/admin/ozon-delivery-pickup-sync.js
+|-- assets/admin/rules-admin.css
+|-- assets/admin/rules-admin.js
+|-- assets/admin/russian-post-pickup-import.js
+|-- assets/admin/shipment-cost-analytics.js
+|-- assets/admin/shipments-admin.css
+|-- assets/admin/shipments-admin.js
+|-- assets/admin/shipments/extensions/cdek.js
+|-- assets/admin/shipments/extensions/dpd.js
+|-- assets/admin/shipments/extensions/ozon-delivery.js
+|-- assets/admin/shipments/extensions/pek.js
+|-- assets/admin/shipments/extensions/russian-post.js
+|-- assets/admin/shipments/extensions/yandex.js
+|-- assets/admin/shipments/shipment-allocation.js
+|-- assets/admin/shipments/shipment-core.js
+|-- assets/admin/shipments/shipment-events.js
+|-- assets/admin/shipments/shipment-picker.js
+|-- assets/admin/shipments/shipment-polling.js
+|-- assets/admin/shipments/shipment-preview.js
+|-- assets/admin/shipments/shipment-status.js
+|-- assets/admin/yandex-delivery-pickup-v2-runner.js
+|-- assets/frontend/.gitkeep
+|-- assets/frontend/checkout-address-fields.js
+|-- assets/frontend/checkout-address-suggestions.css
+|-- assets/frontend/checkout-address-suggestions.js
+|-- assets/frontend/checkout-city-selector.css
+|-- assets/frontend/checkout-city-selector.js
+|-- assets/frontend/checkout-rates.css
+|-- assets/frontend/checkout-sort.js
+|-- assets/frontend/courier-address-summary.js
+|-- assets/frontend/domestic-tariff-selector.css
+|-- assets/frontend/domestic-tariff-selector.js
+|-- assets/frontend/pickup-foundation.css
+|-- assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js
+|-- assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js
+|-- assets/frontend/pickup-map/wdc-pickup-api.js
+|-- assets/frontend/pickup-map/wdc-pickup-checkout.js
+|-- assets/frontend/pickup-map/wdc-pickup-map.css
+|-- assets/frontend/pickup-map/wdc-pickup-map.js
+|-- assets/frontend/pickup-map/wdc-pickup-modal.js
+|-- assets/vendor/leaflet/images/layers-2x.png
+|-- assets/vendor/leaflet/images/layers.png
+|-- assets/vendor/leaflet/images/marker-icon-2x.png
+|-- assets/vendor/leaflet/images/marker-icon.png
+|-- assets/vendor/leaflet/images/marker-shadow.png
+|-- assets/vendor/leaflet/leaflet.css
+|-- assets/vendor/leaflet/leaflet.js
+|-- database/migrations/0001_initial_schema.php
+|-- docs/architecture/dependency-injection.md
+|-- docs/architecture/plugin-architecture.md
+|-- docs/architecture/shipment-framework.md
+|-- docs/development/chat-start.md
+|-- docs/development/codex-prompt-template.md
+|-- docs/development/coding-rules.md
+|-- docs/development/development-workflow.md
+|-- docs/development/new-carrier-guide.md
+|-- docs/development/testing-and-regression.md
+|-- docs/dpd/ws-integration-guide.docx
+|-- docs/operations/cron-and-background-jobs.md
+|-- docs/operations/installation-and-runtime.md
+|-- docs/operations/logging-policy.md
+|-- docs/operations/project-status.md
+|-- docs/operations/technical-debt.md
+|-- docs/operations/troubleshooting.md
+|-- docs/README.md
+|-- docs/research/fias-auto-update-history.md
+|-- docs/research/walls-delivery-calc-tech-spec-history.md
+|-- docs/subsystems/checkout.md
+|-- docs/subsystems/locations.md
+|-- docs/subsystems/packaging.md
+|-- docs/subsystems/rules.md
+|-- docs/subsystems/shipments.md
+|-- README.md
+|-- src/Admin/AdminMenu.php
+|-- src/Admin/AdminNotices.php
+|-- src/Admin/ScheduledTaskCatalog.php
+|-- src/Admin/SettingsAdminPage.php
+|-- src/Calendar/.gitkeep
+|-- src/Calendar/Admin/CalendarAdminPage.php
+|-- src/Calendar/CalendarTypes.php
+|-- src/Calendar/Services/CalendarScheduler.php
+|-- src/Calendar/Services/CalendarService.php
+|-- src/Calendar/Services/DeliveryDateCalculator.php
+|-- src/Calendar/Services/DeliveryDateFormatter.php
+|-- src/Calendar/Services/TimezoneService.php
+|-- src/Calendar/Services/YearGenerator.php
+|-- src/Calendar/Storage/CalendarRepository.php
+|-- src/Calendar/ValueObjects/.gitkeep
+|-- src/Carriers/.gitkeep
+|-- src/Carriers/Cdek/Api/CdekApiClient.php
+|-- src/Carriers/Cdek/Api/CdekApiException.php
+|-- src/Carriers/Cdek/Api/CdekApiResponse.php
+|-- src/Carriers/Cdek/Api/CdekHttpClientInterface.php
+|-- src/Carriers/Cdek/Api/CdekOAuthTokenService.php
+|-- src/Carriers/Cdek/Api/WpCdekHttpClient.php
+|-- src/Carriers/Cdek/CdekCredentials.php
+|-- src/Carriers/Cdek/CdekLocationResolver.php
+|-- src/Carriers/Cdek/CdekSettings.php
+|-- src/Carriers/Cdek/Tariffs/CdekTariffRepository.php
+|-- src/Carriers/Cdek/Tariffs/CdekTariffSyncService.php
+|-- src/Carriers/Contracts/CarrierAdapterInterface.php
+|-- src/Carriers/Contracts/CarrierQuoteCacheContextProviderInterface.php
+|-- src/Carriers/Dpd/DpdApiClient.php
+|-- src/Carriers/Dpd/DpdCityResolver.php
+|-- src/Carriers/Dpd/DpdCredentials.php
+|-- src/Carriers/Dpd/DpdDuplicateCityResolver.php
+|-- src/Carriers/Dpd/DpdEndpoints.php
+|-- src/Carriers/Dpd/DpdErrorMapper.php
+|-- src/Carriers/Dpd/DpdException.php
+|-- src/Carriers/Dpd/DpdGeographyDiagnosticService.php
+|-- src/Carriers/Dpd/DpdSettings.php
+|-- src/Carriers/Dpd/DpdSoapClient.php
+|-- src/Carriers/Dpd/DpdSoapClientInterface.php
+|-- src/Carriers/Dpd/DpdSoapRequest.php
+|-- src/Carriers/Dpd/DpdSoapResponse.php
+|-- src/Carriers/Dpd/Geography/DpdDaDataDeliveryClientInterface.php
+|-- src/Carriers/Dpd/Geography/DpdDaDataDeliveryFallbackService.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyCsvParser.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyFtpClient.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyImportLockService.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyImportReport.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyImportService.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyImportStateService.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyLookupKeys.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyMatchContext.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyMatcher.php
+|-- src/Carriers/Dpd/Geography/DpdGeographyStageRepository.php
+|-- src/Carriers/Dpd/Geography/DpdLocationIndex.php
+|-- src/Carriers/Dpd/Geography/WpDpdDaDataDeliveryClient.php
+|-- src/Carriers/Dpd/Pickup/DpdPickupPointAutoSync.php
+|-- src/Carriers/Dpd/Pickup/DpdPickupPointImportReport.php
+|-- src/Carriers/Dpd/Pickup/DpdPickupPointImportService.php
+|-- src/Carriers/Dpd/Pickup/DpdPickupPointNormalizer.php
+|-- src/Carriers/Dpd/Pickup/DpdPickupPointRepository.php
+|-- src/Carriers/Dpd/Pickup/DpdPickupPointScheduleFormatter.php
+|-- src/Carriers/Dpd/Pickup/DpdPickupPointService.php
+|-- src/Carriers/Dpd/Shipments/DpdShipmentDateResolver.php
+|-- src/Carriers/Dpd/Shipments/DpdShipmentPayloadBuilder.php
+|-- src/Carriers/Dpd/Tariff/DpdPackagingBuilderFactory.php
+|-- src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php
+|-- src/Carriers/Dpd/Tariff/DpdTariffOptionNormalizer.php
+|-- src/Carriers/Dpd/Tariff/DpdTariffParcel.php
+|-- src/Carriers/Dpd/Tariff/DpdTariffRequest.php
+|-- src/Carriers/Dpd/Tariff/DpdTariffRequestBuilder.php
+|-- src/Carriers/Dpd/Tariff/DpdTariffResult.php
+|-- src/Carriers/Dpd/Tariff/DpdTerminalCodeTariffRequest.php
+|-- src/Carriers/Dpd/Tariff/DpdTerminalCodeTariffRequestBuilder.php
+|-- src/Carriers/JetLogistic/Admin/JetLogisticGeographyAdminPage.php
+|-- src/Carriers/JetLogistic/Admin/JetLogisticStatusAdminPage.php
+|-- src/Carriers/JetLogistic/Api/JetLogisticApiClient.php
+|-- src/Carriers/JetLogistic/Api/JetLogisticApiDiagnosticService.php
+|-- src/Carriers/JetLogistic/Api/JetLogisticApiException.php
+|-- src/Carriers/JetLogistic/Api/JetLogisticHttpClientInterface.php
+|-- src/Carriers/JetLogistic/Api/WpJetLogisticHttpClient.php
+|-- src/Carriers/JetLogistic/Checkout/JetLogisticCustomerComments.php
+|-- src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php
+|-- src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvParser.php
+|-- src/Carriers/JetLogistic/Geography/JetLogisticCityNameNormalizer.php
+|-- src/Carriers/JetLogistic/Geography/JetLogisticCountrySyncService.php
+|-- src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php
+|-- src/Carriers/JetLogistic/Geography/JetLogisticGeographyMatcher.php
+|-- src/Carriers/JetLogistic/Geography/JetLogisticGeographyOverrideRepository.php
+|-- src/Carriers/JetLogistic/Geography/JetLogisticGeographyRepository.php
+|-- src/Carriers/JetLogistic/Geography/JetLogisticRegionNameNormalizer.php
+|-- src/Carriers/JetLogistic/JetLogisticCredentials.php
+|-- src/Carriers/JetLogistic/JetLogisticSettings.php
+|-- src/Carriers/JetLogistic/Quote/JetLogisticCalculationResult.php
+|-- src/Carriers/JetLogistic/Quote/JetLogisticQuoteRequestBuilder.php
+|-- src/Carriers/JetLogistic/Quote/JetLogisticQuoteResponseParser.php
+|-- src/Carriers/JetLogistic/Status/JetLogisticStatusEventResolver.php
+|-- src/Carriers/JetLogistic/Status/JetLogisticStatusMapper.php
+|-- src/Carriers/JetLogistic/Status/JetLogisticStatusMappingRepository.php
+|-- src/Carriers/JetLogistic/Status/JetLogisticStatusService.php
+|-- src/Carriers/Manual/ManualDeliveryGeographyMatcher.php
+|-- src/Carriers/Manual/ManualDeliveryGeographyRepository.php
+|-- src/Carriers/Manual/ManualDeliveryPricingCalculator.php
+|-- src/Carriers/Manual/ManualDeliveryPricingConfig.php
+|-- src/Carriers/Manual/ManualDeliveryPricingResult.php
+|-- src/Carriers/Manual/ManualDeliveryPricingService.php
+|-- src/Carriers/Manual/ManualDeliverySettings.php
+|-- src/Carriers/Manual/ManualDeliveryWeightRange.php
+|-- src/Carriers/Manual/ManualDeliveryWeightRangeRepository.php
+|-- src/Carriers/Manual/ManualPickupPointProvider.php
+|-- src/Carriers/Manual/ManualPickupPointRepository.php
+|-- src/Carriers/OzonDelivery/Admin/OzonDeliveryAdminPage.php
+|-- src/Carriers/OzonDelivery/Admin/OzonDeliveryQuoteDiagnosticService.php
+|-- src/Carriers/OzonDelivery/Api/OzonDeliveryAccessTokenService.php
+|-- src/Carriers/OzonDelivery/Api/OzonDeliveryApiClient.php
+|-- src/Carriers/OzonDelivery/Api/OzonDeliveryApiException.php
+|-- src/Carriers/OzonDelivery/Api/OzonDeliveryApiResponse.php
+|-- src/Carriers/OzonDelivery/Api/OzonDeliveryConnectionDiagnosticService.php
+|-- src/Carriers/OzonDelivery/Api/OzonDeliveryHttpClientInterface.php
+|-- src/Carriers/OzonDelivery/Api/OzonDeliveryMessageSanitizer.php
+|-- src/Carriers/OzonDelivery/Api/OzonDeliveryToken.php
+|-- src/Carriers/OzonDelivery/Api/OzonDeliveryTokenCache.php
+|-- src/Carriers/OzonDelivery/Api/WpOzonDeliveryHttpClient.php
+|-- src/Carriers/OzonDelivery/OzonDeliveryCredentials.php
+|-- src/Carriers/OzonDelivery/OzonDeliverySettings.php
+|-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupImportLock.php
+|-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupImportService.php
+|-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupParser.php
+|-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupPointProvider.php
+|-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupRepository.php
+|-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupScheduleFormatter.php
+|-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupScheduler.php
+|-- src/Carriers/OzonDelivery/Quote/OzonDeliveryCourierAddressMapper.php
+|-- src/Carriers/OzonDelivery/Quote/OzonDeliveryCourierLocation.php
+|-- src/Carriers/OzonDelivery/Quote/OzonDeliveryCourierLocationResolver.php
+|-- src/Carriers/OzonDelivery/Quote/OzonDeliveryPackagingBuilderFactory.php
+|-- src/Carriers/OzonDelivery/Quote/OzonDeliveryQuoteException.php
+|-- src/Carriers/OzonDelivery/Quote/OzonDeliveryQuoteParser.php
+|-- src/Carriers/OzonDelivery/Quote/OzonDeliveryQuoteRequestBuilder.php
+|-- src/Carriers/OzonDelivery/Quote/OzonDeliveryQuoteResult.php
+|-- src/Carriers/OzonDelivery/Quote/OzonDeliveryQuoteService.php
+|-- src/Carriers/OzonDelivery/Returns/OzonDeliveryReturnInfoParser.php
+|-- src/Carriers/OzonDelivery/Returns/OzonDeliveryReturnLifecycleResolver.php
+|-- src/Carriers/OzonDelivery/Returns/OzonDeliveryReturnSearchParser.php
+|-- src/Carriers/OzonDelivery/Returns/OzonDeliveryReturnService.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryCourierAddressNormalizer.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentActionPolicy.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentAdapter.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentAllocationValueResolver.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentCreateRequestBuilder.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentCreateResponseParser.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentCreationStatusPolicy.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentDescriptionBuilder.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentDocumentProvider.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentExternalIdResolver.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentInfoParser.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentModalExtension.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentPersistenceMapper.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentPreflightQuoteService.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentService.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentStatusMapper.php
+|-- src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentStatusMapping.php
+|-- src/Carriers/Pek/Admin/PekAdminNoticeStore.php
+|-- src/Carriers/Pek/Admin/PekAdminPage.php
+|-- src/Carriers/Pek/Admin/PekDestinationPickupDiagnosticService.php
+|-- src/Carriers/Pek/Admin/PekDestinationPickupDiagnosticStore.php
+|-- src/Carriers/Pek/Admin/PekQuoteDiagnosticService.php
+|-- src/Carriers/Pek/Admin/PekQuoteDiagnosticStore.php
+|-- src/Carriers/Pek/Admin/PekStatusAdminPage.php
+|-- src/Carriers/Pek/Api/PekApiClient.php
+|-- src/Carriers/Pek/Api/PekApiException.php
+|-- src/Carriers/Pek/Api/PekConnectionDiagnosticService.php
+|-- src/Carriers/Pek/Api/PekHttpClientInterface.php
+|-- src/Carriers/Pek/Api/PekRequestBudget.php
+|-- src/Carriers/Pek/Api/PekSenderWarehouseSearchCache.php
+|-- src/Carriers/Pek/Api/PekSenderWarehouseService.php
+|-- src/Carriers/Pek/Api/WpPekHttpClient.php
+|-- src/Carriers/Pek/Checkout/PekCheckoutQuoteContextResolver.php
+|-- src/Carriers/Pek/Geography/PekAddressBuilder.php
+|-- src/Carriers/Pek/Geography/PekLocationMappingRepository.php
+|-- src/Carriers/Pek/Geography/PekLocationResolver.php
+|-- src/Carriers/Pek/Installation/PekSchemaIntegrityService.php
+|-- src/Carriers/Pek/PekCountryPolicy.php
+|-- src/Carriers/Pek/PekCredentials.php
+|-- src/Carriers/Pek/PekRuPhoneNormalizer.php
+|-- src/Carriers/Pek/PekSettings.php
+|-- src/Carriers/Pek/Pickup/PekCargoConstraintsConverter.php
+|-- src/Carriers/Pek/Pickup/PekCheckoutPickupPointFormatter.php
+|-- src/Carriers/Pek/Pickup/PekDestinationTerminalRequest.php
+|-- src/Carriers/Pek/Pickup/PekDestinationTerminalSearchCache.php
+|-- src/Carriers/Pek/Pickup/PekPickupPointProvider.php
+|-- src/Carriers/Pek/Pickup/PekTerminalRepository.php
+|-- src/Carriers/Pek/Pickup/PekTerminalService.php
+|-- src/Carriers/Pek/Quote/PekLightCargoSurchargePolicy.php
+|-- src/Carriers/Pek/Quote/PekLightCargoSurchargeResult.php
+|-- src/Carriers/Pek/Quote/PekQuoteCargoBuilder.php
+|-- src/Carriers/Pek/Quote/PekQuoteMessageSanitizer.php
+|-- src/Carriers/Pek/Quote/PekQuoteOptions.php
+|-- src/Carriers/Pek/Quote/PekQuotePlannedDateTimeResolver.php
+|-- src/Carriers/Pek/Quote/PekQuoteRequestBuilder.php
+|-- src/Carriers/Pek/Quote/PekQuoteResponseParser.php
+|-- src/Carriers/Pek/Quote/PekQuoteResult.php
+|-- src/Carriers/Pek/Quote/PekQuoteService.php
+|-- src/Carriers/Registry/CarrierRegistry.php
+|-- src/Carriers/Runtime/CarrierRuntimeContext.php
+|-- src/Carriers/Runtime/CdekCarrier.php
+|-- src/Carriers/Runtime/DpdQuoteCarrier.php
+|-- src/Carriers/Runtime/JetLogisticCarrier.php
+|-- src/Carriers/Runtime/ManualDeliveryCarrier.php
+|-- src/Carriers/Runtime/OzonDeliveryCarrier.php
+|-- src/Carriers/Runtime/PekCarrier.php
+|-- src/Carriers/Runtime/RussianPostDomesticCarrier.php
+|-- src/Carriers/Runtime/RussianPostInternationalCarrier.php
+|-- src/Carriers/Runtime/SelfPickupCarrier.php
+|-- src/Carriers/Runtime/YandexDeliveryCarrier.php
+|-- src/Carriers/RussianPost/Admin/RussianPostCountriesAdminPage.php
+|-- src/Carriers/RussianPost/Admin/RussianPostPickupDiagnosticsTab.php
+|-- src/Carriers/RussianPost/DomesticTariffVariant.php
+|-- src/Carriers/RussianPost/Otpravka/RussianPostOtpravkaApiClient.php
+|-- src/Carriers/RussianPost/Otpravka/RussianPostOtpravkaApiSettings.php
+|-- src/Carriers/RussianPost/RussianPostApiClient.php
+|-- src/Carriers/RussianPost/RussianPostCountryDirectory.php
+|-- src/Carriers/RussianPost/RussianPostCountryMapping.php
+|-- src/Carriers/RussianPost/RussianPostCountryMappingRepository.php
+|-- src/Carriers/RussianPost/RussianPostCountryMappingService.php
+|-- src/Carriers/RussianPost/RussianPostCourierTariffProbeService.php
+|-- src/Carriers/RussianPost/RussianPostDomesticApiClient.php
+|-- src/Carriers/RussianPost/RussianPostDomesticSettings.php
+|-- src/Carriers/RussianPost/RussianPostDomesticTariffVariantResolver.php
+|-- src/Carriers/RussianPost/RussianPostSettings.php
+|-- src/Carriers/RussianPost/Tracking/RussianPostTrackingApiClient.php
+|-- src/Carriers/SelfPickup/SelfPickupDiscountPolicy.php
+|-- src/Carriers/SelfPickup/SelfPickupDiscountResult.php
+|-- src/Carriers/SelfPickup/SelfPickupDiscountService.php
+|-- src/Carriers/SelfPickup/SelfPickupSettings.php
+|-- src/Carriers/YandexDelivery/Api/WpYandexDeliveryHttpClient.php
+|-- src/Carriers/YandexDelivery/Api/YandexDeliveryApiClient.php
+|-- src/Carriers/YandexDelivery/Api/YandexDeliveryApiException.php
+|-- src/Carriers/YandexDelivery/Api/YandexDeliveryApiResponse.php
+|-- src/Carriers/YandexDelivery/Api/YandexDeliveryConnectionDiagnosticService.php
+|-- src/Carriers/YandexDelivery/Api/YandexDeliveryHttpClientInterface.php
+|-- src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2BuilderRunnerService.php
+|-- src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2BuilderService.php
+|-- src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2Repository.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2Runner.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexGeoV2RegionEnrichmentRunner.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexGeoV2RegionEnrichmentService.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMapperV2Service.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2NameNormalizer.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Runner.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexRegionMappingV2Repository.php
+|-- src/Carriers/YandexDelivery/Pickup/YandexDeliveryCheckoutPickupPointFormatter.php
+|-- src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2ImportService.php
+|-- src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2JsonStreamReader.php
+|-- src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2Repository.php
+|-- src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2RunnerService.php
+|-- src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2ScheduleFormatter.php
+|-- src/Carriers/YandexDelivery/Pricing/YandexDeliveryPricingRequestBuilder.php
+|-- src/Carriers/YandexDelivery/Pricing/YandexDeliveryPricingResponseParser.php
+|-- src/Carriers/YandexDelivery/Pricing/YandexDeliveryPricingResult.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryBinaryDocument.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryConfirmedRequest.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryEarliestOfferSelector.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryOffer.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryOfferCollection.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryRequestHistory.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryRequestInfo.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryShipmentClient.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryShipmentPayloadBuilder.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryShipmentRegistrationResult.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryShipmentRegistrationService.php
+|-- src/Carriers/YandexDelivery/Shipment/YandexDeliveryShipmentState.php
+|-- src/Carriers/YandexDelivery/YandexDeliveryCredentials.php
+|-- src/Carriers/YandexDelivery/YandexDeliveryEndpoints.php
+|-- src/Carriers/YandexDelivery/YandexDeliverySettings.php
+|-- src/Checkout/Address/AddressLineParser.php
+|-- src/Checkout/Address/CheckoutAddressNormalizer.php
+|-- src/Checkout/Address/CheckoutAddressRuntime.php
+|-- src/Checkout/Address/FiasAddressNormalizer.php
+|-- src/Checkout/AddressSuggestions/AddressSuggestionAjax.php
+|-- src/Checkout/AddressSuggestions/AddressSuggestionClientInterface.php
+|-- src/Checkout/AddressSuggestions/AddressSuggestionNormalizer.php
+|-- src/Checkout/AddressSuggestions/AddressSuggestionService.php
+|-- src/Checkout/AddressSuggestions/AddressSuggestionSettings.php
+|-- src/Checkout/AddressSuggestions/DaDataSuggestionClient.php
+|-- src/Checkout/AddressSuggestions/DaDataTokenPool.php
+|-- src/Checkout/AddressSuggestions/FallbackSuggestionClient.php
+|-- src/Checkout/Cache/DeliveryQuoteCacheManager.php
+|-- src/Checkout/Cache/QuoteCache.php
+|-- src/Checkout/Comments/DeliveryCustomerCommentNormalizer.php
+|-- src/Checkout/Comments/DeliveryCustomerCommentRenderer.php
+|-- src/Checkout/Comments/DeliveryCustomerCommentSnapshotBuilder.php
+|-- src/Checkout/Locations/CheckoutCityResolver.php
+|-- src/Checkout/Locations/CheckoutLocationAjax.php
+|-- src/Checkout/Locations/CheckoutLocationProfileMatcher.php
+|-- src/Checkout/Locations/CheckoutLocationSearch.php
+|-- src/Checkout/Locations/CheckoutLocationSearchParser.php
+|-- src/Checkout/Locations/LocationCoordinateEnricher.php
+|-- src/Checkout/Runtime/CarrierExecutionGuard.php
+|-- src/Checkout/Runtime/CheckoutCalculationResult.php
+|-- src/Checkout/Runtime/CheckoutLogger.php
+|-- src/Checkout/Runtime/CheckoutOrchestrator.php
+|-- src/Checkout/Runtime/DeliveryLeadTimeNormalizer.php
+|-- src/Checkout/Runtime/FallbackRateFactory.php
+|-- src/Checkout/Runtime/RuleAppliedRateBuilder.php
+|-- src/Checkout/Runtime/ShopProcessingDaysResolver.php
+|-- src/Checkout/Sorting/RateSorter.php
+|-- src/Checkout/Validation/CheckoutAddressValidation.php
+|-- src/Checkout/WooCommerce/CheckoutAddressRenderer.php
+|-- src/Checkout/WooCommerce/CheckoutCartTotalsResolver.php
+|-- src/Checkout/WooCommerce/CheckoutDebugPanel.php
+|-- src/Checkout/WooCommerce/CheckoutDeliveryMessages.php
+|-- src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php
+|-- src/Checkout/WooCommerce/CheckoutFieldConfigurator.php
+|-- src/Checkout/WooCommerce/CheckoutLocationFingerprint.php
+|-- src/Checkout/WooCommerce/CheckoutRateRenderer.php
+|-- src/Checkout/WooCommerce/CheckoutSessionManager.php
+|-- src/Checkout/WooCommerce/CheckoutSortSelector.php
+|-- src/Checkout/WooCommerce/CheckoutValidation.php
+|-- src/Checkout/WooCommerce/CourierRateSupport.php
+|-- src/Checkout/WooCommerce/NewShippingMethod.php
+|-- src/Checkout/WooCommerce/OrderDeliveryCustomerCommentsDisplay.php
+|-- src/Checkout/WooCommerce/OrderShippingMetaPersister.php
+|-- src/Checkout/WooCommerce/PickupFamilyResolver.php
+|-- src/Checkout/WooCommerce/PickupMapCheckout.php
+|-- src/Checkout/WooCommerce/PickupPointOrderDisplay.php
+|-- src/Checkout/WooCommerce/PickupPointRenderer.php
+|-- src/Checkout/WooCommerce/ShippingMethodRegistrar.php
+|-- src/Checkout/WooCommerce/WooCommercePackageMapper.php
+|-- src/Checkout/WooCommerce/WooCommerceRateMapper.php
+|-- src/Checkout/WooCommerce/WooCommerceRateMetaNormalizer.php
+|-- src/Checkout/WooCommerce/WooCommerceSessionBootstrapper.php
+|-- src/Core/Autoloader.php
+|-- src/Core/bootstrap.php
+|-- src/Core/Container.php
+|-- src/Core/Plugin.php
+|-- src/Core/PluginConstants.php
+|-- src/Core/PluginEnvironment.php
+|-- src/Core/RequirementsChecker.php
+|-- src/DeliveryServices/Admin/DeliveryServicesAdminPage.php
+|-- src/DeliveryServices/Application/DeliveryServiceKeyRenameService.php
+|-- src/DeliveryServices/DeliveryService.php
+|-- src/DeliveryServices/DeliveryServiceCountryRepository.php
+|-- src/DeliveryServices/DeliveryServiceManager.php
+|-- src/DeliveryServices/DeliveryServiceRegistry.php
+|-- src/DeliveryServices/DeliveryServiceRepository.php
+|-- src/DeliveryServices/DeliveryServiceSettingsRepository.php
+|-- src/Domain/.gitkeep
+|-- src/Domain/Address/Address.php
+|-- src/Domain/Address/AddressNormalizationResult.php
+|-- src/Domain/Calendar/CalendarDay.php
+|-- src/Domain/Calendar/PlannedDeliveryDate.php
+|-- src/Domain/Carrier/CarrierCapabilities.php
+|-- src/Domain/Carrier/CarrierIdentity.php
+|-- src/Domain/Common/DateRange.php
+|-- src/Domain/Common/DeliveryDaysFormatter.php
+|-- src/Domain/Common/Money.php
+|-- src/Domain/Common/MoneyParser.php
+|-- src/Domain/Package/Package.php
+|-- src/Domain/Package/PackageItem.php
+|-- src/Domain/Package/ShipmentPlace.php
+|-- src/Domain/Phone/RussianPhoneNormalizer.php
+|-- src/Domain/Pickup/PickupPoint.php
+|-- src/Domain/Pickup/PickupPointSelection.php
+|-- src/Domain/Quote/DeliveryQuote.php
+|-- src/Domain/Quote/DeliveryRate.php
+|-- src/Domain/Quote/DeliveryType.php
+|-- src/Domain/Quote/QuoteRequest.php
+|-- src/Domain/Shipment/Shipment.php
+|-- src/Domain/Shipment/ShipmentCreateRequest.php
+|-- src/Domain/Shipment/ShipmentCreateResult.php
+|-- src/Domain/Status/DeliveryStatus.php
+|-- src/Domain/Status/StatusEvent.php
+|-- src/Domain/Status/StatusMapping.php
+|-- src/Export-GarPlaces.ps1
+|-- src/Infrastructure/Database/MigrationManager.php
+|-- src/Infrastructure/Logging/Logger.php
+|-- src/Infrastructure/Logging/LogRedactor.php
+|-- src/Infrastructure/Queue/ActionScheduler.php
+|-- src/Infrastructure/Security/EncryptionService.php
+|-- src/Infrastructure/Settings/CheckoutDeliveryMessageSettings.php
+|-- src/Infrastructure/Settings/PlatformRuntimeSettings.php
+|-- src/Infrastructure/Settings/SettingsRepository.php
+|-- src/Locations/.gitkeep
+|-- src/Locations/Admin/LocationAdminJsonResponse.php
+|-- src/Locations/Admin/LocationDatabaseBackupAdmin.php
+|-- src/Locations/Admin/LocationsAdminPage.php
+|-- src/Locations/Coordinates/LocationCoordinatesDadataBatchUpdater.php
+|-- src/Locations/Fias/FiasCredentials.php
+|-- src/Locations/Fias/FiasEndpoints.php
+|-- src/Locations/Fias/FiasHttpClient.php
+|-- src/Locations/Fias/FiasLogger.php
+|-- src/Locations/Fias/FiasRateLimiter.php
+|-- src/Locations/Import/GarImportResult.php
+|-- src/Locations/Import/GarPlacesCsvImporter.php
+|-- src/Locations/Import/LocationImportService.php
+|-- src/Locations/Import/LocationIncrementalCandidateEnricher.php
+|-- src/Locations/Import/LocationIncrementalUpdateService.php
+|-- src/Locations/Import/LocationsSnapshotExporter.php
+|-- src/Locations/Import/LocationsSnapshotImporter.php
+|-- src/Locations/Normalization/AddressNormalizerInterface.php
+|-- src/Locations/Normalization/FallbackAddressNormalizer.php
+|-- src/Locations/Postcodes/DaDataPostcodeClient.php
+|-- src/Locations/Postcodes/RussianPostCourierCalcPostcodeFillStateService.php
+|-- src/Locations/Services/CheckoutPostcode.php
+|-- src/Locations/Services/KeyboardLayoutTransformer.php
+|-- src/Locations/Services/LocationCountryIndexService.php
+|-- src/Locations/Services/LocationDatabaseBackupService.php
+|-- src/Locations/Services/LocationDisplayNameFormatter.php
+|-- src/Locations/Services/LocationMaintenanceJobGuard.php
+|-- src/Locations/Services/LocationSearchService.php
+|-- src/Locations/Storage/LocationDeliveryCodeRepository.php
+|-- src/Locations/Storage/LocationRepository.php
+|-- src/Locations/Storage/LocationWriteLock.php
+|-- src/Locations/Storage/PlaceRegionMatchResult.php
+|-- src/Locations/Storage/RegionRepository.php
+|-- src/Locations/ValueObjects/Location.php
+|-- src/Locations/ValueObjects/Region.php
+|-- src/Orders/Admin/OrderDeliveryMetabox.php
+|-- src/Orders/Admin/OrderDeliveryRateRenderer.php
+|-- src/Orders/Admin/OrderDeliveryRecalculationAdminController.php
+|-- src/Orders/Application/DeliveryCalculationDataBuilder.php
+|-- src/Orders/Application/OrderDeliveryAddressNormalizationService.php
+|-- src/Orders/Application/OrderDeliveryRecalculationService.php
+|-- src/Orders/Application/OrderDeliveryReplacementService.php
+|-- src/Orders/Application/OrderQuoteRequestMapper.php
+|-- src/Orders/Application/ShopProcessingOrderQueueCounter.php
+|-- src/Packaging/PackagingApplicationResult.php
+|-- src/Packaging/PackagingBuilder.php
+|-- src/Packaging/PackagingBuilderConfig.php
+|-- src/Packaging/PackagingException.php
+|-- src/Packaging/PackagingParcel.php
+|-- src/Packaging/PackagingResult.php
+|-- src/Packaging/PackagingWeightCalculator.php
+|-- src/Pickup/Cdek/CdekDeliveryPointService.php
+|-- src/Pickup/Presentation/PickupPointCardRenderer.php
+|-- src/Pickup/Presentation/PickupPointPresentationResolver.php
+|-- src/Pickup/Providers/CarrierPickupPointProviderInterface.php
+|-- src/Pickup/Providers/CarrierPickupPointProviderRegistry.php
+|-- src/Pickup/Providers/CarrierPickupPointQuery.php
+|-- src/Pickup/Providers/CarrierPickupPointSelectionQuery.php
+|-- src/Pickup/Providers/CheckoutPickupPointProviderQueryResolver.php
+|-- src/Pickup/Providers/PickupCargoConstraints.php
+|-- src/Pickup/Rest/CheckoutPickupPointRestController.php
+|-- src/Pickup/Rest/PickupPointsRestController.php
+|-- src/Pickup/RussianPost/RussianPostPassportPointNormalizer.php
+|-- src/Pickup/RussianPost/RussianPostPickupDiagnosticsService.php
+|-- src/Pickup/RussianPost/RussianPostPickupImporter.php
+|-- src/Pickup/RussianPost/RussianPostPickupImportStateService.php
+|-- src/Pickup/RussianPost/RussianPostPickupLocationResolver.php
+|-- src/Pickup/RussianPost/RussianPostPickupPointRepository.php
+|-- src/Pickup/RussianPost/RussianPostPickupPointTypeSettings.php
+|-- src/Pickup/RussianPost/RussianPostWorkTimeFormatter.php
+|-- src/Pickup/Schedule/CompactWeeklyScheduleFormatter.php
+|-- src/Pickup/Search/PickupAddressSearchService.php
+|-- src/Pickup/Services/PickupPointLocationResolver.php
+|-- src/Pickup/Storage/PickupPointRepository.php
+|-- src/Rules/.gitkeep
+|-- src/Rules/Admin/RuleAdminContext.php
+|-- src/Rules/Admin/RuleConditionUiSchema.php
+|-- src/Rules/Admin/RulesAdminPage.php
+|-- src/Rules/Domain/Rule.php
+|-- src/Rules/Domain/RuleAuditEntry.php
+|-- src/Rules/Domain/RuleCondition.php
+|-- src/Rules/Domain/RuleEngineResult.php
+|-- src/Rules/Domain/RuleEvaluationContext.php
+|-- src/Rules/Domain/RuleEvaluationResult.php
+|-- src/Rules/Services/ConditionEvaluator.php
+|-- src/Rules/Services/RuleEngine.php
+|-- src/Rules/Services/RuleEvaluator.php
+|-- src/Rules/Services/RuleFormulaFormatter.php
+|-- src/Rules/Services/RuleSimulator.php
+|-- src/Rules/Storage/RuleRepository.php
+|-- src/Rules/ValueObjects/RuleActionTypes.php
+|-- src/Rules/ValueObjects/RuleConditionTypes.php
+|-- src/Rules/ValueObjects/RuleOperationBases.php
+|-- src/Rules/ValueObjects/RuleOperationTypes.php
+|-- src/Rules/ValueObjects/RuleOperators.php
+|-- src/Shipments/.gitkeep
+|-- src/Shipments/Admin/Ajax/ShipmentActualCostAjaxController.php
+|-- src/Shipments/Admin/Ajax/ShipmentAddressAjaxController.php
+|-- src/Shipments/Admin/Ajax/ShipmentAdminAjaxService.php
+|-- src/Shipments/Admin/Ajax/ShipmentAdminCarrierUiPayloadBuilder.php
+|-- src/Shipments/Admin/Ajax/ShipmentCreateAjaxController.php
+|-- src/Shipments/Admin/Ajax/ShipmentDocumentsAjaxController.php
+|-- src/Shipments/Admin/Ajax/ShipmentLifecycleAjaxController.php
+|-- src/Shipments/Admin/Ajax/ShipmentManualAttachAjaxController.php
+|-- src/Shipments/Admin/Ajax/ShipmentPreviewAjaxController.php
+|-- src/Shipments/Admin/Ajax/ShipmentProductsAjaxController.php
+|-- src/Shipments/Admin/Ajax/ShipmentRemovalAjaxController.php
+|-- src/Shipments/Admin/Ajax/ShipmentStatusAjaxController.php
+|-- src/Shipments/Admin/OrderShipmentsMetabox.php
+|-- src/Shipments/Admin/ShipmentCostAnalyticsAdminSection.php
+|-- src/Shipments/Admin/ShipmentStatusesAdminPage.php
+|-- src/Shipments/Allocation/ShipmentAllocation.php
+|-- src/Shipments/Allocation/ShipmentAllocationBuilder.php
+|-- src/Shipments/Allocation/ShipmentAllocationItem.php
+|-- src/Shipments/Allocation/ShipmentAllocationPlace.php
+|-- src/Shipments/Analytics/CreatedShipmentIdentity.php
+|-- src/Shipments/Analytics/CreatedShipmentIdentityResolver.php
+|-- src/Shipments/Analytics/OrderAnalyticsShipmentSelector.php
+|-- src/Shipments/Analytics/OrderSelectedDeliveryIdentity.php
+|-- src/Shipments/Analytics/OrderSelectedDeliveryIdentityResolver.php
+|-- src/Shipments/Analytics/SelectedAnalyticsShipment.php
+|-- src/Shipments/Analytics/ShipmentCostAnalyticsFilter.php
+|-- src/Shipments/Analytics/ShipmentCostAnalyticsIndexer.php
+|-- src/Shipments/Analytics/ShipmentCostAnalyticsQuery.php
+|-- src/Shipments/Analytics/ShipmentCostAnalyticsRecordBuilder.php
+|-- src/Shipments/Analytics/ShipmentCostAnalyticsResult.php
+|-- src/Shipments/Analytics/ShipmentCostAnalyticsRow.php
+|-- src/Shipments/Analytics/ShipmentCostAnalyticsService.php
+|-- src/Shipments/Analytics/ShipmentCostAnalyticsSummary.php
+|-- src/Shipments/Analytics/ShipmentCostThresholdPolicy.php
+|-- src/Shipments/Analytics/Storage/ShipmentCostAnalyticsRecord.php
+|-- src/Shipments/Analytics/Storage/ShipmentCostAnalyticsRepository.php
+|-- src/Shipments/Analytics/Storage/ShipmentCostAnalyticsTable.php
+|-- src/Shipments/Application/CarrierShipmentAdapterRegistry.php
+|-- src/Shipments/Application/OrderShipmentDraftFactory.php
+|-- src/Shipments/Application/OrderStructuredAddress.php
+|-- src/Shipments/Application/OrderStructuredAddressReader.php
+|-- src/Shipments/Application/RussianPostShipmentActualCostExtractor.php
+|-- src/Shipments/Application/RussianPostShipmentActualCostLookupService.php
+|-- src/Shipments/Application/ShipmentActualCost.php
+|-- src/Shipments/Application/ShipmentActualCostResolver.php
+|-- src/Shipments/Application/ShipmentActualCostService.php
+|-- src/Shipments/Application/ShipmentBacklogService.php
+|-- src/Shipments/Application/ShipmentCreationAttemptService.php
+|-- src/Shipments/Application/ShipmentCreationService.php
+|-- src/Shipments/Application/ShipmentMetaboxButtonPolicy.php
+|-- src/Shipments/Application/ShipmentModalRequestMapper.php
+|-- src/Shipments/Application/ShipmentOrderStatusMappingService.php
+|-- src/Shipments/Application/ShipmentPreparationData.php
+|-- src/Shipments/Application/ShipmentServiceSettings.php
+|-- src/Shipments/Application/ShipmentStatusAutoSyncCron.php
+|-- src/Shipments/Application/ShipmentStatusAutoSyncService.php
+|-- src/Shipments/Application/ShipmentStatusUpdateService.php
+|-- src/Shipments/Cdek/CdekBarcodePrintService.php
+|-- src/Shipments/Cdek/CdekCreateRequestBuilder.php
+|-- src/Shipments/Cdek/CdekOrderStatusService.php
+|-- src/Shipments/Cdek/CdekRecipientAddressPreparationService.php
+|-- src/Shipments/Cdek/CdekShipmentAdapter.php
+|-- src/Shipments/Cdek/CdekShipmentDocumentProvider.php
+|-- src/Shipments/Cdek/CdekShipmentModalExtension.php
+|-- src/Shipments/Cdek/CdekShipmentPersistenceMapper.php
+|-- src/Shipments/Cdek/CdekStatusMappingService.php
+|-- src/Shipments/Contracts/CarrierShipmentAdapterInterface.php
+|-- src/Shipments/Contracts/CarrierShipmentLifecycleContinuationInterface.php
+|-- src/Shipments/Contracts/CarrierShipmentPersistenceMapperInterface.php
+|-- src/Shipments/Documents/CarrierShipmentDocumentProviderInterface.php
+|-- src/Shipments/Documents/ShipmentBinaryDocument.php
+|-- src/Shipments/Documents/ShipmentDocumentAction.php
+|-- src/Shipments/Documents/ShipmentDocumentDownloadService.php
+|-- src/Shipments/Documents/ShipmentDocumentProviderRegistry.php
+|-- src/Shipments/Dpd/DpdEventNormalizer.php
+|-- src/Shipments/Dpd/DpdEventSyncResult.php
+|-- src/Shipments/Dpd/DpdEventSyncService.php
+|-- src/Shipments/Dpd/DpdOrderRegistrationService.php
+|-- src/Shipments/Dpd/DpdShipmentAdapter.php
+|-- src/Shipments/Dpd/DpdShipmentButtonPolicy.php
+|-- src/Shipments/Dpd/DpdShipmentDocumentProvider.php
+|-- src/Shipments/Dpd/DpdShipmentDocumentService.php
+|-- src/Shipments/Dpd/DpdShipmentEnrichmentService.php
+|-- src/Shipments/Dpd/DpdShipmentModalExtension.php
+|-- src/Shipments/Dpd/DpdShipmentPersistenceMapper.php
+|-- src/Shipments/Dpd/DpdShipmentRepository.php
+|-- src/Shipments/Dpd/DpdStatusMapping.php
+|-- src/Shipments/JetLogistic/JetLogisticShipmentAdapter.php
+|-- src/Shipments/JetLogistic/JetLogisticShipmentService.php
+|-- src/Shipments/Lifecycle/ShipmentLifecycleResult.php
+|-- src/Shipments/Manual/ManualShipmentAdapter.php
+|-- src/Shipments/Manual/ManualShipmentService.php
+|-- src/Shipments/Modal/CarrierShipmentModalExtensionInterface.php
+|-- src/Shipments/Modal/ShipmentModalExtensionRegistry.php
+|-- src/Shipments/Pek/PekManualAttachContextResolver.php
+|-- src/Shipments/Pek/PekPrivateAccessTokenService.php
+|-- src/Shipments/Pek/PekSenderCounterpartService.php
+|-- src/Shipments/Pek/PekShipmentAdapter.php
+|-- src/Shipments/Pek/PekShipmentButtonPolicy.php
+|-- src/Shipments/Pek/PekShipmentCargoBuilder.php
+|-- src/Shipments/Pek/PekShipmentCorrelationResolver.php
+|-- src/Shipments/Pek/PekShipmentCourierAddressResolver.php
+|-- src/Shipments/Pek/PekShipmentCreateResponseParser.php
+|-- src/Shipments/Pek/PekShipmentDeclaredValueResolver.php
+|-- src/Shipments/Pek/PekShipmentDestinationResolver.php
+|-- src/Shipments/Pek/PekShipmentDocumentProvider.php
+|-- src/Shipments/Pek/PekShipmentDocumentService.php
+|-- src/Shipments/Pek/PekShipmentModalExtension.php
+|-- src/Shipments/Pek/PekShipmentPersistenceMapper.php
+|-- src/Shipments/Pek/PekShipmentProductWeightResolver.php
+|-- src/Shipments/Pek/PekShipmentRecipientBuilder.php
+|-- src/Shipments/Pek/PekShipmentRequestBuilder.php
+|-- src/Shipments/Pek/PekShipmentSenderWarehouseResolver.php
+|-- src/Shipments/Pek/PekShipmentService.php
+|-- src/Shipments/Pek/PekShipmentStatusResponseNormalizer.php
+|-- src/Shipments/Pek/PekShipmentStatusService.php
+|-- src/Shipments/Pek/PekSmsReleaseAvailabilityService.php
+|-- src/Shipments/Pek/PekSmsReleaseResult.php
+|-- src/Shipments/Pek/PekStatusMapping.php
+|-- src/Shipments/Presentation/ShipmentActualCostComparisonService.php
+|-- src/Shipments/Presentation/ShipmentActualCostPresentation.php
+|-- src/Shipments/Presentation/ShipmentBaseApiCostResolver.php
+|-- src/Shipments/RussianPost/RussianPostAddressNormalizer.php
+|-- src/Shipments/RussianPost/RussianPostCreateRequestBuilder.php
+|-- src/Shipments/RussianPost/RussianPostShipmentAdapter.php
+|-- src/Shipments/RussianPost/RussianPostShipmentDocumentProvider.php
+|-- src/Shipments/RussianPost/RussianPostShipmentDocumentService.php
+|-- src/Shipments/RussianPost/RussianPostShipmentModalExtension.php
+|-- src/Shipments/RussianPost/RussianPostShipmentPersistenceMapper.php
+|-- src/Shipments/RussianPost/RussianPostShipmentProductMapper.php
+|-- src/Shipments/RussianPost/RussianPostTrackingStatusMapper.php
+|-- src/Shipments/Storage/OrderShipmentRepository.php
+|-- src/Shipments/YandexDelivery/YandexShipmentAdapter.php
+|-- src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php
+|-- src/Shipments/YandexDelivery/YandexShipmentDocumentProvider.php
+|-- src/Shipments/YandexDelivery/YandexShipmentDocumentService.php
+|-- src/Shipments/YandexDelivery/YandexShipmentLabelPolicy.php
+|-- src/Shipments/YandexDelivery/YandexShipmentModalExtension.php
+|-- src/Shipments/YandexDelivery/YandexShipmentPersistenceMapper.php
+|-- src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php
+|-- src/Shipments/YandexDelivery/YandexShipmentRepository.php
+|-- src/Shipments/YandexDelivery/YandexStatusMapping.php
+|-- src/WooCommerce/HPOSCompatibility.php
+|-- tests/address/run-address-smoke.php
+|-- tests/address/run-dadata-suggestions-smoke.php
+|-- tests/architecture/run-plugin-architecture-smoke.php
+|-- tests/calendar/run-calendar-smoke.php
+|-- tests/carriers/run-russian-post-countries-smoke.php
+|-- tests/carriers/run-russian-post-domestic-api-probe.php
+|-- tests/carriers/run-russian-post-domestic-smoke.php
+|-- tests/carriers/run-russian-post-smoke.php
+|-- tests/cdek/run-cdek-eaeu-smoke.php
+|-- tests/cdek/run-cdek-foundation-smoke.php
+|-- tests/cdek/run-cdek-order-creation-smoke.php
+|-- tests/cdek/run-cdek-pickup-points-smoke.php
+|-- tests/cdek/run-cdek-tariff-calculation-smoke.php
+|-- tests/cdek/run-cdek-tariffs-sync-smoke.php
+|-- tests/checkout/run-checkout-address-autocomplete-browser-smoke.js
+|-- tests/checkout/run-checkout-address-autocomplete-smoke.js
+|-- tests/checkout/run-checkout-address-fields-smoke.js
+|-- tests/checkout/run-checkout-address-fields-smoke.php
+|-- tests/checkout/run-checkout-city-selector-smoke.js
+|-- tests/checkout/run-checkout-delivery-messages-smoke.php
+|-- tests/checkout/run-checkout-location-picker-smoke.php
+|-- tests/checkout/run-checkout-rate-sorting-smoke.php
+|-- tests/checkout/run-checkout-selection-smoke.php
+|-- tests/checkout/run-checkout-smoke.php
+|-- tests/checkout/run-pickup-map-lifecycle-smoke.js
+|-- tests/checkout/run-pickup-provider-routing-smoke.js
+|-- tests/checkout/run-pickup-provider-routing-smoke.php
+|-- tests/checkout/run-runtime-stabilization-smoke.php
+|-- tests/checkout/run-shop-processing-days-smoke.php
+|-- tests/checkout/run-woocommerce-checkout-smoke.php
+|-- tests/database/run-initial-schema-smoke.php
+|-- tests/delivery-services/run-delivery-services-smoke.php
+|-- tests/domain/run-domain-smoke.php
+|-- tests/dpd/run-dpd-autosync-smoke.php
+|-- tests/dpd/run-dpd-checkout-pickup-selection-smoke.php
+|-- tests/dpd/run-dpd-checkout-runtime-smoke.php
+|-- tests/dpd/run-dpd-city-resolver-smoke.php
+|-- tests/dpd/run-dpd-create-order-smoke.php
+|-- tests/dpd/run-dpd-dadata-fallback-smoke.php
+|-- tests/dpd/run-dpd-documents-smoke.php
+|-- tests/dpd/run-dpd-event-sync-smoke.php
+|-- tests/dpd/run-dpd-foundation-smoke.php
+|-- tests/dpd/run-dpd-geography-import-runner-smoke.js
+|-- tests/dpd/run-dpd-geography-import-smoke.php
+|-- tests/dpd/run-dpd-location-index-smoke.php
+|-- tests/dpd/run-dpd-order-recalculation-smoke.php
+|-- tests/dpd/run-dpd-parcel-builder-smoke.php
+|-- tests/dpd/run-dpd-pickup-autosync-smoke.php
+|-- tests/dpd/run-dpd-pickup-points-smoke.php
+|-- tests/dpd/run-dpd-shipment-buttons-smoke.php
+|-- tests/dpd/run-dpd-shipment-lifecycle-smoke.php
+|-- tests/dpd/run-dpd-shipment-preparation-smoke.php
+|-- tests/dpd/run-dpd-status-mapping-smoke.php
+|-- tests/dpd/run-dpd-tariff-calculation-smoke.php
+|-- tests/dpd/run-dpd-terminalcode-runtime-pricing-smoke.php
+|-- tests/dpd/run-dpd-woocommerce-status-audit-smoke.php
+|-- tests/fias/run-fias-smoke.php
+|-- tests/fixtures/demo/fias-prepared-sample.json
+|-- tests/fixtures/demo/locations-demo.json
+|-- tests/fixtures/demo/pickup-points-demo.json
+|-- tests/fixtures/demo/rules-demo.json
+|-- tests/fixtures/gar_places_sample.csv
+|-- tests/fixtures/TestDemoCarrier.php
+|-- tests/fixtures/TestPickupProvider.php
+|-- tests/infrastructure/run-action-scheduler-lifecycle-smoke.php
+|-- tests/jet-logistic/run-jet-logistic-smoke.php
+|-- tests/locations/run-dadata-postcode-fill-smoke.php
+|-- tests/locations/run-gar-import-smoke.php
+|-- tests/locations/run-location-database-backup-smoke.php
+|-- tests/locations/run-location-delivery-codes-smoke.php
+|-- tests/locations/run-location-display-name-smoke.php
+|-- tests/locations/run-locations-incremental-update-smoke.php
+|-- tests/locations/run-locations-incremental-update-ui-smoke.js
+|-- tests/locations/run-locations-smoke.php
+|-- tests/locations/run-russianpost-courier-postcode-fill-smoke.php
+|-- tests/manual-delivery/run-manual-delivery-foundation-smoke.php
+|-- tests/manual-delivery/run-manual-delivery-shipments-smoke.php
+|-- tests/orders/run-delivery-calculation-data-builder-smoke.php
+|-- tests/orders/run-order-delivery-calculation-meta-smoke.php
+|-- tests/orders/run-order-delivery-recalculation-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-admin-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-authorization-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-checkout-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-foundation-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-modal-limits-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-admin-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-cancellation-race-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-import-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-owner-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-progress-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-provider-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-ready-transition-race-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-schedule-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-scheduler-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-two-phase-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-quote-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-return-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-shipment-smoke.php
+|-- tests/packaging/run-packaging-smoke.php
+|-- tests/pek/fixtures/confirmed-counterparties-mixed-response.json
+|-- tests/pek/fixtures/confirmed-counterparties-physical-only-response.json
+|-- tests/pek/fixtures/confirmed-counterparties-response.json
+|-- tests/pek/fixtures/connected-services-response.json
+|-- tests/pek/fixtures/order-print-response.json
+|-- tests/pek/fixtures/preregistration-submit-courier.json
+|-- tests/pek/fixtures/preregistration-submit-pickup.json
+|-- tests/pek/fixtures/preregistration-submit-response.json
+|-- tests/pek/fixtures/private-token-response.json
+|-- tests/pek/run-pek-admin-routing-smoke.php
+|-- tests/pek/run-pek-admin-ui-smoke.php
+|-- tests/pek/run-pek-checkout-runtime-smoke.php
+|-- tests/pek/run-pek-foundation-smoke.php
+|-- tests/pek/run-pek-geography-smoke.php
+|-- tests/pek/run-pek-international-runtime-smoke.php
+|-- tests/pek/run-pek-pickup-provider-smoke.php
+|-- tests/pek/run-pek-quote-foundation-smoke.php
+|-- tests/pek/run-pek-shipment-cancellation-smoke.php
+|-- tests/pek/run-pek-shipment-create-smoke.php
+|-- tests/pek/run-pek-shipment-documents-smoke.php
+|-- tests/pek/run-pek-shipment-integration-smoke.php
+|-- tests/pek/run-pek-shipment-modal-smoke.php
+|-- tests/pek/run-pek-shipment-picker-smoke.php
+|-- tests/pek/run-pek-shipment-status-smoke.php
+|-- tests/pek/run-pek-warehouse-datetime-smoke.php
+|-- tests/pickup/run-carrier-pickup-provider-registry-smoke.php
+|-- tests/pickup/run-pickup-checkout-smoke.php
+|-- tests/pickup/run-pickup-diagnostics-smoke.php
+|-- tests/pickup/run-pickup-rest-smoke.php
+|-- tests/pickup/run-pickup-smoke.php
+|-- tests/pickup/run-russian-post-pickup-import-smoke.php
+|-- tests/rules/run-rules-admin-smoke.php
+|-- tests/rules/run-rules-smoke.php
+|-- tests/runtime/run-no-legacy-smoke.php
+|-- tests/scheduled-tasks/run-scheduled-task-timezone-smoke.php
+|-- tests/self-pickup/run-self-pickup-smoke.php
+|-- tests/shipments/actual-cost-test-helpers.php
+|-- tests/shipments/admin-js-bundle-source.php
+|-- tests/shipments/regression/shipment-regression-manifest.php
+|-- tests/shipments/regression/ShipmentRegressionRunner.php
+|-- tests/shipments/run-carrier-adapter-registry-smoke.php
+|-- tests/shipments/run-russian-post-cancel-shipment-smoke.php
+|-- tests/shipments/run-russian-post-documents-smoke.php
+|-- tests/shipments/run-russian-post-shipment-price-smoke.php
+|-- tests/shipments/run-russian-post-shipments-smoke.php
+|-- tests/shipments/run-shipment-actual-cost-presentation-smoke.php
+|-- tests/shipments/run-shipment-actual-cost-service-smoke.php
+|-- tests/shipments/run-shipment-admin-ajax-smoke.php
+|-- tests/shipments/run-shipment-admin-js-structure-smoke.php
+|-- tests/shipments/run-shipment-allocation-smoke.php
+|-- tests/shipments/run-shipment-cost-analytics-indexer-smoke.php
+|-- tests/shipments/run-shipment-cost-analytics-query-smoke.php
+|-- tests/shipments/run-shipment-cost-analytics-smoke.php
+|-- tests/shipments/run-shipment-cost-analytics-storage-smoke.php
+|-- tests/shipments/run-shipment-cost-threshold-policy-smoke.php
+|-- tests/shipments/run-shipment-creation-attempt-smoke.php
+|-- tests/shipments/run-shipment-document-actions-smoke.php
+|-- tests/shipments/run-shipment-lifecycle-contract-smoke.php
+|-- tests/shipments/run-shipment-modal-extensions-smoke.php
+|-- tests/shipments/run-shipment-persistence-mappers-smoke.php
+|-- tests/shipments/run-shipment-regression-profile-smoke.php
+|-- tests/shipments/run-shipment-regression-profile.php
+|-- tests/shipments/run-shipment-status-smoke.php
+|-- tests/shipments/shipment-cost-analytics-test-helpers.php
+|-- tests/statuses/run-order-status-mapping-smoke.php
+|-- tests/statuses/run-status-autosync-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-checkout-rates-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-foundation-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-geo-pipeline-v2-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-geo-v2-builder-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-geo-v2-region-enrichment-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-location-mapping-v2-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-pickup-selection-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-pickup-v2-foundation-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-pickup-v2-runner-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-pricing-calculator-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-region-mapping-v2-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-shipment-framework-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-shipment-http-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-shipment-payload-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-source-station-smoke.php
+|-- tools/build-release.ps1
+|-- uninstall.php
+|-- walls-delivery-calc.php

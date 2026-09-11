@@ -1,6 +1,6 @@
 <?php
 /**
- * Cleanup legacy plugin data on uninstall.
+ * Cleanup ephemeral plugin caches on uninstall.
  *
  * @package Walls_Delivery_Calc
  */
@@ -8,9 +8,6 @@
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
-
-delete_option( 'wdc_settings' );
-delete_site_option( 'wdc_settings' );
 
 global $wpdb;
 

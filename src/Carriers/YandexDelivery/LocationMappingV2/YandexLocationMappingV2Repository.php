@@ -50,7 +50,9 @@ final class YandexLocationMappingV2Repository {
 		if ( ! $this->can_create_schema() ) {
 			return;
 		}
-		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+		if ( ! function_exists( 'dbDelta' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+		}
 		dbDelta( $this->schema() );
 	}
 

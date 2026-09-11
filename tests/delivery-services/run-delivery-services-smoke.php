@@ -485,7 +485,6 @@ use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
-use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -499,13 +498,8 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 
 $GLOBALS['wpdb'] = new wpdb();
-$migration = require dirname( __DIR__, 2 ) . '/database/migrations/0018_create_delivery_services_tables.php';
-$migration();
-$migration_0019 = require dirname( __DIR__, 2 ) . '/database/migrations/0019_add_delivery_service_include_packaging_weight.php';
-$migration_0019();
-$migration_0020 = require dirname( __DIR__, 2 ) . '/database/migrations/0020_add_delivery_service_customer_comments.php';
-$migration_0020();
-wdc_ds_assert( count( $GLOBALS['wdc_db_delta'] ?? array() ) === 3, 'Delivery services migration must create three tables.' );
+$initial_schema_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' );
+wdc_ds_assert( str_contains( $initial_schema_source, 'wdc_delivery_services' ) && str_contains( $initial_schema_source, 'wdc_delivery_service_settings' ) && str_contains( $initial_schema_source, 'wdc_delivery_service_countries' ), 'The initial schema must create all three delivery service tables.' );
 
 $services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 $settings = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
@@ -597,35 +591,10 @@ wdc_ds_assert( 1 === count( $domestic_rows ) && array() === $legacy_domestic_row
 $cdek = $services->ensure_cdek_service();
 wdc_ds_assert( CdekSettings::SERVICE_KEY === $cdek->service_key && CdekSettings::CARRIER_KEY === $cdek->carrier_key && ! $cdek->enabled, 'CDEK predefined service must be disabled by default.' );
 
-$run_cdek_eaeu_migration = static function ( array $seed_countries, bool $reset_applied = true ) use ( $countries, $cdek ): array {
-	if ( $reset_applied ) {
-		unset( $GLOBALS['wdc_options']['wdc_applied_migrations'], $GLOBALS['wdc_options']['wdc_db_version'] );
-	}
-	$countries->replace_countries( (int) $cdek->id, $seed_countries );
-	$migration_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-cdek-0042-' . uniqid( '', true );
-	if ( ! mkdir( $migration_dir ) && ! is_dir( $migration_dir ) ) {
-		throw new RuntimeException( 'Unable to create temp migration directory.' );
-	}
-	$migration_file = $migration_dir . DIRECTORY_SEPARATOR . '0042_seed_cdek_eaeu_countries.php';
-	copy( dirname( __DIR__, 2 ) . '/database/migrations/0042_seed_cdek_eaeu_countries.php', $migration_file );
-	( new MigrationManager( '0.128.23-test', $migration_dir ) )->run();
-	@unlink( $migration_file );
-	@rmdir( $migration_dir );
-
-	return $countries->countries( (int) $cdek->id );
-};
-
 $default_cdek_countries = array( 'AM', 'BY', 'KG', 'KZ', 'RU' );
-wdc_ds_assert( $default_cdek_countries === $run_cdek_eaeu_migration( array() ), 'CDEK 0042 migration must seed empty countries through MigrationManager without ArgumentCountError.' );
-wdc_ds_assert( in_array( '0042_seed_cdek_eaeu_countries.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'CDEK 0042 migration must be marked as applied.' );
-wdc_ds_assert( $default_cdek_countries === $run_cdek_eaeu_migration( array( 'RU' ) ), 'CDEK 0042 migration must expand RU-only countries to EAEU defaults.' );
-wdc_ds_assert( array( 'BY', 'RU' ) === $run_cdek_eaeu_migration( array( 'RU', 'BY' ) ), 'CDEK 0042 migration must preserve custom country selection.' );
-unset( $GLOBALS['wdc_options']['wdc_applied_migrations'], $GLOBALS['wdc_options']['wdc_db_version'] );
-$countries->replace_countries( (int) $cdek->id, array() );
-$run_cdek_eaeu_migration( array(), false );
-$countries->delete_countries( (int) $cdek->id );
-$after_admin_empty = $run_cdek_eaeu_migration( array(), false );
-wdc_ds_assert( array() === $after_admin_empty, 'CDEK 0042 migration must not reseed an admin-empty country selection after it is already applied.' );
+$supported_cdek_countries = CdekSettings::SUPPORTED_COUNTRIES;
+sort( $supported_cdek_countries );
+wdc_ds_assert( $default_cdek_countries === $supported_cdek_countries, 'CDEK EAEU defaults must remain the current supported-country contract.' );
 $yandex = $services->ensure_yandex_delivery_service();
 $yandex_settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService(), $services, $settings );
 wdc_ds_assert( YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE === $yandex_settings->pickup_method_title(), 'Yandex Delivery pickup method title must use default when service setting is absent.' );
@@ -1205,141 +1174,7 @@ wdc_ds_assert( RuleOperationTypes::DECREASE === $copied_rule->operation_type && 
 wdc_ds_assert( 1 === count( $copied_rule->conditions ) && RuleConditionTypes::COUNTRY === $copied_rule->conditions[0]->condition_type && 'RU' === $copied_rule->conditions[0]->value_text, 'Copied rule must preserve conditions.' );
 wdc_ds_assert( 1 === count( $rule_repo->get_all_rules_for_target( RuleRepository::TARGET_DEFAULT, '' ) ), 'Copy default rules must leave default rules unchanged.' );
 
-$old_pickup_service_id = ++$GLOBALS['wpdb']->insert_id;
-$old_courier_service_id = ++$GLOBALS['wpdb']->insert_id;
-$GLOBALS['wpdb']->services[] = array(
-	'id' => $old_pickup_service_id,
-	'service_key' => 'russian_post_domestic_pickup',
-	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
-	'service_type' => DeliveryService::TYPE_API,
-	'title' => 'Почта России до ПВЗ / ОПС',
-	'enabled' => 1,
-	'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
-	'use_default_rules_when_no_service_rules' => 1,
-	'round_up_to_ruble' => 1,
-	'minimum_price_rub' => 1.0,
-	'include_packaging_weight' => 1,
-	'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
-	'pickup_customer_comment' => 'legacy pickup',
-	'courier_customer_comment' => '',
-	'sort_order' => 20,
-	'deleted' => 0,
-	'created_at' => current_time( 'mysql' ),
-	'updated_at' => current_time( 'mysql' ),
-);
-$GLOBALS['wpdb']->services[] = array(
-	'id' => $old_courier_service_id,
-	'service_key' => 'russian_post_domestic_courier',
-	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
-	'service_type' => DeliveryService::TYPE_API,
-	'title' => 'Почта России курьером',
-	'enabled' => 1,
-	'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
-	'use_default_rules_when_no_service_rules' => 1,
-	'round_up_to_ruble' => 1,
-	'minimum_price_rub' => 1.0,
-	'include_packaging_weight' => 1,
-	'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
-	'pickup_customer_comment' => '',
-	'courier_customer_comment' => 'legacy courier',
-	'sort_order' => 21,
-	'deleted' => 0,
-	'created_at' => current_time( 'mysql' ),
-	'updated_at' => current_time( 'mysql' ),
-);
-$GLOBALS['wpdb']->settings[] = array(
-	'id' => ++$GLOBALS['wpdb']->insert_id,
-	'service_id' => $old_pickup_service_id,
-	'setting_key' => 'tariff_variants',
-	'setting_value' => wp_json_encode(
-		array(
-			array(
-				'object_code' => '23030',
-				'delivery_type' => DeliveryType::PICKUP,
-				'enabled' => true,
-				'is_ecom' => true,
-				'requires_declared_value' => true,
-				'title' => 'Pickup legacy tariff',
-			),
-		),
-		JSON_UNESCAPED_UNICODE
-	),
-	'value_format' => 'json',
-	'autoload' => 0,
-	'updated_at' => current_time( 'mysql' ),
-);
-$GLOBALS['wpdb']->settings[] = array(
-	'id' => ++$GLOBALS['wpdb']->insert_id,
-	'service_id' => $old_pickup_service_id,
-	'setting_key' => 'russian_post_point_type_ops_enabled',
-	'setting_value' => '1',
-	'value_format' => 'bool',
-	'autoload' => 0,
-	'updated_at' => current_time( 'mysql' ),
-);
-$GLOBALS['wpdb']->settings[] = array(
-	'id' => ++$GLOBALS['wpdb']->insert_id,
-	'service_id' => $old_courier_service_id,
-	'setting_key' => 'tariff_variants',
-	'setting_value' => wp_json_encode(
-		array(
-			array(
-				'object_code' => '24030',
-				'delivery_type' => DeliveryType::COURIER,
-				'enabled' => false,
-				'is_ecom' => false,
-				'requires_declared_value' => false,
-				'title' => 'Courier legacy tariff',
-			),
-		),
-		JSON_UNESCAPED_UNICODE
-	),
-	'value_format' => 'json',
-	'autoload' => 0,
-	'updated_at' => current_time( 'mysql' ),
-);
-$GLOBALS['wpdb']->settings[] = array(
-	'id' => ++$GLOBALS['wpdb']->insert_id,
-	'service_id' => $old_courier_service_id,
-	'setting_key' => 'shelf_life_days_default',
-	'setting_value' => '15',
-	'value_format' => 'int',
-	'autoload' => 0,
-	'updated_at' => current_time( 'mysql' ),
-);
-$GLOBALS['wpdb']->countries[] = array( 'id' => ++$GLOBALS['wpdb']->insert_id, 'service_id' => $old_pickup_service_id, 'country_code' => 'RU', 'created_at' => current_time( 'mysql' ) );
-$GLOBALS['wpdb']->countries[] = array( 'id' => ++$GLOBALS['wpdb']->insert_id, 'service_id' => $old_courier_service_id, 'country_code' => 'RU', 'created_at' => current_time( 'mysql' ) );
-$GLOBALS['wpdb']->rules[] = array( 'id' => 501, 'name' => 'Legacy pickup rule', 'enabled' => 1, 'priority' => 1, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'russian_post_domestic_pickup', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::INCREASE, 'operation_value' => 1, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
-$GLOBALS['wpdb']->rules[] = array( 'id' => 502, 'name' => 'Legacy courier rule', 'enabled' => 1, 'priority' => 1, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'russian_post_domestic_courier', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::INCREASE, 'operation_value' => 1, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
-$GLOBALS['wpdb']->conditions[] = array( 'id' => 501, 'rule_id' => 501, 'condition_group' => 1, 'condition_type' => RuleConditionTypes::COUNTRY, 'operator' => RuleOperators::EQ, 'value_text' => 'RU', 'value_number' => null, 'value_json' => '{}' );
-$GLOBALS['wpdb']->conditions[] = array( 'id' => 502, 'rule_id' => 502, 'condition_group' => 1, 'condition_type' => RuleConditionTypes::COUNTRY, 'operator' => RuleOperators::EQ, 'value_text' => 'RU', 'value_number' => null, 'value_json' => '{}' );
-$GLOBALS['wdc_options']['wdc_core_settings'] = array(
-	'russian_post_otpravka_access_token' => 'token-from-core',
-	'russian_post_tracking_login' => 'tracking-login',
-);
-
-$migration_0026 = require dirname( __DIR__, 2 ) . '/database/migrations/0026_unify_russian_post_domestic_service.php';
-$migration_0026();
-$migration_0026();
-
-$legacy_after_migration = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => in_array( (string) $row['service_key'], array( 'russian_post_domestic_pickup', 'russian_post_domestic_courier' ), true ) ) );
-wdc_ds_assert( array() === $legacy_after_migration, 'Migration 0026 must physically delete legacy Russian Post domestic service rows.' );
-wdc_ds_assert( array() === array_values( array_filter( $GLOBALS['wpdb']->settings, static fn ( array $row ): bool => in_array( (int) $row['service_id'], array( $old_pickup_service_id, $old_courier_service_id ), true ) ) ), 'Migration 0026 must physically delete legacy Russian Post domestic settings rows.' );
-wdc_ds_assert( array() === array_values( array_filter( $GLOBALS['wpdb']->countries, static fn ( array $row ): bool => in_array( (int) $row['service_id'], array( $old_pickup_service_id, $old_courier_service_id ), true ) ) ), 'Migration 0026 must physically delete legacy Russian Post domestic country rows.' );
-wdc_ds_assert( array() === array_values( array_filter( $GLOBALS['wpdb']->rules, static fn ( array $row ): bool => in_array( (string) $row['target_value'], array( 'russian_post_domestic_pickup', 'russian_post_domestic_courier' ), true ) ) ), 'Migration 0026 must delete rule bindings for legacy Russian Post domestic services.' );
-wdc_ds_assert( array() === array_values( array_filter( $GLOBALS['wpdb']->conditions, static fn ( array $row ): bool => in_array( (int) $row['rule_id'], array( 501, 502 ), true ) ) ), 'Migration 0026 must delete rule conditions for legacy Russian Post domestic services.' );
-
-$migrated_domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
-wdc_ds_assert( $migrated_domestic instanceof DeliveryService, 'Migration 0026 must keep unified Russian Post domestic service.' );
-$migrated_settings = $settings->all_settings( (int) $migrated_domestic->id );
-$migrated_tariffs = is_array( $migrated_settings['tariff_variants'] ?? null ) ? $migrated_settings['tariff_variants'] : array();
-$migrated_tariff_keys = array_map( static fn ( array $variant ): string => (string) ( $variant['delivery_type'] ?? '' ) . ':' . (string) ( $variant['object_code'] ?? '' ), $migrated_tariffs );
-wdc_ds_assert( in_array( 'pickup:23030', $migrated_tariff_keys, true ) && in_array( 'courier:24030', $migrated_tariff_keys, true ), 'Migration 0026 must merge pickup and courier tariff variants into unified service settings.' );
-wdc_ds_assert( '1' === (string) ( $migrated_settings['russian_post_domestic_point_type_ops_enabled'] ?? '' ), 'Migration 0026 must migrate Russian Post point type settings to unified keys.' );
-wdc_ds_assert( '15' === (string) ( $migrated_settings['shelf_life_days_default'] ?? '' ), 'Migration 0026 must preserve shipment settings in unified service settings.' );
-wdc_ds_assert( 'token-from-core' === (string) ( $migrated_settings['russian_post_otpravka_access_token'] ?? '' ) && 'tracking-login' === (string) ( $migrated_settings['russian_post_tracking_login'] ?? '' ), 'Migration 0026 must copy Russian Post credentials into unified service settings.' );
-wdc_ds_assert( in_array( 'RU', $countries->countries( (int) $migrated_domestic->id ), true ), 'Migration 0026 must keep RU country on unified Russian Post domestic service.' );
-wdc_ds_assert( null === $services->find_by_service_key( 'russian_post_domestic_pickup' ) && null === $services->find_by_service_key( 'russian_post_domestic_courier' ), 'Runtime repository must not find legacy Russian Post domestic service keys after migration 0026.' );
+wdc_ds_assert( null === $services->find_by_service_key( 'russian_post_domestic_pickup' ) && null === $services->find_by_service_key( 'russian_post_domestic_courier' ), 'Fresh runtime must not expose retired Russian Post domestic service keys.' );
 
 $delivery_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );

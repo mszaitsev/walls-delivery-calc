@@ -22,7 +22,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public int $insert_id = 0;
 		public array $locations = array();
 		public array $regions = array();
-		public array $aliases = array();
 
 		public function prepare( string $query, mixed ...$args ): array {
 			return array( 'query' => $query, 'args' => $args );
@@ -35,10 +34,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public function insert( string $table, array $data, ?array $format = null ): int {
 			++$this->insert_id;
 			$data['id'] = $this->insert_id;
-			if ( str_contains( $table, 'wdc_location_aliases' ) ) {
-				$this->aliases[ $this->insert_id ] = $data;
-				return 1;
-			}
 			$this->locations[ $this->insert_id ] = $data;
 			return 1;
 		}
@@ -69,7 +64,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 				$columns = match ( $table ) {
 					'wdc_locations' => array( 'id', 'gar_object_id', 'fias_id', 'region_name', 'region_type', 'region_code', 'place_name', 'place_type', 'place_level', 'display_name', 'searchable_text', 'postal_code', 'active', 'created_at', 'updated_at' ),
 					'wdc_regions' => array( 'region_code', 'region_name', 'region_type' ),
-					'wdc_location_aliases' => array( 'id', 'location_id', 'alias', 'alias_normalized', 'source', 'created_at' ),
 					'wdc_location_delivery_codes' => array( 'location_id', 'dpd_city_id', 'updated_at' ),
 					default => array(),
 				};
@@ -83,9 +77,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function query( mixed $query ): int {
-			if ( str_contains( is_array( $query ) ? $query['query'] : (string) $query, 'wdc_location_aliases' ) ) {
-				$this->aliases = array();
-			}
 			return 1;
 		}
 	}
@@ -243,7 +234,6 @@ $step_payload = json_decode( (string) ob_get_clean(), true );
 $job = $step_payload['data'] ?? array();
 display_smoke_assert( 'finished' === ( $job['phase'] ?? '' ), 'Display_name rebuild job must finish for one-row fixture.' );
 display_smoke_assert( 1 === (int) ( $job['updated'] ?? 0 ), 'Display_name rebuild must update rows.' );
-display_smoke_assert( ! isset( $job['aliases_updated'] ), 'Display rebuild no longer owns aliases.' );
 $rebuilt_row = reset( $wpdb->locations );
 display_smoke_assert( is_array( $rebuilt_row ) && 'Новосибирская обл, Новосибирский р-н, село Гусиный Брод' === ( $rebuilt_row['display_name'] ?? '' ), 'Display_name rebuild must update display_name, got: ' . ( is_array( $rebuilt_row ) ? (string) ( $rebuilt_row['display_name'] ?? '' ) : 'no row' ) );
 display_smoke_assert( is_array( $rebuilt_row ) && str_contains( (string) ( $rebuilt_row['searchable_text'] ?? '' ), 'гусиный брод' ), 'Display_name rebuild must update searchable_text.' );

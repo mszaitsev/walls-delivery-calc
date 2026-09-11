@@ -1,8 +1,8 @@
 # Locations And Pickup
 
-0.155.16 correction: postal_code is enrichment-owned, never a GAR changed field. The retired location alias index is no longer generated, exported or used by runtime. Search uses searchable_text and canonical hierarchy fields. Backup/restore and incremental apply swap locations only. Migration 0064 drops only the canonical live alias table; pending migrations run even at unchanged plugin version. Legacy alias backup/temporary tables are retained inert. Finish or cancel an older update before deployment and start a fresh GAR analysis; do not resume its pre-correction diff.
+`postal_code` is enrichment-owned and is never a GAR changed field. The retired location alias index is not generated, exported, created by the 1.0 schema, or used by runtime. Search uses `searchable_text` and canonical hierarchy fields; backup/restore and incremental apply swap locations only.
 
-Version: 0.155.16
+Version: 1.0.0
 
 ## One-Click Full GAR Update
 
@@ -44,22 +44,6 @@ pwsh -ExecutionPolicy Bypass -File "D:\FIAS\Export-GarPlaces.ps1" `
   -OutCsv "D:\FIAS\out\gar_places.csv" `
   -IncludeOptionalCodes
 ```
-
-0.155.6 does not change destination/location semantics. Rule Engine `cart_total` conditions reuse existing full-cart totals and do not affect `CheckoutLocationFingerprint`, pickup destination binding, or location resolution.
-
-0.155.5 does not change destination/location semantics. Rule Engine full-cart bases use WooCommerce cart item totals and do not affect `CheckoutLocationFingerprint`, pickup destination binding, or location resolution.
-
-0.155.4 does not change destination fingerprinting. Checkout selected-method preservation now matches raw fresh Woo rate keys by WDC metadata, while stale pickup points still depend on current `CheckoutLocationFingerprint` and carrier/provider validation.
-
-0.155.3 does not change destination fingerprinting. The WooCommerce selected-method filter may preserve only the method id after rate reordering; stale pickup points still depend on current `CheckoutLocationFingerprint` and carrier/provider validation.
-
-0.155.2 keeps destination identity authoritative for pickup selections during checkout recalculation. Same-destination cart changes may preserve a valid selected point, but a changed `CheckoutLocationFingerprint` still clears stale pickup selections before fresh carrier/provider validation.
-
-0.155.1 clarifies fixed fulfillment-location snapshots for store pickup. `self_pickup` stores card title, address, and working hours in Delivery Service settings, emits them as `fixed_pickup_point_snapshot`, and persists the historical snapshot into the existing order pickup presentation metadata. This is not a pickup provider/catalog flow: there is no map, point search, browser authority, selectable code, or provider registration.
-
-0.154.0 filters dominated Russian Post domestic tariff rates by price and delivery period for checkout and order recalculation, preserving only meaningful price/speed trade-offs.
-
-0.153.0 does not change manual pickup locality storage or lookup. Manual shipment attach uses the order's historical delivery snapshot and does not create shipment-time location identities, fake `location_id` values, or manual pickup schema changes.
 
 Manual pickup provider lookup can be restored from the current WooCommerce shipping-rate metadata even when `wdc_platform_rates` has not been written on the same request. The locality identity is still textual and server-owned for manual point storage, while checkout selection freshness uses the shared canonical `CheckoutLocationFingerprint`: positive `location_id` wins when known, and `location_id=0` falls back to normalized `country + region + place`.
 
