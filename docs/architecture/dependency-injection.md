@@ -1,6 +1,6 @@
 # Dependency Injection
 
-0.155.20 keeps the existing shared `ActionScheduler` adapter injection and extends that adapter with one request-scoped lifecycle coordinator. Scheduler owners identify their deferred callback by class, preventing repeated registration within the same bootstrap request. The dead prepared-dataset service dependency is removed from the composition root and `LocationsAdminPage`; its small legacy cleanup receives only the shared adapter needed to retire the obsolete action once.
+0.155.20 keeps the existing shared `ActionScheduler` adapter injection and extends that adapter with one request-scoped lifecycle coordinator. Scheduler owners identify their deferred callback by class, preventing repeated registration within the same bootstrap request. Dead prepared-dataset and automatic GAR/SPAS dependencies are removed from the composition root and `LocationsAdminPage`; the combined `ObsoleteScheduledTaskCleanup` receives only the shared adapter needed to retire both obsolete actions once.
 
 0.155.17 adds no service or composition-root wiring. The existing injected `CheckoutAddressRuntime` provides the explicitly read-only package normalization boundary, the existing `LocationRepository` remains the authority for canonical coordinates, and the existing generic map adapters expose zoom through their provider contract.
 

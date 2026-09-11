@@ -730,6 +730,7 @@ C:.
 |   |   |
 |   |   +---Queue
 |   |   |       ActionScheduler.php
+|   |   |       ObsoleteScheduledTaskCleanup.php
 |   |   |
 |   |   +---Security
 |   |   |       EncryptionService.php
@@ -757,12 +758,7 @@ C:.
 |   |   |       FiasLogger.php
 |   |   |       FiasRateLimiter.php
 |   |   |
-|   |   +---Gar
-|   |   |       GarChangesClient.php
-|   |   |       GarSyncManager.php
-|   |   |
 |   |   +---Import
-|   |   |       FiasLegacyScheduleCleanup.php
 |   |   |       GarImportResult.php
 |   |   |       GarPlacesCsvImporter.php
 |   |   |       LocationImportService.php
@@ -781,7 +777,6 @@ C:.
 |   |   |
 |   |   +---Services
 |   |   |       CheckoutPostcode.php
-|   |   |       GarChangesService.php
 |   |   |       KeyboardLayoutTransformer.php
 |   |   |       LocationCountryIndexService.php
 |   |   |       LocationDatabaseBackupService.php

@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-0.155.20 centralizes Action Scheduler readiness and deferred owner callbacks in the infrastructure wrapper. Ozon, Calendar, and GAR register execution hooks immediately but perform datastore reads/writes only after the official `action_scheduler_init` boundary. A versioned lifecycle-safe cleanup removes the queued action and unused timestamp option left by the retired prepared-dataset placeholder.
+0.155.20 centralizes Action Scheduler readiness and deferred owner callbacks in the infrastructure wrapper. Ozon and Calendar register execution hooks immediately but perform datastore reads/writes only after the official `action_scheduler_init` boundary. The obsolete prepared-dataset and automatic GAR/SPAS owners are removed; one versioned infrastructure cleanup retires their queued actions and unused options after the same readiness boundary. Manual GAR CSV import, incremental update, backup/restore, and archive-export tooling retain their independent owners.
 
 0.155.19 extends the existing calendar `TimezoneService` as the single WDC `Asia/Novosibirsk` owner for local-clock scheduling and admin formatting. `ScheduledTaskCatalog` is a read-only descriptor provider: scheduler owners retain their settings and execution logic, while the overview reads real WP-Cron/Action Scheduler next timestamps without repairing or running jobs.
 

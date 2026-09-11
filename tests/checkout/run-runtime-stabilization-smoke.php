@@ -1232,9 +1232,10 @@ runtime_smoke_assert( str_contains( $overview_html, 'wdc_overview_action' ) && s
 runtime_smoke_assert( str_contains( $overview_html, 'Версия плагина' ) && str_contains( $overview_html, 'Версия PHP' ) && str_contains( $overview_html, 'Версия WooCommerce' ) && str_contains( $overview_html, 'Статус HPOS' ) && str_contains( $overview_html, 'Статус Action Scheduler' ), 'Overview page must keep the platform information block.' );
 runtime_smoke_assert( str_contains( $overview_html, 'Запланированные задачи' ) && str_contains( $overview_html, 'Время указано по Новосибирску (GMT+7).' ) && str_contains( $overview_html, 'Обновление ПВЗ DPD' ), 'Overview page must render the read-only WDC scheduled task catalog.' );
 runtime_smoke_assert( str_contains( $overview_html, 'Каждые 00:30' ), 'Overview must render the effective configured shipment status interval.' );
-$ordered_task_labels = array( 'Автосинхронизация статусов отправлений', 'Обновление ПВЗ Почты России', 'Обновление ПВЗ Ozon Delivery', 'Полное обновление ПВЗ/географии Яндекс', 'Обновление ПВЗ DPD', 'Проверка обновлений GAR', 'Генерация календаря следующего года' );
-runtime_smoke_assert( 7 === count( $container->get( \WallsShop\WDC\Admin\ScheduledTaskCatalog::class )->tasks() ), 'Overview catalog must contain exactly seven scheduled tasks.' );
+$ordered_task_labels = array( 'Автосинхронизация статусов отправлений', 'Обновление ПВЗ Почты России', 'Обновление ПВЗ Ozon Delivery', 'Полное обновление ПВЗ/географии Яндекс', 'Обновление ПВЗ DPD', 'Генерация календаря следующего года' );
+runtime_smoke_assert( 6 === count( $container->get( \WallsShop\WDC\Admin\ScheduledTaskCatalog::class )->tasks() ), 'Overview catalog must contain exactly six scheduled tasks.' );
 runtime_smoke_assert( ! str_contains( $overview_html, 'Проверка подготовленного FIAS dataset' ), 'Overview must not render the retired prepared FIAS placeholder.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Проверка обновлений GAR' ), 'Overview must not render the retired automatic GAR check.' );
 $previous_task_position = -1;
 foreach ( $ordered_task_labels as $task_label ) {
 	$task_position = strpos( $overview_html, $task_label );

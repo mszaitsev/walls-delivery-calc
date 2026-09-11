@@ -694,7 +694,6 @@ ob_start();
 	null,
 	null,
 	null,
-	null,
 	$importer,
 	new LocationsSnapshotExporter( $wpdb ),
 	new LocationsSnapshotImporter( $wpdb )

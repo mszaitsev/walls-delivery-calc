@@ -11,7 +11,6 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutAddressRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
-use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -20,8 +19,6 @@ use WallsShop\WDC\Locations\Fias\FiasEndpoints;
 use WallsShop\WDC\Locations\Fias\FiasHttpClient;
 use WallsShop\WDC\Locations\Fias\FiasLogger;
 use WallsShop\WDC\Locations\Fias\FiasRateLimiter;
-use WallsShop\WDC\Locations\Gar\GarChangesClient;
-use WallsShop\WDC\Locations\Gar\GarSyncManager;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
@@ -211,11 +208,5 @@ ob_start();
 $manual_city_html = (string) ob_get_clean();
 fias_smoke_assert( str_contains( $manual_city_html, 'Используется введенный вручную населенный пункт' ), 'Renderer must show manual city state for explicit manual fallback city.' );
 fias_smoke_assert( ! $manual->success, 'Manual city chain must remain unsuccessful normalization.' );
-
-$gar = new GarSyncManager( new ActionScheduler( new Logger() ), new GarChangesClient( $http ), new Logger(), $settings, $wpdb );
-$before_gar_requests = $GLOBALS['wdc_fias_http_requests'];
-$gar_status = $gar->check_for_changes();
-fias_smoke_assert( ! empty( $gar_status['disabled'] ), 'GAR runtime requests must be disabled by default.' );
-fias_smoke_assert( $before_gar_requests === $GLOBALS['wdc_fias_http_requests'], 'GAR disabled check must not execute HTTP requests.' );
 
 echo "FIAS smoke test passed.\n";
