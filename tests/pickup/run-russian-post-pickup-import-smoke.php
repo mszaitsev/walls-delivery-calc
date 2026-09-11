@@ -102,6 +102,40 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return $query;
 		}
 		public function query( string $query ): int|bool {
+			if ( preg_match( '/^INSERT INTO ([A-Za-z0-9_]+) \(([^)]+)\) VALUES (.+) ON DUPLICATE KEY UPDATE/s', trim( $query ), $insert_match ) ) {
+				$table = $insert_match[1];
+				$columns = array_map( 'trim', explode( ',', $insert_match[2] ) );
+				preg_match_all( "/'(?:''|[^'])*'|-?[0-9]+(?:\\.[0-9]+)?|NULL/", $insert_match[3], $value_matches );
+				$values = array_map(
+					static function ( string $value ): mixed {
+						if ( 'NULL' === $value ) {
+							return null;
+						}
+						if ( str_starts_with( $value, "'" ) ) {
+							return str_replace( "''", "'", substr( $value, 1, -1 ) );
+						}
+
+						return str_contains( $value, '.' ) ? (float) $value : (int) $value;
+					},
+					$value_matches[0]
+				);
+				$inserted = 0;
+				foreach ( array_chunk( $values, count( $columns ) ) as $cells ) {
+					if ( count( $cells ) !== count( $columns ) ) {
+						continue;
+					}
+					$row = array_combine( $columns, $cells );
+					$duplicate = array_filter( $this->tables[ $table ] ?? array(), static fn( array $existing ): bool => (string) ( $existing['point_code'] ?? '' ) === (string) ( $row['point_code'] ?? '' ) );
+					if ( array() !== $duplicate ) {
+						continue;
+					}
+					$row['id'] = ++$this->insert_id;
+					$this->tables[ $table ][] = $row;
+					++$inserted;
+				}
+
+				return $inserted;
+			}
 			if ( str_starts_with( trim( $query ), 'UPDATE wp_options SET option_value =' ) ) {
 				$replacement = (string) ( $this->prepared_args[0] ?? '' );
 				$key = (string) ( $this->prepared_args[1] ?? '' );
@@ -699,8 +733,8 @@ $first_profile = is_array( $state['last_batch_profile'] ?? null ) ? $state['last
 $first_profile_queries = is_array( $first_profile['query_counts'] ?? null ) ? $first_profile['query_counts'] : array();
 $first_profile_matches = is_array( $first_profile['match_counts'] ?? null ) ? $first_profile['match_counts'] : array();
 $first_profile_lookups = is_array( $first_profile['lookup_counts'] ?? null ) ? $first_profile['lookup_counts'] : array();
-rp_pickup_assert( 3 === (int) ( $first_profile['objects'] ?? 0 ) && 3 === (int) ( $first_profile_queries['staging_write_queries'] ?? 0 ) && 3 === (int) ( $first_profile_matches['matched_fias'] ?? 0 ), 'Completed atomic batch must persist object, staging-write, and matching profiler counters.' );
-rp_pickup_assert( 3 === (int) ( $first_profile_lookups['fias_lookups'] ?? 0 ) && 1 === (int) ( $first_profile_lookups['unique_fias_keys'] ?? 0 ) && (int) ( $first_profile_queries['total_profiled_queries'] ?? 0 ) >= 5, 'Integrated profiler must distinguish repeated FIAS lookups and include staging/state activity in total queries.' );
+rp_pickup_assert( 3 === (int) ( $first_profile['objects'] ?? 0 ) && 1 === (int) ( $first_profile_queries['staging_write_queries'] ?? 0 ) && 3 === (int) ( $first_profile_matches['matched_fias'] ?? 0 ), 'Completed atomic batch must persist object, batched staging-write, and matching profiler counters.' );
+rp_pickup_assert( 3 === (int) ( $first_profile_lookups['fias_lookups'] ?? 0 ) && 1 === (int) ( $first_profile_lookups['unique_fias_keys'] ?? 0 ) && 1 === (int) ( $first_profile_queries['fias_lookup_queries'] ?? 0 ) && (int) ( $first_profile_queries['total_profiled_queries'] ?? 0 ) >= 3, 'Integrated profiler must distinguish repeated FIAS lookups, one prefetched FIAS query, and batched staging/state activity.' );
 foreach ( array( 'payload_read_ms', 'parse_ms', 'normalize_ms', 'location_match_ms', 'staging_prepare_ms', 'staging_write_ms', 'checkpoint_ms', 'lock_renew_ms', 'total_batch_ms' ) as $profile_timing ) {
 	rp_pickup_assert( isset( $first_profile[ $profile_timing ] ) && (int) $first_profile[ $profile_timing ] >= 0, 'Batch profiler must persist non-negative timing: ' . $profile_timing );
 }

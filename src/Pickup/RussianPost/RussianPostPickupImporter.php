@@ -381,7 +381,7 @@ final class RussianPostPickupImporter {
 			return array( 'success' => false, 'result' => $result );
 		}
 
-		$rows = array();
+		$normalized_rows = array();
 		$batch_errors = array();
 		$parsed = 0;
 		$skipped = 0;
@@ -401,6 +401,14 @@ final class RussianPostPickupImporter {
 				$profiler->record_skipped();
 				continue;
 			}
+			$normalized_rows[] = $row;
+		}
+
+		if ( $this->location_resolver instanceof RussianPostPickupLocationResolver ) {
+			$profiler->measure( 'location_match_ms', fn(): mixed => $this->location_resolver->prefetch_fias_for_rows( $normalized_rows, $profiler ) );
+		}
+		$rows = array();
+		foreach ( $normalized_rows as $row ) {
 			if ( $this->location_resolver instanceof RussianPostPickupLocationResolver ) {
 				$match = $profiler->measure( 'location_match_ms', fn(): array => $this->location_resolver->resolve( $row, $profiler ) );
 				$profiler->record_match( $match );

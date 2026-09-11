@@ -1,6 +1,6 @@
 # Shipment Framework
 
-Version: 1.0.8
+Version: 1.0.9
 
 The Shipment Framework provides carrier-neutral creation, persistence, status, actual-cost, document, cancellation, manual-attach, and lifecycle contracts. Carrier adapters own carrier payloads and immutable carrier facts; shared services own creation attempts, generic state transitions, order snapshots, analytics, and administration boundaries.
 

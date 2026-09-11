@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.8
+Version: 1.0.9
 
-The current Walls Delivery Calc release source is version 1.0.8. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.8 adds bounded, PII-free Russian Post atomic-batch profiling only; matching, SQL semantics, worker-slice limits, lock lifecycle, and the schema baseline remain unchanged at their 1.0.7/1.0.0 contracts.
+The current Walls Delivery Calc release source is version 1.0.9. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.9 retains the bounded, PII-free Russian Post profiler and batches exact FIAS lookup plus staging writes. Matching decisions, worker-slice limits, lock lifecycle, and the schema baseline remain unchanged at their 1.0.8/1.0.0 contracts.
 
 Current production scope includes:
 

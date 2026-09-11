@@ -867,6 +867,56 @@ final class LocationRepository {
 		return is_array( $row ) ? $this->row_to_location( $row ) : null;
 	}
 
+	/**
+	 * Finds locations by the exact stored FIAS values in bounded caller-provided sets.
+	 *
+	 * This deliberately does not apply normalized-expression fallback matching. Callers
+	 * that need that compatibility path must use find_by_fias_id() for unresolved keys.
+	 *
+	 * @param array<int,string> $fias_ids
+	 * @return array<string,Location>
+	 */
+	public function find_by_exact_fias_ids( array $fias_ids ): array {
+		$fias_ids = array_values( array_unique( array_filter( array_map( static fn( mixed $value ): string => trim( (string) $value ), $fias_ids ), static fn( string $value ): bool => '' !== $value ) ) );
+		if ( array() === $fias_ids ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$wanted = array_fill_keys( $fias_ids, true );
+			$result = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				$stored = (string) ( $row['fias_id'] ?? '' );
+				if ( '' !== $stored && isset( $wanted[ $stored ] ) ) {
+					$result[ $stored ] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+				}
+			}
+
+			return $result;
+		}
+
+		$placeholders = implode( ', ', array_fill( 0, count( $fias_ids ), '%s' ) );
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.fias_id IN ({$placeholders})",
+				...$fias_ids
+			),
+			ARRAY_A
+		);
+		$result = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$stored = trim( (string) ( $row['fias_id'] ?? '' ) );
+			if ( '' !== $stored ) {
+				$result[ $stored ] = $this->row_to_location( $row );
+			}
+		}
+
+		return $result;
+	}
+
 	public function find_by_fias_or_city_fias_id( string $fias_id ): ?Location {
 		$normalized = $this->normalize_guid( $fias_id );
 		if ( '' === $normalized ) {

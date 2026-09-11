@@ -1,6 +1,6 @@
 # Russian Post pickup import performance profiling
 
-Version: 1.0.8  
+Version: 1.0.9
 Schema version: 1.0.0
 
 ## Purpose and scope
@@ -60,6 +60,46 @@ Production evidence is required to compare a slow batch with a normal batch:
 - input objects, offsets, and the surrounding worker slice.
 
 Only after a complete ALL import should a separate optimization task choose between lookup prefetch/caching, staging-write batching, an index change, or no change.
+
+## Optimization 1.0.9
+
+The complete 1.0.8 production profile processed 36,714 objects in 74 batches and wrote 36,700 staging rows. Of 233,942 ms of profiled batch work, location matching accounted for 137,821 ms and staging writes for 81,398 ms. The import issued 27,358 logical FIAS lookup queries and 36,700 staging write queries. These two paths therefore accounted for 93.7% of measured batch time and are the only paths changed in 1.0.9.
+
+### Exact FIAS prefetch
+
+The former resolver performed `LocationRepository::find_by_fias_id()` once per request-unique FIAS key. Version 1.0.9 collects FIAS values from the current 500-object atomic batch and loads exact `fias_id` matches in chunks of 200 through prepared `IN` lists. Its in-memory cache belongs to the resolver instance and can be reused by later atomic batches in the same worker slice; it is never persisted or shared between imports. Exact raw values are loaded first. Only raw misses are checked against the existing compact normalized value, and unresolved exceptional values retain the old per-key normalized-expression fallback. The matching priority and returned `Location` objects are unchanged.
+
+The deterministic 500-key fixture changes the structural query model from approximately 500 exact SELECTs to at most three exact SELECTs. Repeated keys are served by the same request-local cache.
+
+### Bounded staging INSERT
+
+The former repository called `$wpdb->insert()` for every accepted row. Version 1.0.9 prepares the identical normalized columns and writes chunks of 100 rows with placeholders, reducing a normal 500-row batch from 500 statements to five. `ON DUPLICATE KEY` performs a no-op on the unique `point_code`, preserving the former behavior in which the first staged row remains and a later duplicate is counted as skipped. A failed bulk statement falls back to the former per-row path, retaining its exceptional failure accounting.
+
+No transaction spans a worker slice or import. Each multi-row statement is the write boundary; the table DDL continues to inherit the WordPress database default engine. Production acceptance must confirm that the staging table uses InnoDB before relying on statement rollback during the exceptional per-row fallback. No schema or index changed.
+
+### Region/city query investigation
+
+The unchanged fallback calls `LocationRepository::search_by_tokens([$region, $city], 20, true, '', 'RU')`, producing this query shape:
+
+```sql
+SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+FROM wp_wdc_locations l
+LEFT JOIN wp_wdc_regions r ON r.region_code = l.region_code
+WHERE l.active = 1
+  AND l.country_code = 'RU'
+  AND l.searchable_text LIKE '%<normalized-region>%'
+  AND l.searchable_text LIKE '%<normalized-city>%'
+ORDER BY l.display_name ASC
+LIMIT 20;
+```
+
+The leading-wildcard predicates are non-sargable against the current indexes; the existing `(active, country_code)` key can narrow rows, while the text predicates and display-name ordering still require residual filtering and may require sorting. The development host has no project MySQL/MariaDB dataset, so no fabricated `EXPLAIN` is recorded here. A production `EXPLAIN` remains required before proposing an index or changing this parity-sensitive fallback. Version 1.0.9 deliberately leaves the query and its ambiguity semantics unchanged.
+
+### Local structural and parity results
+
+The optimization smoke covers unique and repeated FIAS keys, unique/ambiguous postcode fallback, ambiguous region/city results, missing FIAS fallback, and an inactive exact-FIAS fixture. Reference per-row resolution and prefetched resolution return identical status, strategy, and location ID. A 500-row staging fixture persists every supplied column identically in five writes; a duplicate keeps the first row and increments `skipped`. Profiler meanings and fields are unchanged and now report the reduced physical query counts.
+
+Production validation still needs the same 1.0.8 profile export: output totals, phase totals, query totals, duration samples, slow-batch count, maximum batch duration, total import wall time, and peak memory. In particular, production data must show whether the exact-FIAS and staging reductions remove most slow batches while the unchanged region/city fallback remains the dominant residual spike.
 
 ## Extraction
 

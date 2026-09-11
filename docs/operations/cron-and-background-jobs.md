@@ -1,6 +1,6 @@
 # Cron And Background Jobs
 
-Version: 1.0.8
+Version: 1.0.9
 
 WDC business clock times use `Asia/Novosibirsk`; scheduler APIs receive Unix timestamps. Owners register callbacks during plugin bootstrap and defer Action Scheduler inspection/creation until `action_scheduler_init`. Registration after that hook ensures the schedule immediately. Expected pre-initialization and disabled/no-work states are silent.
 
@@ -21,7 +21,7 @@ Manual Russian Post cancellation makes the persisted terminal state authoritativ
 
 Since 1.0.7, `init`, `batch`, and `finalize` use one foreign-callback policy: a callback whose immutable argument `import_id` differs from the persisted active job fails without recording diagnostics into, cleaning, failing, renewing, scheduling for, or unlocking that job. Unexpected-failure handling rechecks state ownership before building a result and before cleanup, and never lets mutable current state replace the callback owner ID.
 
-Version 1.0.8 adds diagnostic-only profiling around each Russian Post atomic batch. Timings use a monotonic clock and cover payload reading, parsing, normalization, location matching, staging preparation/write, checkpoint, and lock renewal. State retains only the last profile, ten slow profiles at the existing 10-second threshold, aggregate counters, and at most 200 integer duration samples. Lookup values, SQL text, payload data, and credentials are never persisted. The 500-row batch, 18-second/15-unit worker slice, scheduling, lease, and retry contracts are unchanged.
+Version 1.0.9 keeps the 1.0.8 profiler and reduces Russian Post batch database round-trips with request-local exact-FIAS prefetch and bounded 100-row staging inserts. Matching priority, ambiguity handling, the 500-row atomic batch, 18-second/15-unit worker slice, scheduling, lease, and retry contracts are unchanged.
 
 Ozon browser polling reads local progress only and never executes background work. Checkout reads published local pickup snapshots and never initiates imports.
 
