@@ -36,6 +36,7 @@ return array(
 	'russian-post.price' => array( 'path' => 'tests/shipments/run-russian-post-shipment-price-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.cancel' => array( 'path' => 'tests/shipments/run-russian-post-cancel-shipment-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.documents' => array( 'path' => 'tests/shipments/run-russian-post-documents-smoke.php', 'groups' => array( 'russian-post' ) ),
+	'russian-post.status-mapping' => array( 'path' => 'tests/shipments/run-russian-post-status-mapping-smoke.php', 'groups' => array( 'russian-post', 'status-core' ) ),
 	'russian-post.pickup-import' => array( 'path' => 'tests/pickup/run-russian-post-pickup-import-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.cross-job-callback-race' => array( 'path' => 'tests/pickup/run-russian-post-cross-job-callback-race-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.wp-file-api' => array( 'path' => 'tests/pickup/run-russian-post-wp-file-api-smoke.php', 'groups' => array( 'russian-post' ) ),

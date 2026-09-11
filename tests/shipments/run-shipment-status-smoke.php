@@ -153,6 +153,8 @@ final class ShipmentStatusAjaxResponse extends RuntimeException {
 }
 
 final class ShipmentStatusSmokeAdapter implements CarrierShipmentAdapterInterface {
+	public int $update_calls = 0;
+
 	public function __construct( private ShipmentStatusUpdateService $status_updates ) {
 	}
 
@@ -162,11 +164,11 @@ final class ShipmentStatusSmokeAdapter implements CarrierShipmentAdapterInterfac
 	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { return new ShipmentCreateResult( false, error_code: 'not-supported', error_message: 'Not supported in smoke.' ); }
 	public function presentation(): array { return array(); }
 	public function status_payload( object $order, array $shipment ): array { return $this->status_updates->status_payload( $shipment, $order ); }
-	public function update_status( object $order, string $shipment_key = '' ): array { return $this->status_updates->update_russian_post( $order, $shipment_key ?: RussianPostDomesticSettings::CARRIER_KEY ); }
+	public function update_status( object $order, string $shipment_key = '' ): array { ++$this->update_calls; return $this->status_updates->update_russian_post( $order, $shipment_key ?: RussianPostDomesticSettings::CARRIER_KEY ); }
 	public function attach_manual( object $order, array $payload ): array { return array( 'success' => false ); }
 	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { return array( 'success' => false ); }
 	public function remove_from_order( object $order, string $shipment_key = '' ): array { return array( 'success' => false ); }
-	public function supports_status_auto_sync(): bool { return false; }
+	public function supports_status_auto_sync(): bool { return true; }
 	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ); }
 	public function auto_sync_throttle_microseconds(): int { return 0; }
 }
@@ -330,7 +332,7 @@ $wpdb->settings[] = array( 'service_id' => 1, 'setting_key' => RussianPostOtprav
 
 $settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), $encryption, new DeliveryServiceRepository( $wpdb ), new DeliveryServiceSettingsRepository( $wpdb ) );
 $client = new RussianPostTrackingApiClient( $settings );
-$mapper = new RussianPostTrackingStatusMapper();
+$mapper = new RussianPostTrackingStatusMapper( new SettingsRepository() );
 
 $autosync_settings = new SettingsRepository();
 $autosync_settings->set( ShipmentStatusAutoSyncService::ENABLED_KEY, true );
@@ -441,6 +443,53 @@ shipment_status_smoke_assert( false === $empty['success'] && 'Почта Рос�
 
 $repository = new OrderShipmentRepository();
 $status_service = new ShipmentStatusUpdateService( $repository, $client, $mapper, shipment_test_actual_cost_resolver() );
+
+$russian_post_autosync_settings = new SettingsRepository();
+$russian_post_autosync_repository = new OrderShipmentRepository();
+$russian_post_autosync_mapper = new RussianPostTrackingStatusMapper( $russian_post_autosync_settings );
+$russian_post_autosync_mapper->save_mapping( array( '2:1' => DeliveryStatus::IN_TRANSIT ) );
+$russian_post_autosync_status_service = new ShipmentStatusUpdateService( $russian_post_autosync_repository, $client, $russian_post_autosync_mapper, shipment_test_actual_cost_resolver() );
+$russian_post_autosync_adapter = new ShipmentStatusSmokeAdapter( $russian_post_autosync_status_service );
+$russian_post_autosync_order = new ShipmentStatusSmokeOrder(
+	803,
+	array(
+		OrderShipmentRepository::META_KEY => array(
+			RussianPostDomesticSettings::CARRIER_KEY => array(
+				'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+				'status' => 'created',
+				'tracking_number' => '12345678901234',
+				'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
+			),
+		),
+	),
+	'processing'
+);
+$GLOBALS['wdc_status_smoke_autosync_orders'] = array( $russian_post_autosync_order );
+$GLOBALS['wdc_status_smoke_http_body'] = shipment_status_smoke_envelope( shipment_status_smoke_record( '2026-06-06T10:00:00+07:00', '2', 'Вручение', '1', 'Вручение адресату' ) );
+$russian_post_autosync_settings->set( ShipmentStatusAutoSyncService::ENABLED_KEY, false );
+$disabled_russian_post_autosync = new ShipmentStatusAutoSyncService(
+	$russian_post_autosync_settings,
+	new PlatformRuntimeSettings( $russian_post_autosync_settings ),
+	$russian_post_autosync_repository,
+	$russian_post_autosync_status_service,
+	registry: new CarrierShipmentAdapterRegistry( array( $russian_post_autosync_adapter ) )
+);
+$disabled_result = $disabled_russian_post_autosync->run( 'cron' );
+shipment_status_smoke_assert( 'disabled' === $disabled_result['status'] && 0 === $russian_post_autosync_adapter->update_calls, 'Global autosync disabled must not update Russian Post shipments.' );
+
+$russian_post_autosync_settings->set( ShipmentStatusAutoSyncService::ENABLED_KEY, true );
+$enabled_result = ( new ShipmentStatusAutoSyncService(
+	$russian_post_autosync_settings,
+	new PlatformRuntimeSettings( $russian_post_autosync_settings ),
+	$russian_post_autosync_repository,
+	$russian_post_autosync_status_service,
+	registry: new CarrierShipmentAdapterRegistry( array( $russian_post_autosync_adapter ) )
+) )->run( 'cron' );
+$russian_post_autosync_saved = $russian_post_autosync_repository->find_by_carrier( $russian_post_autosync_order, RussianPostDomesticSettings::CARRIER_KEY );
+shipment_status_smoke_assert( 1 === $russian_post_autosync_adapter->update_calls && 1 === (int) ( $enabled_result['updates_by_carrier'][ RussianPostDomesticSettings::CARRIER_KEY ] ?? 0 ), 'Common autosync must select and dispatch an eligible Russian Post shipment through the adapter registry.' );
+shipment_status_smoke_assert( DeliveryStatus::IN_TRANSIT === (string) ( $russian_post_autosync_saved['universal_status_code'] ?? '' ), 'Common autosync must consume the persisted Russian Post status mapping override.' );
+$russian_post_autosync_mapper->save_mapping( RussianPostTrackingStatusMapper::default_mapping() );
+
 $no_barcode_order = new ShipmentStatusSmokeOrder( 10, array( OrderShipmentRepository::META_KEY => array( RussianPostDomesticSettings::CARRIER_KEY => array( 'status' => 'created' ) ) ) );
 $no_barcode = $status_service->update_russian_post( $no_barcode_order );
 shipment_status_smoke_assert( false === $no_barcode['success'] && 'У отправления нет ШПИ.' === $no_barcode['message'], 'Shipment without barcode must fail.' );

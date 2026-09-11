@@ -98,6 +98,7 @@ use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexStatusMapping;
 
 defined( 'ABSPATH' ) || exit;
@@ -180,6 +181,7 @@ final class DeliveryServicesAdminPage {
 		private ?OzonDeliveryAdminPage $ozon_delivery_admin = null,
 		private ?SelfPickupSettings $self_pickup_settings = null,
 		?Logger $logger = null,
+		private ?RussianPostTrackingStatusMapper $russian_post_status_mapping = null,
 	) {
 		$this->logger = $logger;
 	}
@@ -897,7 +899,7 @@ final class DeliveryServicesAdminPage {
 				'reset_russian_post_pickup_import',
 				'save_api_credentials',
 				'save_shipments',
-				'save_status_mapping',
+				'save_russian_post_statuses',
 				'save_cdek_statuses',
 				'save_dpd_statuses',
 				'save_pek_statuses',
@@ -954,7 +956,7 @@ final class DeliveryServicesAdminPage {
 					'reset_russian_post_pickup_import',
 					'save_api_credentials',
 					'save_shipments',
-					'save_status_mapping',
+					'save_russian_post_statuses',
 					'save_cdek_statuses',
 					'save_dpd_statuses',
 					'save_pek_statuses',
@@ -1076,10 +1078,13 @@ final class DeliveryServicesAdminPage {
 					$this->save_shipment_service_settings( (int) $service->id, $service->service_key );
 				}
 			}
-			if ( 'save_status_mapping' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
+			if ( 'save_russian_post_statuses' === $action && $this->russian_post_status_mapping instanceof RussianPostTrackingStatusMapper ) {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
-				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) && null !== $service->id ) {
-					$this->save_status_mapping_settings( (int) $service->id );
+				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) ) {
+					$mapping = isset( $_POST[ RussianPostTrackingStatusMapper::MAPPING_KEY ] ) && is_array( $_POST[ RussianPostTrackingStatusMapper::MAPPING_KEY ] )
+						? $this->russian_post_status_mapping->sanitize_mapping( wp_unslash( $_POST[ RussianPostTrackingStatusMapper::MAPPING_KEY ] ) )
+						: RussianPostTrackingStatusMapper::default_mapping();
+					$this->russian_post_status_mapping->save_mapping( $mapping );
 				}
 			}
 			if ( 'save_cdek_statuses' === $action && $this->cdek_status_mapping instanceof CdekStatusMappingService ) {
@@ -1406,7 +1411,7 @@ final class DeliveryServicesAdminPage {
 			'reset_russian_post_pickup_import',
 			'save_api_credentials',
 			'save_shipments',
-			'save_status_mapping',
+			'save_russian_post_statuses',
 			'save_cdek_statuses',
 			'save_dpd_statuses',
 			'save_pek_statuses',
@@ -1443,7 +1448,7 @@ final class DeliveryServicesAdminPage {
 				'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' => 'russian_post_pickup',
 				'save_api_credentials' => 'api_credentials',
 				'save_shipments' => 'shipments',
-				'save_status_mapping' => 'status_mapping',
+				'save_russian_post_statuses' => 'status_mapping',
 				'save_cdek_statuses' => 'cdek_statuses',
 				'save_dpd_statuses' => 'dpd_statuses',
 				'save_pek_statuses' => PekStatusAdminPage::TAB_KEY,
@@ -2093,7 +2098,7 @@ final class DeliveryServicesAdminPage {
 			$tabs[ RussianPostPickupDiagnosticsTab::TAB_KEY ] = 'Диагностика базы ПВЗ';
 			$tabs['api_credentials'] = 'Данные для входа';
 			$tabs['shipments'] = 'Отправления';
-			$tabs['status_mapping'] = 'Статусы / Mapping';
+			$tabs['status_mapping'] = 'Статусы Почты России';
 			$tabs['diagnostics'] = 'Диагностика';
 		}
 		if ( $this->is_cdek_service( $service ) ) {
@@ -2146,7 +2151,7 @@ final class DeliveryServicesAdminPage {
 			RussianPostPickupDiagnosticsTab::TAB_KEY => $this->render_russian_post_pickup_diagnostics_tab(),
 			'api_credentials' => $this->render_api_credentials_tab( $service ),
 			'shipments' => $this->render_shipments_tab( $service ),
-			'status_mapping' => $this->render_status_mapping_tab( $service ),
+			'status_mapping' => $this->render_russian_post_statuses_tab( $service ),
 			'diagnostics' => $this->render_diagnostics_tab( $service ),
 			'cdek_settings' => $this->render_cdek_settings_tab( $service ),
 			'dpd_settings' => $this->render_dpd_settings_tab( $service ),
@@ -3904,23 +3909,31 @@ final class DeliveryServicesAdminPage {
 		<?php
 	}
 
-	private function render_status_mapping_tab( DeliveryService $service ): void {
-		if ( ! $this->is_domestic_service( $service ) ) {
+	private function render_russian_post_statuses_tab( DeliveryService $service ): void {
+		if ( ! $this->is_domestic_service( $service ) || ! $this->russian_post_status_mapping instanceof RussianPostTrackingStatusMapper ) {
 			return;
 		}
-		$settings = null !== $service->id && $this->settings instanceof DeliveryServiceSettingsRepository ? $this->settings->all_settings( (int) $service->id ) : array();
+		$mapping = $this->russian_post_status_mapping->mapping();
 		?>
-		<form method="post" style="max-width: 860px;">
+		<form method="post" style="max-width: 960px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
-			<input type="hidden" name="wdc_delivery_services_action" value="save_status_mapping">
+			<input type="hidden" name="wdc_delivery_services_action" value="save_russian_post_statuses">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
-			<table class="form-table" role="presentation">
-				<?php $this->textarea_row( 'status_mapping_json', __( 'Status mapping JSON', 'walls-delivery-calc' ), (string) ( $settings['status_mapping_json'] ?? '{}' ) ); ?>
-				<?php $this->text_row( 'status_polling_frequency_minutes', __( 'Polling frequency, minutes', 'walls-delivery-calc' ), (string) ( $settings['status_polling_frequency_minutes'] ?? 60 ) ); ?>
-				<?php $this->text_row( 'status_auto_sync_wc_statuses', __( 'WC statuses eligible for auto-sync', 'walls-delivery-calc' ), (string) ( $settings['status_auto_sync_wc_statuses'] ?? 'processing,completed' ) ); ?>
+			<p class="description"><?php echo esc_html__( 'Сопоставление меняет только универсальный статус WDC. Признак конечной операции принадлежит каталогу Почты России и не редактируется. Частота проверки задается на общей странице статусов отправлений.', 'walls-delivery-calc' ); ?></p>
+			<table class="widefat striped">
+				<thead><tr><th><?php echo esc_html__( 'Код Почты России', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Статус Почты России', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Универсальный статус WDC', 'walls-delivery-calc' ); ?></th></tr></thead>
+				<tbody>
+					<?php foreach ( RussianPostTrackingStatusMapper::catalog() as $code => $row ) : ?>
+						<tr>
+							<td><code><?php echo esc_html( $code ); ?></code></td>
+							<td><?php echo esc_html( $row['label'] ); ?></td>
+							<td><?php $this->render_delivery_status_select( RussianPostTrackingStatusMapper::MAPPING_KEY, $code, (string) ( $mapping[ $code ] ?? '' ) ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
 			</table>
-			<?php submit_button( __( 'Сохранить mapping статусов', 'walls-delivery-calc' ) ); ?>
+			<?php submit_button( __( 'Сохранить статусы Почты России', 'walls-delivery-calc' ) ); ?>
 		</form>
 		<?php
 	}
@@ -6072,16 +6085,6 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		foreach ( ShipmentServiceSettings::sanitize_from_post( $_POST, $service_key ) as $key => $data ) {
 			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
 		}
-	}
-
-	private function save_status_mapping_settings( int $service_id ): void {
-		if ( ! $this->settings instanceof DeliveryServiceSettingsRepository ) {
-			return;
-		}
-		$json = trim( (string) wp_unslash( $_POST['status_mapping_json'] ?? '{}' ) );
-		$this->settings->set_setting( $service_id, 'status_mapping_json', '' !== $json ? $json : '{}', 'string' );
-		$this->settings->set_setting( $service_id, 'status_polling_frequency_minutes', max( 5, min( 1440, (int) ( $_POST['status_polling_frequency_minutes'] ?? 60 ) ) ), 'number' );
-		$this->settings->set_setting( $service_id, 'status_auto_sync_wc_statuses', sanitize_text_field( wp_unslash( $_POST['status_auto_sync_wc_statuses'] ?? 'processing,completed' ) ), 'string' );
 	}
 
 	/**

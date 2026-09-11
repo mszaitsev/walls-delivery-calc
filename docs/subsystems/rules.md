@@ -1,6 +1,6 @@
 # Rules
 
-Version: 1.0.10
+Version: 1.0.11
 
 The Rule Engine distinguishes the current shipping package item total (`order_total`) from the full cart item total (`cart_total`). Both use post-discount product totals and exclude shipping, fees, and taxes; outside WooCommerce checkout, the typed full-cart value falls back to the package total.
 

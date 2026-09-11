@@ -705,7 +705,7 @@ final class Plugin {
 		$this->container->register( RussianPostOtpravkaApiSettings::class, fn(): RussianPostOtpravkaApiSettings => new RussianPostOtpravkaApiSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiClient::class, fn(): RussianPostOtpravkaApiClient => new RussianPostOtpravkaApiClient( $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
 		$this->container->register( RussianPostTrackingApiClient::class, fn(): RussianPostTrackingApiClient => new RussianPostTrackingApiClient( $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
-		$this->container->register( RussianPostTrackingStatusMapper::class, fn(): RussianPostTrackingStatusMapper => new RussianPostTrackingStatusMapper() );
+		$this->container->register( RussianPostTrackingStatusMapper::class, fn(): RussianPostTrackingStatusMapper => new RussianPostTrackingStatusMapper( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( OrderShipmentRepository::class, fn(): OrderShipmentRepository => new OrderShipmentRepository() );
 		$this->container->register( ShipmentCreationAttemptService::class, fn(): ShipmentCreationAttemptService => new ShipmentCreationAttemptService( $this->container->get( OrderShipmentRepository::class ) ) );
 		$this->container->register( ShipmentServiceSettings::class, fn(): ShipmentServiceSettings => new ShipmentServiceSettings( $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
@@ -1162,6 +1162,7 @@ final class Plugin {
 				$this->container->get( OzonDeliveryAdminPage::class ),
 				$this->container->get( SelfPickupSettings::class ),
 				$this->container->get( Logger::class ),
+				$this->container->get( RussianPostTrackingStatusMapper::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );

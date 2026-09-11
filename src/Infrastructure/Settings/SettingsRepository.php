@@ -11,6 +11,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
 use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexStatusMapping;
 
 defined( 'ABSPATH' ) || exit;
@@ -135,6 +136,7 @@ final class SettingsRepository {
 			'cdek_status_mapping' => CdekStatusMappingService::default_mapping(),
 			'dpd_status_mapping' => DpdStatusMapping::default_mapping(),
 			'pek_status_mapping' => PekStatusMapping::default_mapping(),
+			RussianPostTrackingStatusMapper::MAPPING_KEY => RussianPostTrackingStatusMapper::default_mapping(),
 			'yandex_delivery_status_mapping' => YandexStatusMapping::default_mapping(),
 			'packaging_weight_tiers'       => array(),
 			),

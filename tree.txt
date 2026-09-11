@@ -80,6 +80,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- docs/research/background-execution-optimization.md
 |-- docs/research/fias-auto-update-history.md
 |-- docs/research/russian-post-import-performance-profile.md
+|-- docs/research/russian-post-status-catalog-compatibility.md
 |-- docs/research/walls-delivery-calc-tech-spec-history.md
 |-- docs/subsystems/checkout.md
 |-- docs/subsystems/locations.md
@@ -857,6 +858,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- tests/shipments/run-russian-post-documents-smoke.php
 |-- tests/shipments/run-russian-post-shipment-price-smoke.php
 |-- tests/shipments/run-russian-post-shipments-smoke.php
+|-- tests/shipments/run-russian-post-status-mapping-smoke.php
 |-- tests/shipments/run-shipment-actual-cost-presentation-smoke.php
 |-- tests/shipments/run-shipment-actual-cost-service-smoke.php
 |-- tests/shipments/run-shipment-admin-ajax-smoke.php
