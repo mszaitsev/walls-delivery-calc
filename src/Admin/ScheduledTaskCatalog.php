@@ -13,8 +13,6 @@ use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Locations\Gar\GarSyncManager;
-use WallsShop\WDC\Locations\Import\FiasImportManager;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
@@ -22,7 +20,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 defined( 'ABSPATH' ) || exit;
 
 final class ScheduledTaskCatalog {
-	public const TASK_KEYS = array( 'shipment_statuses', 'russian_post_pickup', 'ozon_pickup', 'yandex_geo', 'dpd_pickup', 'gar', 'fias', 'calendar' );
+	public const TASK_KEYS = array( 'shipment_statuses', 'russian_post_pickup', 'ozon_pickup', 'yandex_geo', 'dpd_pickup', 'calendar' );
 
 	public function __construct(
 		private ActionScheduler $action_scheduler,
@@ -50,8 +48,6 @@ final class ScheduledTaskCatalog {
 			$this->task( 'ozon_pickup', 'Обновление ПВЗ Ozon Delivery', 'Ежедневно в ' . $this->ozon_settings->pickup_sync_time(), $this->ozon_settings->pickup_auto_sync_enabled(), $this->ozon_scheduler->next_run() ),
 			$this->task( 'yandex_geo', 'Полное обновление ПВЗ/географии Яндекс', $this->yandex_schedule( $yandex ), ! empty( $yandex['enabled'] ), $this->yandex_runner->next_run_timestamp() ),
 			$this->task( 'dpd_pickup', 'Обновление ПВЗ DPD', array() === $dpd_times ? '—' : implode( ', ', $dpd_times ), $this->dpd_settings->pickup_autosync_enabled() && array() !== $dpd_times, $this->next_dpd_run( $dpd_times ) ),
-			$this->task( 'gar', 'Проверка обновлений GAR', 'Каждые 24 часа', $this->settings->get_bool( 'gar_sync_enabled', false ), $this->action_scheduler->next_scheduled( GarSyncManager::DAILY_HOOK ) ),
-			$this->task( 'fias', 'Проверка подготовленного FIAS dataset', 'Каждые 7 дней', true, $this->action_scheduler->next_scheduled( FiasImportManager::WEEKLY_HOOK ) ),
 			$this->task( 'calendar', 'Генерация календаря следующего года', 'Первый понедельник месяца в 09:00', true, $this->action_scheduler->next_scheduled( CalendarScheduler::HOOK ) )
 		);
 	}

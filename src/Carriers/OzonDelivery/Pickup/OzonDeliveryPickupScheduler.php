@@ -8,7 +8,7 @@ defined( 'ABSPATH' ) || exit;
 final class OzonDeliveryPickupScheduler {
 	public const GROUP = 'walls-delivery-calc'; public const DAILY_HOOK = 'wdc_ozon_delivery_pickup_daily'; public const STEP_HOOK = 'wdc_ozon_delivery_pickup_step';
 	public function __construct( private ActionScheduler $scheduler, private OzonDeliveryPickupImportService $importer, private OzonDeliveryPickupImportLock $lock, private OzonDeliverySettings $settings, private TimezoneService $timezone ) {}
-	public function register(): void { add_action( self::DAILY_HOOK, array( $this, 'run_scheduled' ) ); add_action( self::STEP_HOOK, array( $this, 'run_step' ), 10, 2 ); $this->ensure_schedule(); }
+	public function register(): void { add_action( self::DAILY_HOOK, array( $this, 'run_scheduled' ) ); add_action( self::STEP_HOOK, array( $this, 'run_step' ), 10, 2 ); $this->scheduler->when_initialized( self::class, array( $this, 'ensure_schedule' ) ); }
 	public function ensure_schedule(): void { if ( ! $this->settings->pickup_auto_sync_enabled() ) { $this->scheduler->unschedule( self::DAILY_HOOK, array(), self::GROUP ); return; } $next = $this->scheduler->next_scheduled( self::DAILY_HOOK, array(), self::GROUP ); if ( null !== $next && $this->settings->pickup_sync_time() === $this->timezone->format_timestamp( $next, 'H:i' ) ) { return; } if ( null !== $next ) { $this->scheduler->unschedule( self::DAILY_HOOK, array(), self::GROUP ); } $this->schedule(); }
 	public function reschedule(): void { $this->scheduler->unschedule( self::DAILY_HOOK, array(), self::GROUP ); if ( $this->settings->pickup_auto_sync_enabled() ) { $this->schedule(); } }
 	public function start_manual(): bool { return $this->start(); }

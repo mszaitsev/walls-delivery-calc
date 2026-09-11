@@ -12,8 +12,6 @@ use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
 use WallsShop\WDC\Locations\Fias\FiasRateLimiter;
-use WallsShop\WDC\Locations\Gar\GarSyncManager;
-use WallsShop\WDC\Locations\Import\FiasImportManager;
 use WallsShop\WDC\Locations\Import\GarPlacesCsvImporter;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Import\LocationIncrementalUpdateService;
@@ -54,8 +52,6 @@ final class LocationsAdminPage {
 		private LocationSearchService $search_service,
 		private LocationImportService $import_service,
 		private ?FiasRateLimiter $fias_limiter = null,
-		private ?GarSyncManager $gar_sync = null,
-		private ?FiasImportManager $fias_import = null,
 		private ?SettingsRepository $settings = null,
 		private ?FiasCredentials $fias_credentials = null,
 		private ?GarPlacesCsvImporter $gar_importer = null,
@@ -154,7 +150,6 @@ final class LocationsAdminPage {
 				<p><strong><?php echo esc_html__( 'Runtime-нормализация:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html__( 'временно отключена до проверки API', 'walls-delivery-calc' ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'Источник населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html__( 'локальная база', 'walls-delivery-calc' ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'FIAS limiter:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->limiter_label() ); ?></span></p>
-				<p><strong><?php echo esc_html__( 'GAR sync:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->gar_status_label() ); ?></span></p>
 				<?php if ( ! $show_deep_counts ) : ?>
 					<p><a class="button" href="<?php echo esc_attr( $deep_counts_url ); ?>"><?php echo esc_html__( 'Показать подробные счетчики', 'walls-delivery-calc' ); ?></a></p>
 				<?php endif; ?>
@@ -1674,16 +1669,4 @@ final class LocationsAdminPage {
 		return null === $count ? '0' : (string) $count;
 	}
 
-	private function gar_status_label(): string {
-		if ( ! $this->gar_sync instanceof GarSyncManager ) {
-			return 'n/a';
-		}
-
-		$status = $this->gar_sync->status();
-		if ( array() === $status ) {
-			return 'not checked';
-		}
-
-		return ! empty( $status['pending'] ) ? 'pending changes detected' : 'no pending changes';
-	}
 }

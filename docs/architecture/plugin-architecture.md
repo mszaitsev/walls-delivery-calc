@@ -1,5 +1,7 @@
 # Plugin Architecture
 
+0.155.20 centralizes Action Scheduler readiness and deferred owner callbacks in the infrastructure wrapper. Ozon and Calendar register execution hooks immediately but perform datastore reads/writes only after the official `action_scheduler_init` boundary. The obsolete prepared-dataset and automatic GAR/SPAS owners are removed; one versioned infrastructure cleanup retires their queued actions and unused options after the same readiness boundary. Manual GAR CSV import, incremental update, backup/restore, and archive-export tooling retain their independent owners.
+
 0.155.19 extends the existing calendar `TimezoneService` as the single WDC `Asia/Novosibirsk` owner for local-clock scheduling and admin formatting. `ScheduledTaskCatalog` is a read-only descriptor provider: scheduler owners retain their settings and execution logic, while the overview reads real WP-Cron/Action Scheduler next timestamps without repairing or running jobs.
 
 0.155.18 keeps PEK mode separation inside the carrier-owned quote runtime. `PekCheckoutQuoteContextResolver` prepares independent pickup and courier option/error contexts; failure of findzone or terminal discovery cannot suppress a courier calculator attempt when the canonical destination can build a documented address/coordinate payload. Generic checkout, cache, order-admin, and Shipment Framework interfaces are unchanged.
@@ -8,7 +10,7 @@
 
 0.155.16 correction: postal_code is enrichment-owned, never a GAR changed field. The retired location alias index is no longer generated, exported or used by runtime. Search uses searchable_text and canonical hierarchy fields. Backup/restore and incremental apply swap locations only. Migration 0064 drops only the canonical live alias table; pending migrations run even at unchanged plugin version. Legacy alias backup/temporary tables are retained inert. Finish or cancel an older update before deployment and start a fresh GAR analysis; do not resume its pre-correction diff.
 
-Version: 0.155.19
+Version: 0.155.20
 
 ## One-Click GAR Update
 

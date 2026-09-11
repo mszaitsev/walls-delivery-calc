@@ -36,11 +36,13 @@ $overview = (string) file_get_contents( $root . '/src/Admin/AdminMenu.php' );
 $dpd = (string) file_get_contents( $root . '/src/Carriers/Dpd/Pickup/DpdPickupPointAutoSync.php' );
 $yandex = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2Runner.php' );
 $ozon = (string) file_get_contents( $root . '/src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupScheduler.php' );
-$expected_keys = array( 'shipment_statuses', 'russian_post_pickup', 'ozon_pickup', 'yandex_geo', 'dpd_pickup', 'gar', 'fias', 'calendar' );
+$expected_keys = array( 'shipment_statuses', 'russian_post_pickup', 'ozon_pickup', 'yandex_geo', 'dpd_pickup', 'calendar' );
 foreach ( $expected_keys as $key ) {
 	scheduled_task_timezone_assert( str_contains( $catalog, "'" . $key . "'" ), 'Catalog must include known task key: ' . $key );
 }
 scheduled_task_timezone_assert( str_contains( $catalog, "TASK_KEYS = array( '" . implode( "', '", $expected_keys ) . "' )" ), 'Catalog inventory contract must preserve the exact presentation order.' );
+scheduled_task_timezone_assert( ! str_contains( $catalog, "'fias'" ) && ! str_contains( $catalog, 'Проверка подготовленного FIAS dataset' ), 'Retired prepared FIAS placeholder must not appear in the catalog.' );
+scheduled_task_timezone_assert( ! str_contains( $catalog, "'gar'" ) && ! str_contains( $catalog, 'Проверка обновлений GAR' ), 'Retired automatic GAR check must not appear in the catalog.' );
 scheduled_task_timezone_assert( str_contains( $catalog, "'Каждые ' . \$this->shipment_status_auto_sync->format_interval_minutes" ) && str_contains( $catalog, "'Первый понедельник месяца в 09:00'" ), 'Catalog must show the effective status interval and monthly calendar schedule.' );
 scheduled_task_timezone_assert( str_contains( $catalog, "'Отключена'" ) && str_contains( $catalog, "'Не запланировано'" ) && str_contains( $catalog, "'Запланировано'" ), 'Catalog must distinguish disabled, missing, and scheduled states.' );
 scheduled_task_timezone_assert( str_contains( $catalog, 'pickup_autosync_times()' ) && ! str_contains( $catalog, 'pickup_autosync_time_options()' ), 'Overview must use effective DPD slots only.' );

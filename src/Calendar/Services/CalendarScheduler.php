@@ -21,7 +21,7 @@ final class CalendarScheduler {
 
 	public function register(): void {
 		add_action( self::HOOK, array( $this, 'run' ) );
-		add_action( 'init', array( $this, 'schedule' ) );
+		$this->scheduler->when_initialized( self::class, array( $this, 'schedule' ) );
 	}
 
 	public function schedule(): void {
