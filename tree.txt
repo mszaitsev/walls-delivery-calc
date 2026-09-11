@@ -4,7 +4,6 @@ Generated for Walls Delivery Calc 1.0.0
 .
 |-- tree.txt
 |-- .gitignore
-|-- assets/admin/.gitkeep
 |-- assets/admin/calendar-admin.css
 |-- assets/admin/calendar-admin.js
 |-- assets/admin/delivery-services-shop-processing.js
@@ -35,7 +34,6 @@ Generated for Walls Delivery Calc 1.0.0
 |-- assets/admin/shipments/shipment-preview.js
 |-- assets/admin/shipments/shipment-status.js
 |-- assets/admin/yandex-delivery-pickup-v2-runner.js
-|-- assets/frontend/.gitkeep
 |-- assets/frontend/checkout-address-fields.js
 |-- assets/frontend/checkout-address-suggestions.css
 |-- assets/frontend/checkout-address-suggestions.js
@@ -91,7 +89,6 @@ Generated for Walls Delivery Calc 1.0.0
 |-- src/Admin/AdminNotices.php
 |-- src/Admin/ScheduledTaskCatalog.php
 |-- src/Admin/SettingsAdminPage.php
-|-- src/Calendar/.gitkeep
 |-- src/Calendar/Admin/CalendarAdminPage.php
 |-- src/Calendar/CalendarTypes.php
 |-- src/Calendar/Services/CalendarScheduler.php
@@ -101,8 +98,6 @@ Generated for Walls Delivery Calc 1.0.0
 |-- src/Calendar/Services/TimezoneService.php
 |-- src/Calendar/Services/YearGenerator.php
 |-- src/Calendar/Storage/CalendarRepository.php
-|-- src/Calendar/ValueObjects/.gitkeep
-|-- src/Carriers/.gitkeep
 |-- src/Carriers/Cdek/Api/CdekApiClient.php
 |-- src/Carriers/Cdek/Api/CdekApiException.php
 |-- src/Carriers/Cdek/Api/CdekApiResponse.php
@@ -436,7 +431,6 @@ Generated for Walls Delivery Calc 1.0.0
 |-- src/DeliveryServices/DeliveryServiceRegistry.php
 |-- src/DeliveryServices/DeliveryServiceRepository.php
 |-- src/DeliveryServices/DeliveryServiceSettingsRepository.php
-|-- src/Domain/.gitkeep
 |-- src/Domain/Address/Address.php
 |-- src/Domain/Address/AddressNormalizationResult.php
 |-- src/Domain/Calendar/CalendarDay.php
@@ -472,7 +466,6 @@ Generated for Walls Delivery Calc 1.0.0
 |-- src/Infrastructure/Settings/CheckoutDeliveryMessageSettings.php
 |-- src/Infrastructure/Settings/PlatformRuntimeSettings.php
 |-- src/Infrastructure/Settings/SettingsRepository.php
-|-- src/Locations/.gitkeep
 |-- src/Locations/Admin/LocationAdminJsonResponse.php
 |-- src/Locations/Admin/LocationDatabaseBackupAdmin.php
 |-- src/Locations/Admin/LocationsAdminPage.php
@@ -546,7 +539,6 @@ Generated for Walls Delivery Calc 1.0.0
 |-- src/Pickup/Search/PickupAddressSearchService.php
 |-- src/Pickup/Services/PickupPointLocationResolver.php
 |-- src/Pickup/Storage/PickupPointRepository.php
-|-- src/Rules/.gitkeep
 |-- src/Rules/Admin/RuleAdminContext.php
 |-- src/Rules/Admin/RuleConditionUiSchema.php
 |-- src/Rules/Admin/RulesAdminPage.php
@@ -567,7 +559,6 @@ Generated for Walls Delivery Calc 1.0.0
 |-- src/Rules/ValueObjects/RuleOperationBases.php
 |-- src/Rules/ValueObjects/RuleOperationTypes.php
 |-- src/Rules/ValueObjects/RuleOperators.php
-|-- src/Shipments/.gitkeep
 |-- src/Shipments/Admin/Ajax/ShipmentActualCostAjaxController.php
 |-- src/Shipments/Admin/Ajax/ShipmentAddressAjaxController.php
 |-- src/Shipments/Admin/Ajax/ShipmentAdminAjaxService.php
