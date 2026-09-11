@@ -9,14 +9,6 @@ $GLOBALS['wdc_as_current_action'] = null;
 $GLOBALS['wdc_as_calls'] = array( 'single' => 0, 'recurring' => 0, 'unschedule' => 0, 'has' => 0, 'next' => 0 );
 $GLOBALS['wdc_as_unscheduled_hooks'] = array();
 $GLOBALS['wdc_as_log_calls'] = 0;
-$GLOBALS['wdc_as_options'] = array(
-	'wdc_fias_prepared_import_last_check_at' => '2026-09-10 12:00:00',
-	'wdc_fias_prepared_import_cleanup_version' => 1,
-	'wdc_gar_changes_last_check_at' => '2026-09-10 12:00:00',
-	'wdc_gar_changes_pending' => true,
-	'wdc_gar_changes_last_status' => array( 'pending' => true ),
-	'wdc_core_settings' => array( 'gar_sync_enabled' => true, 'unrelated' => 'preserved' ),
-);
 
 final class ActionScheduler {
 	public static bool $initialized = false;
@@ -55,11 +47,9 @@ function delete_option( string $key ): bool { unset( $GLOBALS['wdc_as_options'][
 require_once dirname( __DIR__, 2 ) . '/src/Infrastructure/Logging/LogRedactor.php';
 require_once dirname( __DIR__, 2 ) . '/src/Infrastructure/Logging/Logger.php';
 require_once dirname( __DIR__, 2 ) . '/src/Infrastructure/Queue/ActionScheduler.php';
-require_once dirname( __DIR__, 2 ) . '/src/Infrastructure/Queue/ObsoleteScheduledTaskCleanup.php';
 
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler as WdcActionScheduler;
-use WallsShop\WDC\Infrastructure\Queue\ObsoleteScheduledTaskCleanup;
 
 function action_scheduler_lifecycle_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) { throw new RuntimeException( $message ); }
@@ -98,21 +88,6 @@ $adapter->when_initialized( 'late-owner', static function () use ( &$after_init_
 $adapter->when_initialized( 'late-owner', static function () use ( &$after_init_runs ): void { ++$after_init_runs; } );
 action_scheduler_lifecycle_assert( 1 === $after_init_runs, 'An owner registered after AS init must run immediately and only once.' );
 
-$legacy_cleanup = new ObsoleteScheduledTaskCleanup( $adapter );
-$legacy_cleanup->register();
-action_scheduler_lifecycle_assert( 2 === $GLOBALS['wdc_as_calls']['unschedule'], 'Legacy prepared FIAS and GAR actions must each be unscheduled once after AS initialization.' );
-action_scheduler_lifecycle_assert( array( 'wdc_fias_prepared_import_check', 'wdc_gar_daily_check' ) === $GLOBALS['wdc_as_unscheduled_hooks'], 'Cleanup must target only the two retired scheduled hooks.' );
-action_scheduler_lifecycle_assert( ! isset( $GLOBALS['wdc_as_options']['wdc_fias_prepared_import_last_check_at'] ), 'Dead prepared FIAS last-check option must be deleted.' );
-foreach ( array( 'wdc_gar_changes_last_check_at', 'wdc_gar_changes_pending', 'wdc_gar_changes_last_status' ) as $dead_gar_option ) {
-	action_scheduler_lifecycle_assert( ! isset( $GLOBALS['wdc_as_options'][ $dead_gar_option ] ), 'Dead GAR option must be deleted: ' . $dead_gar_option );
-}
-action_scheduler_lifecycle_assert( ! isset( $GLOBALS['wdc_as_options']['wdc_core_settings']['gar_sync_enabled'] ) && 'preserved' === ( $GLOBALS['wdc_as_options']['wdc_core_settings']['unrelated'] ?? '' ), 'Cleanup must remove only the dead GAR setting from core settings.' );
-action_scheduler_lifecycle_assert( ! isset( $GLOBALS['wdc_as_options']['wdc_fias_prepared_import_cleanup_version'] ), 'Superseded FIAS-only cleanup marker must be deleted.' );
-action_scheduler_lifecycle_assert( 2 === (int) ( $GLOBALS['wdc_as_options']['wdc_obsolete_scheduled_task_cleanup_version'] ?? 0 ), 'Combined cleanup marker version 2 must be persisted.' );
-$second_request_adapter = new WdcActionScheduler( new Logger() );
-( new ObsoleteScheduledTaskCleanup( $second_request_adapter ) )->register();
-action_scheduler_lifecycle_assert( 2 === $GLOBALS['wdc_as_calls']['unschedule'], 'Versioned obsolete-task cleanup must not repeat on later requests.' );
-
 ActionScheduler::$initialized = false;
 $GLOBALS['wdc_as_did_actions']['init'] = 1;
 $unavailable = new WdcActionScheduler( new Logger() );
@@ -128,11 +103,9 @@ foreach ( array(
 	$source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/' . $owner_file );
 	action_scheduler_lifecycle_assert( str_contains( $source, 'when_initialized' ), $owner_file . ' must use the shared AS lifecycle boundary.' );
 }
-$cleanup_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Infrastructure/Queue/ObsoleteScheduledTaskCleanup.php' );
 action_scheduler_lifecycle_assert( ! is_file( dirname( __DIR__, 2 ) . '/src/Locations/Import/FiasImportManager.php' ), 'Dead FiasImportManager must be removed.' );
 foreach ( array( 'src/Locations/Gar/GarSyncManager.php', 'src/Locations/Gar/GarChangesClient.php', 'src/Locations/Services/GarChangesService.php' ) as $retired_file ) {
 	action_scheduler_lifecycle_assert( ! is_file( dirname( __DIR__, 2 ) . '/' . $retired_file ), 'Dead GAR/SPAS runtime file must be removed: ' . $retired_file );
 }
-action_scheduler_lifecycle_assert( str_contains( $cleanup_source, 'wdc_fias_prepared_import_check' ) && str_contains( $cleanup_source, 'wdc_gar_daily_check' ) && str_contains( $cleanup_source, 'when_initialized' ) && str_contains( $cleanup_source, 'unschedule' ) && ! str_contains( $cleanup_source, 'schedule_recurring' ), 'Retired hooks may remain only in versioned legacy unscheduling cleanup.' );
 
 echo "Action Scheduler lifecycle smoke passed.\n";

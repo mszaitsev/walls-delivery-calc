@@ -80,6 +80,14 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			$outcomes[ $mode ] = $outcome['diagnostic'];
 			if ( $outcome['rate'] instanceof DeliveryRate ) {
 				$rates[] = $outcome['rate'];
+			} elseif ( $this->is_technical_mode_failure( $outcome['diagnostic'] ) ) {
+				$this->logger->warning(
+					'PEK checkout quote mode failed.',
+					array_merge(
+						array( 'carrier' => self::KEY, 'mode' => $mode, 'location_id' => (int) ( $context['location_id'] ?? 0 ) ),
+						$this->safe_mode_failure_context( $outcome['diagnostic'] )
+					)
+				);
 			}
 		}
 
@@ -161,19 +169,6 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			$code = $mode === PekQuoteOptions::MODE_PICKUP && ! empty( $context['pickup_options']['selected'] )
 				? 'pek_selected_terminal_quote_failed'
 				: $result->error_code;
-			$this->logger->warning(
-				'PEK checkout quote mode unavailable.',
-				array(
-					'carrier' => self::KEY,
-					'mode' => $mode,
-					'error_code' => $code,
-					'failure_stage' => $result->failure_stage,
-					'location_id' => (int) ( $context['location_id'] ?? 0 ),
-					'http_status' => $result->http_status,
-					'receiver_warehouse_source' => (string) ( $context['pickup_options']['warehouse_source'] ?? '' ),
-				)
-			);
-
 			return array(
 				'rate' => null,
 				'diagnostic' => array(
@@ -198,7 +193,6 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			$error = is_array( $context['pickup_options_error'] ?? null )
 				? $context['pickup_options_error']
 				: array( 'success' => false, 'error_code' => 'pek_checkout_pickup_options_missing' );
-			$this->log_pickup_options_error( $context, $error );
 			return array( 'rate' => null, 'diagnostic' => $error );
 		}
 
@@ -218,8 +212,6 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			'failure_stage' => $result->failure_stage,
 			'http_status' => $result->http_status,
 		);
-		$this->log_pickup_failure( $context, $result, $code, $selected, false, false );
-
 		if ( ! $selected || 'pek_selected_terminal_quote_failed' !== $code ) {
 			return array( 'rate' => null, 'diagnostic' => $selected_attempt );
 		}
@@ -246,7 +238,6 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 		$recovery_context['pickup_options'] = $recovery_pickup;
 		$recovery_result = $this->quotes->calculate( $request, $preliminary_options );
 		if ( $recovery_result->success ) {
-			$this->log_pickup_failure( $context, $result, $code, true, true, true );
 			return array(
 				'rate' => $this->rate_from_result( $request, $recovery_result, $recovery_context, $this->pickup_rejection_meta() ),
 				'diagnostic' => array(
@@ -261,7 +252,6 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			);
 		}
 
-		$this->log_pickup_failure( $recovery_context, $recovery_result, $recovery_result->error_code, false, true, false );
 		return array(
 			'rate' => null,
 			'diagnostic' => array(
@@ -274,44 +264,6 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 					'http_status' => $recovery_result->http_status,
 				),
 			),
-		);
-	}
-
-	/** @param array<string,mixed> $context */
-	private function log_pickup_options_error( array $context, array $error ): void {
-		$this->logger->warning(
-			'PEK checkout pickup preliminary options unavailable.',
-			array(
-				'carrier' => self::KEY,
-				'mode' => PekQuoteOptions::MODE_PICKUP,
-				'error_code' => (string) ( $error['error_code'] ?? 'pek_checkout_pickup_options_missing' ),
-				'failure_stage' => (string) ( $error['failure_stage'] ?? 'checkout_context' ),
-				'endpoint' => (string) ( $error['endpoint'] ?? '' ),
-				'method' => (string) ( $error['method'] ?? '' ),
-				'http_status' => $error['http_status'] ?? '',
-				'location_id' => (int) ( $context['location_id'] ?? 0 ),
-				'cache_hit' => ! empty( $error['cache_hit'] ),
-				'api_source' => (string) ( $error['api_source'] ?? '' ),
-			)
-		);
-	}
-
-	/** @param array<string,mixed> $context */
-	private function log_pickup_failure( array $context, PekQuoteResult $result, string $code, bool $selected, bool $recovery_attempted, bool $recovery_success ): void {
-		$this->logger->warning(
-			'PEK checkout quote mode unavailable.',
-			array(
-				'carrier' => self::KEY,
-				'mode' => PekQuoteOptions::MODE_PICKUP,
-				'selected_terminal' => $selected,
-				'error_code' => $code,
-				'failure_stage' => $result->failure_stage,
-				'location_id' => (int) ( $context['location_id'] ?? 0 ),
-				'http_status' => $result->http_status,
-				'receiver_warehouse_source' => (string) ( $context['pickup_options']['warehouse_source'] ?? '' ),
-				'recovery_attempted' => $recovery_attempted,
-				'recovery_success' => $recovery_success,
-			)
 		);
 	}
 
@@ -447,9 +399,33 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 
 	/** @param array<string,mixed> $diagnostics */
 	private function empty_quote( QuoteRequest $request, string $reason, array $diagnostics ): DeliveryQuote {
-		$this->logger->warning( 'PEK checkout quote returned empty.', array_merge( array( 'carrier' => self::KEY, 'reason' => $reason ), $diagnostics ) );
-
 		return new DeliveryQuote( self::KEY . ':' . sha1( $reason . '|' . $request->calculation_date ), self::KEY, $request->destination, $request->package, array(), false, $reason, 'Расчёт ПЭК временно недоступен.', false, 'api', array_merge( array( 'fallback_reason' => $reason ), $diagnostics ) );
+	}
+
+	/** @param array<string,mixed> $diagnostic */
+	private function is_technical_mode_failure( array $diagnostic ): bool {
+		$status = (int) ( $diagnostic['http_status'] ?? 0 );
+		$stage = strtolower( trim( (string) ( $diagnostic['failure_stage'] ?? '' ) ) );
+		$code = strtolower( trim( (string) ( $diagnostic['error_code'] ?? '' ) ) );
+
+		return $status >= 400
+			|| in_array( $stage, array( 'transport', 'api', 'parse', 'contract' ), true )
+			|| str_starts_with( $code, 'pek_http_' )
+			|| str_contains( $code, 'transport' )
+			|| str_contains( $code, 'invalid_response' )
+			|| str_contains( $code, 'unexpected_response' );
+	}
+
+	/** @param array<string,mixed> $diagnostic @return array<string,mixed> */
+	private function safe_mode_failure_context( array $diagnostic ): array {
+		$result = array();
+		foreach ( array( 'error_code', 'failure_stage', 'endpoint', 'method', 'http_status', 'cache_hit', 'api_source', 'api_error_message' ) as $key ) {
+			if ( is_scalar( $diagnostic[ $key ] ?? null ) ) {
+				$result[ $key ] = $diagnostic[ $key ];
+			}
+		}
+
+		return $result;
 	}
 
 	/** @return array<string,mixed> */

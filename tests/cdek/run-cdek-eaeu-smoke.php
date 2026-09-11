@@ -22,7 +22,6 @@ $settings = cdek_eaeu_source( 'src/Carriers/Cdek/CdekSettings.php' );
 $carrier = cdek_eaeu_source( 'src/Carriers/Runtime/CdekCarrier.php' );
 $manager = cdek_eaeu_source( 'src/DeliveryServices/DeliveryServiceManager.php' );
 $admin = cdek_eaeu_source( 'src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
-$migration = cdek_eaeu_source( 'database/migrations/0042_seed_cdek_eaeu_countries.php' );
 $resolver = cdek_eaeu_source( 'src/Carriers/Cdek/CdekLocationResolver.php' );
 $points = cdek_eaeu_source( 'src/Pickup/Cdek/CdekDeliveryPointService.php' );
 $checkout_js = cdek_eaeu_source( 'assets/frontend/pickup-map/wdc-pickup-checkout.js' );
@@ -43,7 +42,7 @@ cdek_eaeu_assert( str_contains( $settings, "SUPPORTED_COUNTRIES = array( 'RU', '
 cdek_eaeu_assert( str_contains( $carrier, 'supports_international: true' ) && str_contains( $carrier, 'CdekSettings::SUPPORTED_COUNTRIES' ), 'CDEK carrier must support international through one existing carrier.' );
 cdek_eaeu_assert( ! str_contains( $carrier . $manager . $admin, 'cdek_international' ) && ! str_contains( $carrier . $manager . $admin, 'CdekInternational' ), 'CDEK EAEU must not introduce separate carrier/service keys.' );
 cdek_eaeu_assert( str_contains( $manager, 'cdek_service_exists' ) && str_contains( $manager, 'SUPPORTED_COUNTRIES' ) && ! str_contains( $manager, 'replace_countries( (int) $cdek->id, array( \'RU\' )' ), 'ensure_builtin_services must seed CDEK countries only on fresh creation.' );
-cdek_eaeu_assert( str_contains( $migration, "service_key = %s" ) && str_contains( $migration, "array( 'RU' )" ) && str_contains( $migration, "array( 'RU', 'AM', 'BY', 'KZ', 'KG' )" ), 'Migration must seed existing empty/RU-only CDEK countries once.' );
+cdek_eaeu_assert( str_contains( $manager, 'CdekSettings::SUPPORTED_COUNTRIES' ), 'Fresh CDEK service creation must seed the current supported EAEU countries.' );
 cdek_eaeu_assert( str_contains( $admin, 'name="countries[]"' ) && str_contains( $admin, 'render_cdek_country_checkboxes' ) && str_contains( $admin, 'array_intersect' ), 'CDEK admin must use generic countries[] save flow with allowlisted checkboxes.' );
 
 cdek_eaeu_assert( str_contains( $dpd_import, 'process_foreign_row' ) && str_contains( $dpd_import, "array( 'AM', 'BY', 'KZ', 'KG' )" ) && str_contains( $dpd_import, 'upsert_candidate' ) && ! str_contains( $dpd_import, 'save_dpd_city_id( $saved_id' ), 'DPD geography import must create foreign locations and stage DPD city mappings for finalization.' );

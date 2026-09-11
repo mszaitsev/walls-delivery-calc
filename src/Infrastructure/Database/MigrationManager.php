@@ -57,9 +57,15 @@ final class MigrationManager {
 			}
 
 			$applied[] = $migration;
-			update_option( self::MIGRATIONS_OPTION_NAME, array_values( array_unique( $applied ) ), false );
+			update_option(
+				self::MIGRATIONS_OPTION_NAME,
+				array_values( array_intersect( array_map( 'basename', $files ), $applied ) ),
+				false
+			);
 		}
 
+		$current_migrations = array_map( 'basename', $files );
+		update_option( self::MIGRATIONS_OPTION_NAME, array_values( array_intersect( $current_migrations, $applied ) ), false );
 		update_option( self::OPTION_NAME, $this->code_version, false );
 	}
 

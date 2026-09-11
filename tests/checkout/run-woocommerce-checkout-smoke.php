@@ -733,7 +733,7 @@ $_POST = array(
 );
 $coordinate_db->checkout_hierarchy_candidate_calls = 0;
 try {
-	$post_manual_request = ( new WooCommercePackageMapper( null, $post_manual_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $post_manual_package );
+	$post_manual_request = ( new WooCommercePackageMapper( null, $post_manual_session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( $post_manual_package );
 } finally {
 	$_POST = $previous_post;
 }
@@ -760,7 +760,7 @@ $_POST = array(
 );
 $coordinate_db->checkout_hierarchy_candidate_calls = 0;
 try {
-	$post_manual_stale_marker_request = ( new WooCommercePackageMapper( null, new CheckoutSessionManager(), null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $post_manual_stale_marker_package );
+	$post_manual_stale_marker_request = ( new WooCommercePackageMapper( null, new CheckoutSessionManager(), null, $coordinate_repository, null, $coordinate_location_search ) )->map( $post_manual_stale_marker_package );
 } finally {
 	$_POST = $previous_post;
 }
@@ -784,7 +784,7 @@ $manual_incomplete_package['destination']['city'] = 'Тестоград';
 $manual_incomplete_package['destination']['state'] = '';
 $manual_incomplete_package['destination']['postcode'] = '';
 $coordinate_db->checkout_hierarchy_candidate_calls = 0;
-$manual_incomplete_request = ( new WooCommercePackageMapper( null, $manual_incomplete_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $manual_incomplete_package );
+$manual_incomplete_request = ( new WooCommercePackageMapper( null, $manual_incomplete_session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( $manual_incomplete_package );
 wc_checkout_smoke_assert( 'manual' === (string) ( $manual_incomplete_request->customer_context['selected_source'] ?? '' ) && ! empty( $manual_incomplete_request->customer_context['is_manual_city'] ), 'Package mapper must preserve incomplete manual session source in QuoteRequest customer_context.' );
 wc_checkout_smoke_assert( 'session_manual' === (string) ( $manual_incomplete_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must use explicit session_manual context for incomplete manual city.' );
 wc_checkout_smoke_assert( 'Тестоград' === $manual_incomplete_request->destination->city && '' === $manual_incomplete_request->destination->region_name && '' === $manual_incomplete_request->destination->postcode, 'Package mapper must keep incomplete manual destination fields for quote gating.' );
@@ -808,13 +808,13 @@ $manual_complete_package['destination']['city'] = 'Тестоград';
 $manual_complete_package['destination']['state'] = 'Тестовая область';
 $manual_complete_package['destination']['postcode'] = '123456';
 $coordinate_db->checkout_hierarchy_candidate_calls = 0;
-$manual_complete_request = ( new WooCommercePackageMapper( null, $manual_complete_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $manual_complete_package );
+$manual_complete_request = ( new WooCommercePackageMapper( null, $manual_complete_session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( $manual_complete_package );
 wc_checkout_smoke_assert( 'manual' === (string) ( $manual_complete_request->customer_context['selected_source'] ?? '' ) && ! empty( $manual_complete_request->customer_context['is_manual_city'] ), 'Package mapper must preserve manual source after user completes manual region/postcode.' );
 wc_checkout_smoke_assert( 'Тестовая область' === $manual_complete_request->destination->region_name && '123456' === $manual_complete_request->destination->postcode, 'Package mapper must keep completed manual region/postcode in QuoteRequest destination.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Completed manual session context must also skip backend checkout location recovery.' );
 $coordinate_session = new CheckoutSessionManager();
 $coordinate_session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'latitude' => 54.9833, 'longitude' => 82.8964 ) );
-$coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
+$coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request->customer_context['destination_longitude'] ?? 0 ), 'Canonical DB coordinates must override stale session coordinates for a known location_id.' );
 wc_checkout_smoke_assert( $coordinate_db->location_find_by_id_calls > 0, 'Package mapper must query the canonical location even when session coordinates are complete.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when selected city/session coordinates are already complete.' );
@@ -822,7 +822,7 @@ wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_cal
 $coordinate_session_id = new CheckoutSessionManager();
 $coordinate_session_id->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск' ) );
 $coordinate_db->checkout_hierarchy_candidate_calls = 0;
-$coordinate_request_id = ( new WooCommercePackageMapper( null, $coordinate_session_id, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
+$coordinate_request_id = ( new WooCommercePackageMapper( null, $coordinate_session_id, null, $coordinate_repository, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( '650000' === (string) ( $coordinate_request_id->customer_context['selected_location_id'] ?? '' ), 'Package mapper must preserve canonical selected_location_id.' );
 wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request_id->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request_id->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must resolve destination coordinates from canonical selected_location_id.' );
 wc_checkout_smoke_assert( 'session' === (string) ( $coordinate_request_id->customer_context['location_context_source'] ?? '' ), 'Package mapper must keep the session fast path when canonical location_id already exists.' );
@@ -844,7 +844,7 @@ $assert_read_only_package_identity = static function ( int $location_id, string 
 	$package['destination'] = array( 'country' => 'RU', 'city' => $city, 'state' => '', 'postcode' => '', 'address_1' => '' );
 	$coordinate_db->location_single_lookup_calls = 0;
 	$coordinate_db->checkout_hierarchy_candidate_calls = 0;
-	$request = ( new WooCommercePackageMapper( $homonym_runtime( $session ), $session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $package );
+	$request = ( new WooCommercePackageMapper( $homonym_runtime( $session ), $session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( $package );
 	wc_checkout_smoke_assert( $location_id === (int) ( $session->selected_city()['id'] ?? 0 ) && $location_id === (int) ( $session->city_context()['location_id'] ?? 0 ), $city . ' package mapping must not mutate canonical session identity.' );
 	wc_checkout_smoke_assert( (string) $location_id === (string) ( $request->customer_context['selected_location_id'] ?? '' ), $city . ' QuoteRequest must preserve canonical selected_location_id.' );
 	wc_checkout_smoke_assert( $latitude === (float) ( $request->customer_context['destination_latitude'] ?? 0 ) && $longitude === (float) ( $request->customer_context['destination_longitude'] ?? 0 ), $city . ' coordinates must come from the canonical DB row.' );
@@ -861,7 +861,7 @@ $no_coordinates_session->save_city_context( $no_coordinates_selection );
 $no_coordinates_package = wc_checkout_smoke_package();
 $no_coordinates_package['destination'] = array( 'country' => 'RU', 'city' => 'Безкоординатный', 'state' => '', 'postcode' => '' );
 $coordinate_db->location_single_lookup_calls = 0;
-$no_coordinates_request = ( new WooCommercePackageMapper( $homonym_runtime( $no_coordinates_session ), $no_coordinates_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $no_coordinates_package );
+$no_coordinates_request = ( new WooCommercePackageMapper( $homonym_runtime( $no_coordinates_session ), $no_coordinates_session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( $no_coordinates_package );
 wc_checkout_smoke_assert( 154961 === (int) ( $no_coordinates_session->selected_city()['id'] ?? 0 ) && 154961 === (int) ( $no_coordinates_session->city_context()['location_id'] ?? 0 ), 'Coordinate-less canonical location must preserve identity.' );
 wc_checkout_smoke_assert( 54.5 === (float) ( $no_coordinates_request->customer_context['destination_latitude'] ?? 0 ) && 83.5 === (float) ( $no_coordinates_request->customer_context['destination_longitude'] ?? 0 ), 'Coordinate-less canonical DB row must keep the existing session/map fallback available.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->location_single_lookup_calls, 'Coordinate-less canonical location must not trigger city-only substitution.' );
@@ -986,7 +986,7 @@ $atbasar_package['destination']['city'] = 'поселок Атбасар';
 $atbasar_session = new CheckoutSessionManager();
 $atbasar_session->clear_normalized_address();
 $coordinate_db->checkout_hierarchy_candidate_calls = 0;
-$atbasar_request = ( new WooCommercePackageMapper( null, $atbasar_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $atbasar_package );
+$atbasar_request = ( new WooCommercePackageMapper( null, $atbasar_session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( $atbasar_package );
 wc_checkout_smoke_assert( '184506' === (string) ( $atbasar_request->customer_context['selected_location_id'] ?? '' ) && '184506' === (string) ( $atbasar_request->customer_context['location_id'] ?? '' ), 'Package mapper must recover canonical KZ поселок Атбасар location_id when frontend hidden ID is missing.' );
 wc_checkout_smoke_assert( 'backend_resolved' === (string) ( $atbasar_request->customer_context['location_context_source'] ?? '' ), 'Recovered checkout location context must be marked as backend_resolved.' );
 wc_checkout_smoke_assert( 1 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper backend recovery must call the injected checkout resolver exactly once when canonical ID is missing.' );
@@ -995,7 +995,7 @@ $frontend_session = new CheckoutSessionManager();
 $frontend_session->clear_normalized_address();
 $frontend_session->save_selected_city( array( 'id' => 184506, 'display_name' => 'Акмолинская обл., п Атбасар', 'place_name' => 'Атбасар', 'place_type' => 'п' ) );
 $coordinate_db->checkout_hierarchy_candidate_calls = 0;
-$frontend_request = ( new WooCommercePackageMapper( null, $frontend_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $atbasar_package );
+$frontend_request = ( new WooCommercePackageMapper( null, $frontend_session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( $atbasar_package );
 wc_checkout_smoke_assert( '184506' === (string) ( $frontend_request->customer_context['selected_location_id'] ?? '' ) && 'frontend' === (string) ( $frontend_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must prefer existing frontend-selected canonical location_id over backend recovery.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when frontend location_id already exists.' );
 
@@ -1005,7 +1005,7 @@ $ambiguous_package['destination']['city'] = 'поселок Ивановка';
 $ambiguous_session = new CheckoutSessionManager();
 $ambiguous_session->clear_normalized_address();
 $coordinate_db->checkout_hierarchy_candidate_calls = 0;
-$ambiguous_request = ( new WooCommercePackageMapper( null, $ambiguous_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $ambiguous_package );
+$ambiguous_request = ( new WooCommercePackageMapper( null, $ambiguous_session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( $ambiguous_package );
 wc_checkout_smoke_assert( '' === (string) ( $ambiguous_request->customer_context['selected_location_id'] ?? '' ) && 'ambiguous' === (string) ( $ambiguous_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must not choose the first location when backend recovery is ambiguous.' );
 wc_checkout_smoke_assert( 1 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper ambiguous backend recovery must use the injected checkout resolver once.' );
 
@@ -1014,7 +1014,7 @@ $missing_package['destination']['city'] = 'поселок Несуществую
 $missing_session = new CheckoutSessionManager();
 $missing_session->clear_normalized_address();
 $coordinate_db->checkout_hierarchy_candidate_calls = 0;
-$missing_request = ( new WooCommercePackageMapper( null, $missing_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $missing_package );
+$missing_request = ( new WooCommercePackageMapper( null, $missing_session, null, $coordinate_repository, null, $coordinate_location_search ) )->map( $missing_package );
 wc_checkout_smoke_assert( '' === (string) ( $missing_request->customer_context['selected_location_id'] ?? '' ) && 'missing' === (string) ( $missing_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must leave location_id empty when backend recovery finds no canonical location.' );
 wc_checkout_smoke_assert( 1 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper not-found backend recovery must use the injected checkout resolver once.' );
 

@@ -338,7 +338,7 @@ $settings->set(
 		),
 	)
 );
-$postcode_client = new DaDataPostcodeClient( new DaDataTokenPool( $settings, $encryption ), new Logger(), 3 );
+$postcode_client = new DaDataPostcodeClient( new DaDataTokenPool( $settings, $encryption ), 3 );
 $carrier = new RussianPostDomesticCarrier( $domestic_settings, new RussianPostDomesticApiClient( $domestic_settings, new Logger() ), new RussianPostDomesticTariffVariantResolver(), new Logger(), $postcode_client );
 $default_objects = array_map( static fn( DomesticTariffVariant $variant ): int => $variant->object_code, ( new RussianPostDomesticTariffVariantResolver() )->defaults() );
 rpd_assert( ! array_intersect( array( 27030, 27020, 28030, 28020 ), $default_objects ), 'Deprecated domestic variants must not be created by defaults.' );
@@ -603,7 +603,7 @@ $courier_insured_objects = array_map( static fn( $rate ): string => $rate->tarif
 rpd_assert( in_array( '7020', $courier_insured_objects, true ) && ! in_array( '28020', $courier_insured_objects, true ), 'Declared-value EMS courier variants must be available with insurance and deprecated 28020 must stay out of defaults.' );
 rpd_replace_service_settings( $service_db, array_merge( $domestic_settings->all(), array( 'insurance_enabled' => false ) ) );
 
-$probe = new RussianPostCourierTariffProbeService( new Logger() );
+$probe = new RussianPostCourierTariffProbeService();
 $GLOBALS['wdc_rpd_request_urls'] = array();
 $probe_success = $probe->probe( '630200' );
 $probe_success_url = (string) ( $GLOBALS['wdc_rpd_request_urls'][0] ?? '' );

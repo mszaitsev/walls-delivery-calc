@@ -24,8 +24,6 @@ final class CarrierExecutionGuard {
 		$key     = $adapter->get_identity()->key;
 		$started = microtime( true );
 
-		$this->logger->info( 'Carrier quote started.', array( 'carrier' => $key ) );
-
 		try {
 			$quote   = $adapter->quote( $request );
 			$elapsed = microtime( true ) - $started;
@@ -34,8 +32,6 @@ final class CarrierExecutionGuard {
 				$carrier_errors[ $key ] = 'Carrier timeout threshold exceeded.';
 				$this->logger->warning( 'Carrier quote exceeded timeout threshold.', array( 'carrier' => $key, 'elapsed' => round( $elapsed, 3 ) ) );
 			}
-
-			$this->logger->info( 'Carrier quote finished.', array( 'carrier' => $key, 'rates_count' => count( $quote->rates ) ) );
 
 			return $quote;
 		} catch ( Throwable $exception ) {

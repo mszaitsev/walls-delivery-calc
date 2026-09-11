@@ -11,6 +11,16 @@ $GLOBALS['wdc_test_scripts'] = array();
 $GLOBALS['wdc_test_localized_scripts'] = array();
 $GLOBALS['wdc_test_styles'] = array();
 $GLOBALS['wdc_test_is_checkout'] = true;
+$GLOBALS['wdc_test_dbdelta_queries'] = array();
+
+if ( ! function_exists( 'dbDelta' ) ) {
+	function dbDelta( string|array $queries = '' ): array {
+		foreach ( (array) $queries as $query ) {
+			$GLOBALS['wdc_test_dbdelta_queries'][] = (string) $query;
+		}
+		return array();
+	}
+}
 
 if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $key, mixed $default = false ): mixed {
@@ -270,6 +280,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 		/** @var array<string,mixed> */
 		public array $options = array();
 
+		public function get_charset_collate(): string {
+			return '';
+		}
+
 		public function esc_like( string $text ): string {
 			return addcslashes( $text, '_%\\' );
 		}
@@ -361,7 +375,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 			$data['id'] = $this->insert_id;
 			if ( str_contains( $table, 'wdc_locations' ) ) {
 				$this->location_rows[] = $data;
-			} else {
+			} elseif ( str_ends_with( $table, 'wdc_pickup_points' ) ) {
 				$this->pickup_rows[] = $data;
 			}
 			return true;
@@ -667,6 +681,7 @@ $settings->replace( array() );
 $plugin = new Plugin( runtime_smoke_environment() );
 $plugin->register();
 $container = $plugin->container();
+runtime_smoke_assert( array() !== $GLOBALS['wdc_test_dbdelta_queries'], 'Initial schema must run before table-backed runtime services are registered.' );
 runtime_smoke_assert( $container->get( AdminMenu::class ) instanceof AdminMenu, 'Composition root must build AdminMenu.' );
 $admin_menu = $container->get( AdminMenu::class );
 ob_start();

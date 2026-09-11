@@ -87,7 +87,6 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 			}
 			try {
 				$result = DeliveryType::COURIER === $mode ? $this->quotes->quote_courier( $request ) : $this->quotes->quote_pickup( $request );
-				$this->logger->info( 'Ozon Delivery checkout quote calculated.', $this->safe_success_log_context( $result ) + array( 'delivery_type' => $mode ) );
 				$rates[] = $this->rate_from_result( $result, $mode );
 			} catch ( OzonDeliveryQuoteException $exception ) {
 				$first_error ??= $exception;
@@ -189,44 +188,6 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		if ( isset( $details['places_truncated'] ) ) { $context['places_truncated'] = (bool) $details['places_truncated']; }
 		foreach ( array( 'rows_in_bbox', 'valid_base_points', 'base_point_rejected', 'outside_radius', 'inside_radius', 'accepted', 'min_weight_rejected', 'max_weight_rejected', 'dimension_rejected', 'cargo_weight_rejected', 'cargo_dimensions_rejected', 'cargo_other_rejected', 'cargo_rejected', 'points_with_all_3_dimension_limits', 'points_with_partial_dimension_limits', 'points_without_dimension_limits', 'points_with_min_weight', 'points_without_min_weight', 'points_with_max_weight', 'points_without_max_weight', 'highest_max_weight_g' ) as $key ) {
 			if ( array_key_exists( $key, $pickup ) && is_scalar( $pickup[ $key ] ) ) { $context[ $key ] = $pickup[ $key ]; }
-		}
-
-		return $context;
-	}
-
-	/** @return array<string,mixed> */
-	private function safe_success_log_context( OzonDeliveryQuoteResult $result ): array {
-		$meta = $result->meta;
-		$context = array(
-			'carrier' => self::KEY,
-			'packages_count' => $result->package_count,
-		);
-		foreach ( array( 'total_weight_g', 'goods_weight_g', 'packaging_weight_g', 'packing_strategy', 'selected_box_format', 'total_declared_value_rub', 'declared_value_per_posting_rub', 'delivery_total_rub', 'insurance_total_rub', 'total_rub' ) as $key ) {
-			if ( array_key_exists( $key, $meta ) && is_scalar( $meta[ $key ] ) ) {
-				$context[ $key ] = $meta[ $key ];
-			}
-		}
-		foreach ( array( 'shipment_method_id', 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude', 'courier_proxy_point_id', 'courier_proxy_distance_m' ) as $key ) {
-			if ( array_key_exists( $key, $meta ) && is_scalar( $meta[ $key ] ) ) {
-				$context[ $key ] = $meta[ $key ];
-			}
-		}
-		if ( isset( $meta['selected_box_formats'] ) && is_array( $meta['selected_box_formats'] ) ) {
-			$context['selected_box_formats'] = array_values( array_filter( $meta['selected_box_formats'], static fn( mixed $format ): bool => is_string( $format ) ) );
-		}
-		$places = $this->safe_success_rows( $meta['ozon_delivery_places'] ?? null, array( 'weight_g', 'length_cm', 'width_cm', 'height_cm' ) );
-		if ( array() !== $places ) {
-			$context['places'] = $places;
-		}
-		if ( is_array( $meta['ozon_delivery_places'] ?? null ) && count( $meta['ozon_delivery_places'] ) > count( $places ) ) {
-			$context['places_truncated'] = true;
-		}
-		$postings = $this->safe_success_rows( $meta['postings'] ?? null, array( 'request_id', 'delivery_cost_rub', 'insurance_cost_rub', 'total_cost_rub', 'delivery_days' ) );
-		if ( array() !== $postings ) {
-			$context['postings'] = $postings;
-		}
-		if ( is_array( $meta['postings'] ?? null ) && count( $meta['postings'] ) > count( $postings ) ) {
-			$context['postings_truncated'] = true;
 		}
 
 		return $context;

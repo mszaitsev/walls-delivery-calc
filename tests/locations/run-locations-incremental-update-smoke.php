@@ -211,7 +211,7 @@ function automatic_fixture(): array {
 	$encryption = new \WallsShop\WDC\Infrastructure\Security\EncryptionService();
 	$settings->replace( array( 'dadata_suggestions_tokens' => array( array( 'id' => 'test', 'encrypted_token' => $encryption->encrypt( 'test-token' ), 'enabled' => true, 'daily_limit' => 1000 ) ) ) );
 	$pool = new \WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool( $settings, $encryption );
-	$postcodes = new \WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient( $pool, new \WallsShop\WDC\Infrastructure\Logging\Logger() );
+	$postcodes = new \WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient( $pool );
 	$coordinates = new CoordinateClient();
 	$probe = new class {
 		public array $calls = array();
@@ -225,7 +225,6 @@ function automatic_fixture(): array {
 function drive( LocationIncrementalUpdateService $service, array $job, string $until = 'finished' ): array {
 	for ( $i = 0; $i < 1000 && $job['phase'] !== $until && ! in_array( $job['phase'], array( 'failed', 'waiting_dadata_limit' ), true ); ++$i ) {
 		$job = $service->step_job( $job );
-		incremental_smoke_assert( 'aliases_build' !== $job['phase'] && ! isset( $job['candidate_alias_table'] ), 'No alias stage or candidate table contract.' );
 		incremental_smoke_assert( isset( $job['stage_label'], $job['stage_processed'], $job['stage_total'], $job['overall_percent'] ), 'Every step has progress payload.' );
 	}
 	return $job;
@@ -292,7 +291,6 @@ foreach ( $fields->getValue( $service ) as $field ) {
 }
 incremental_smoke_assert( str_contains( $sql, "c.country_code = 'RU'" ) && ! str_contains( $sql, 'c.latitude =' ) && ! str_contains( $sql, 'c.russianpost_courier_calc_postal_code =' ), 'Production SQL preserves foreign/enrichment fields.' );
 incremental_smoke_assert( ! str_contains( $sql, 'c.postal_code =' ), 'Changed UPDATE never overwrites enrichment postcode.' );
-incremental_smoke_assert( ! str_contains( file_get_contents( __DIR__ . '/../../src/Locations/Import/LocationIncrementalUpdateService.php' ), 'aliases_build' ), 'Retired alias stage is absent from workflow and progress counters.' );
 ( new ReflectionMethod( $service, 'apply_removed_rows' ) )->invoke( $service, 'candidate', array( 'g:1001' ) );
 $sql = end( $db->sql );
 incremental_smoke_assert( str_contains( $sql, "country_code = 'RU'" ) && str_contains( $sql, 'fias_id IS NULL' ), 'Removal SQL is RU-only and handles NULL fallback FIAS.' );

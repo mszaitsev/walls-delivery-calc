@@ -20,10 +20,6 @@ final class FiasRateLimiter {
 	public function can_request(): bool {
 		$stats = $this->stats();
 		$can = $stats['minute_count'] < $stats['minute_limit'] && $stats['day_count'] < $stats['daily_limit'];
-		if ( ! $can ) {
-			$this->logger->limiter_block( 'normalize', $stats );
-		}
-
 		return $can;
 	}
 

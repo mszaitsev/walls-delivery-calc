@@ -378,7 +378,7 @@ foreach ( array(
 	'docs/development/development-workflow.md',
 	'docs/development/testing-and-regression.md',
 	'docs/development/coding-rules.md',
-	'docs/reference/walls-delivery-calc-tech-spec.md',
+	'docs/research/walls-delivery-calc-tech-spec-history.md',
 ) as $canonical_doc ) {
 	shipment_admin_js_structure_assert( is_file( $root . '/' . $canonical_doc ), 'Canonical documentation path must exist: ' . $canonical_doc );
 }

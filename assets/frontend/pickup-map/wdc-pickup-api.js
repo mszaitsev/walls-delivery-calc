@@ -7,13 +7,25 @@
 		if (config.nonce) {
 			headers['X-WP-Nonce'] = config.nonce;
 		}
-		return fetch((config.restUrl || '/wp-json/wdc/v1/') + path.replace(/^\/+/, ''), Object.assign({}, options || {}, { headers: headers }))
+		return fetch(requestUrl(config.restUrl || '/wp-json/wdc/v1/', path), Object.assign({}, options || {}, { headers: headers }))
 			.then(function (response) {
 				if (!response.ok) {
 					throw new Error('HTTP ' + response.status);
 				}
 				return response.json();
 			});
+	}
+
+	function requestUrl(base, path) {
+		var normalizedPath = String(path || '').replace(/^\/+/, '');
+		var queryIndex = normalizedPath.indexOf('?');
+		var route = queryIndex >= 0 ? normalizedPath.slice(0, queryIndex) : normalizedPath;
+		var query = queryIndex >= 0 ? normalizedPath.slice(queryIndex + 1) : '';
+		var url = String(base || '/wp-json/wdc/v1/') + route;
+		if (query) {
+			url += url.indexOf('?') === -1 ? '?' + query : '&' + query;
+		}
+		return url;
 	}
 
 	window.WDCPickupApi = {

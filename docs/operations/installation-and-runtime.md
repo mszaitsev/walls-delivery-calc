@@ -1,21 +1,35 @@
 # Installation And Runtime
 
-Version: 0.133.9
+Version: 1.0.0
 
-The plugin requires WordPress 6.8+, PHP 8.4+, WooCommerce 9.0+, and the main plugin file `walls-delivery-calc.php`.
+## Requirements
 
-Runtime boot:
+- WordPress 6.8+
+- WooCommerce 9.0+
+- PHP 8.4+
 
-1. plugin constants and `WDC_VERSION`;
-2. core bootstrap and autoloader;
-3. `Plugin` service registration;
-4. WordPress hooks, AJAX, REST, cron, and admin pages;
-5. migrations and startup module checks on `plugins_loaded`.
+## Production installation
 
-No production data migration is required for pre-0.122 internal wire aliases because the plugin has not been deployed to production.
+Build the package from the repository root:
 
-Shipment cost analytics creates `{$wpdb->prefix}wdc_shipment_cost_analytics` through the normal migration manager. It is a materialized read-model table rebuilt one order at a time after canonical order/shipment changes. No historical analytics import is installed because new deployments start without old orders.
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/build-release.ps1
+```
 
-PEK foundation creates its carrier-owned geography and destination terminal tables through migrations `0048` and `0049`. Migration history is not considered a complete proof of physical schema integrity, because an installer can fail silently at the WordPress `dbDelta()` boundary if postconditions are not checked. Migration `0050_repair_pek_foundation_schema.php` performs controlled PEK schema integrity recovery during the migration lifecycle: it checks `wdc_pek_location_mappings` and `wdc_pek_terminals` with the active `$wpdb->prefix`, invokes the existing repository installer only for each missing table, verifies both tables exist afterward, and throws before migration state advances if repair is incomplete. The PEK location mapping schema uses physical `mapping_precision` rather than reserved MySQL identifier `precision`; repository read/write methods translate this to the domain `precision` key. Migration `0051_migrate_pek_mapping_precision_column.php` supports legacy mapping tables that already contain physical `` `precision` `` by adding `mapping_precision` and backfilling only missing new values.
+This creates `dist/walls-delivery-calc-1.0.0.zip` with one top-level `walls-delivery-calc/` directory. Install it through **Plugins → Add Plugin → Upload Plugin**, then activate **Walls Delivery Calc**. No dependency installation or asset compilation is required on the server.
 
-PEK schema recovery is idempotent and non-destructive. It does not drop, truncate, delete, import rows, edit canonical `wdc_locations`, or call PEK APIs. Runtime repository reads/writes and PEK admin diagnostics still fail closed on SQL errors and do not create tables themselves; schema repair belongs only to installation/update control flow. PEK installers check unavailable `dbDelta()` and `$wpdb->last_error` immediately, and plugin boot logs migration failures plus an admin notice instead of allowing an unhandled site-wide fatal.
+The package contains only runtime files: the main plugin entry, `uninstall.php`, `src/`, `assets/`, and `database/`. It intentionally excludes tests, documentation, VCS files, local output, and development configuration. `src/Export-GarPlaces.ps1` is included because the Locations admin UI offers it as a protected download.
+
+## Activation and schema
+
+Runtime boot order is:
+
+1. plugin constants and autoloader;
+2. service registration in `Plugin`;
+3. WordPress, WooCommerce, AJAX, REST, cron, and admin hooks;
+4. `database/migrations/0001_initial_schema.php` through `MigrationManager`;
+5. module boot and scheduled-task registration.
+
+An empty database receives the complete 1.0 schema directly. The migration is idempotent and can normalize an already-correct development database without dropping or truncating business tables. Retired pre-1.0 tables are not created; an existing development database may retain such inert tables until an operator removes them separately.
+
+Deactivation removes no business data. Reactivation reruns safe lifecycle checks. `uninstall.php` clears only ephemeral plugin caches and does not destructively remove business tables or settings.

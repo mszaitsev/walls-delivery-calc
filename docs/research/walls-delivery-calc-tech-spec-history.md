@@ -4,8 +4,6 @@ Historical reference. Not source of truth.
 
 ## Implemented Ozon Delivery foundation
 
-Version 0.147.8 keeps the buyer-facing Ozon Delivery runtime for `Ozon до ПВЗ` and the independent `Ozon курьером` checkout rate, and adds Ozon courier shipment creation through the existing Shipment Framework lifecycle. Pickup continues to use the local pickup catalog, selected-point repricing, and shipment `delivery.delivery_point.delivery_point_id`; courier checkout uses official `/v1/order/checkout` `delivery.courier.coordinates.latitude/longitude` from server-confirmed DaData exact-address coordinates or the 1 km Ozon pickup proxy for preliminary pricing. Courier shipment create never uses that proxy as address authority. Order creation may freeze generic `_wdc_platform_structured_recipient_address` from trusted checkout DaData evidence; legacy/missing snapshots use the Woo recipient address only as input for server-side Shipment modal normalization. Ozon shipment modal normalization carries `selected_location_id` and `selected_location_fias_id` from server-owned order snapshot/meta/calculation context, ignores browser modal location/FIAS fields, and fails closed when server-owned selected location FIAS conflicts with DaData `city_fias_id`/`settlement_fias_id`. The Ozon courier modal keeps Create disabled until the existing server-side normalized address result confirms street, house/stead, required structured fields, and valid coordinates; manager edits to the original address clear the stale result until the address is analyzed again, optional apartment/entrance/floor/intercom edits do not reset normalization, and post-error busy-state release delegates button availability back to the canonical modal availability recalculation. Ozon hides the unused recipient email field, renders original address plus optional apartment/entrance/floor/intercom in the left recipient column, renders analysis action/status plus confirmed readonly postcode/country/region/city/street/house in the right delivery column, shows `Адрес для Ozon подтвержден.` after successful analysis, and shows `Не удалось распознать адрес, попробуйте исправить его.` for generic recognition failure. Failed empty normalization snapshots are consumed as empty plain fields so Array prototype methods cannot become field values. `/v1/order/create` courier payload uses official `delivery.courier` fields: required `coordinates.latitude`, `coordinates.longitude`, `zip_code`, `country`, `region`, `city`, `street`, plus optional `house_number`, `entrance`, `floor`, `apartment`, and `intercom`. Shipment-time preflight `/v1/order/checkout` is derived from the same canonical create body, preserving postings, shipment method, dimensions, declared values, recipient phone, and courier coordinates while stripping create-only delivery address fields. Browser coordinates/FIAS are not authority. Existing pickup create payload, actual-cost preflight, declared-value model, external IDs, cancellation polling, return reconciliation, status mapping settings, label filenames, creation confirmation, manual attach, order-admin selected-rate pickup context, Shipment modal point-limit validation, and local remove text remain unchanged.
-
 Delivery service country storage keeps `wp_wdc_delivery_service_countries` with the unique `service_country (service_id, country_code)` contract. Version 0.145.1 makes `replace_countries()` an exact but diff-based replace: normalized equal sets perform no writes, stale rows are deleted selectively, and missing rows use duplicate-safe UPSERT without changing existing `created_at`. This preserves bootstrap self-healing for builtin `RU` services while removing the previous DELETE-all/INSERT-all race on ordinary WordPress requests.
 
 This file preserves the old product tech spec for audit and requirement archaeology. Canonical architecture, workflow, testing, and subsystem documentation lives under `docs/README.md`. Internal paths, roadmap sections, external links, version references, and document structure below may be historical. When this reference conflicts with production code or canonical docs, use production code and canonical docs.
@@ -55,7 +53,7 @@ This file preserves the old product tech spec for audit and requirement archaeol
 * хорошие совпадения по региону поднимают регион выше;
 * при выборе города из справочника заполняем:
 
-  * город;
+* город;
   * регион;
   * базовый почтовый индекс города;
   * внутренний `fias/gar id`, если он есть;
@@ -153,7 +151,7 @@ This file preserves the old product tech spec for audit and requirement archaeol
 1. Берем дату создания заказа или текущую дату расчета на checkout.
 2. Определяем дату сдачи посылки в ТК:
 
-   * день заказа не считается днем обработки;
+* день заказа не считается днем обработки;
    * магазин обрабатывает заказ заданное количество рабочих дней;
    * срок обработки магазина настраивается в админке;
    * по умолчанию — 1 рабочий день.
@@ -233,13 +231,13 @@ This file preserves the old product tech spec for audit and requirement archaeol
 * нормализованный адрес, если нормализация успешна;
 * package snapshot:
 
-  * вес;
+* вес;
   * габариты;
   * объем;
   * объявленная стоимость;
 * тип состава грузомест:
 
-  * подробный состав по заказу WooCommerce;
+* подробный состав по заказу WooCommerce;
   * либо объединенная строка `Товары по заказу {{номер заказа WooCommerce}}`.
 
 Raw carrier quote/reference не сохраняем по умолчанию, чтобы не раздувать БД. Возможность сохранять raw API response включаем только в debug-режиме и с ротацией логов.
@@ -348,25 +346,25 @@ Rule engine применяет бизнес-правила к исходной �
 * название;
 * что изменить:
 
-  * стоимость;
+* стоимость;
   * срок;
   * комментарий;
   * доступность службы;
 * как изменить:
 
-  * увеличить на;
+* увеличить на;
   * уменьшить на;
   * равно;
 * величина изменения до 4 знаков после запятой;
 * база:
 
-  * рубли;
+* рубли;
   * % от стоимости доставки;
   * % от стоимости заказа;
   * % от стоимости заказа + доставки;
 * условия:
 
-  * 1–3 условия;
+* 1–3 условия;
   * комбинация через И/ИЛИ;
 * флаг “Скидка на доставку по акции”.
 
@@ -455,7 +453,7 @@ Fallback-метод:
 * кешируем до конца текущего дня;
 * ключ кеша ПВЗ:
 
-  * страна;
+* страна;
   * регион;
   * город;
   * ТК;
@@ -571,7 +569,7 @@ Fallback-города, введенные покупателями вручну�
 * редкий вариант курьерского забора от магазина, если он поддерживается ТК, например СДЭК;
 * данные получателя:
 
-  * ФИО;
+* ФИО;
   * телефон;
   * email;
   * страна;
@@ -612,7 +610,7 @@ Fallback-города, введенные покупателями вручну�
 
 * три отдельных поля:
 
-  * длина, см;
+* длина, см;
   * ширина, см;
   * высота, см;
 * только целые значения в сантиметрах;
@@ -664,7 +662,7 @@ supports_place_items
 * галка “Показать исходные стоимости от ТК”;
 * единый список вариантов:
 
-  * ТК;
+* ТК;
   * тип доставки;
   * тариф;
   * исходная цена и срок, если включена галка;
@@ -711,7 +709,7 @@ supports_place_items
 * хранить raw API responses только в debug;
 * настройка хранения документов:
 
-  * только ссылки/API references;
+* только ссылки/API references;
   * либо сохранять файлы в закрытой папке uploads;
 * срок хранения файлов документов: по умолчанию 90 дней, настраиваемо.
 
@@ -777,7 +775,7 @@ Fallback-населенные пункты покупателей не хран�
 * тарифы;
 * режим выбора тарифа:
 
-  * конкретный тариф;
+* конкретный тариф;
   * минимальный тариф;
   * показать все тарифы;
 * доставка до ПВЗ;
@@ -875,15 +873,15 @@ interface CarrierAdapterInterface {
     public function get_name(): string;
     public function get_capabilities(): CarrierCapabilities;
 
-    public function quote(DeliveryQuoteRequest $request): DeliveryQuoteResult;
+public function quote(DeliveryQuoteRequest $request): DeliveryQuoteResult;
     public function get_pickup_points(PickupPointRequest $request): PickupPointResult;
 
-    public function create_shipment(ShipmentCreateRequest $request): ShipmentCreateResult;
+public function create_shipment(ShipmentCreateRequest $request): ShipmentCreateResult;
     public function get_shipment(ShipmentInfoRequest $request): ShipmentInfoResult;
     public function get_status(ShipmentStatusRequest $request): ShipmentStatusResult;
     public function get_documents(ShipmentDocumentsRequest $request): ShipmentDocumentsResult;
 
-    public function health_check(CarrierHealthCheckRequest $request): CarrierHealthCheckResult;
+public function health_check(CarrierHealthCheckRequest $request): CarrierHealthCheckResult;
 }
 ```
 
@@ -899,7 +897,7 @@ interface CarrierAdapterInterface {
 * единицы измерения API;
 * способ округления:
 
-  * вверх до грамма;
+* вверх до грамма;
   * вверх до минимального порога ТК;
   * вверх до 10/50/100 г, если это потребуется конкретной ТК.
 
@@ -1048,7 +1046,7 @@ feature/wdc-delivery-domain
 
 * DTO/value objects:
 
-  * address;
+* address;
   * package;
   * place;
   * quote request;
@@ -1351,7 +1349,7 @@ feature/wdc-carrier-cdek
 * документы;
 * международные направления:
 
-  * Казахстан;
+* Казахстан;
   * Беларусь;
   * Армения;
   * Киргизия;
@@ -1381,7 +1379,7 @@ feature/wdc-carrier-dpd
 * документы;
 * международные направления:
 
-  * Казахстан;
+* Казахстан;
   * Беларусь.
 
 ## Этап 13. Carrier: Yandex.Доставка
@@ -1489,4 +1487,3 @@ feature/wdc-status-documents-hardening
 [7]: https://yandex.ru/support/delivery-profile/ru/api/other-day/ref/2.-Tochki-samoprivoza-i-PVZ/apib2bplatformpickup-pointslist-post "2.02. Получение списка точек самопривоза и ПВЗ - 2. Точки самопривоза и ПВЗ | Яндекс Доставка"
 [8]: https://yandex.ru/support/delivery-profile/ru/api/other-day/ref/3.-Osnovnye-zaprosy/apib2bplatformofferscreate-post "3.01. Создание заявки - 3. Основные запросы | Яндекс Доставка"
 [9]: https://fias-public-service.nalog.ru/api/spas/v2.0/swagger/index.html?utm_source=chatgpt.com "Swagger UI"
-

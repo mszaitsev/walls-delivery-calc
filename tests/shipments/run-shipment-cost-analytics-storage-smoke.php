@@ -23,7 +23,7 @@ $schema = $table->schema();
 foreach ( array( 'UNIQUE KEY uniq_order_id (order_id)', 'KEY idx_created_at (order_created_at)', 'KEY idx_carrier_created (carrier_key, order_created_at)', 'KEY idx_order_number (order_number)', 'KEY idx_actual_cost (actual_cost_kopecks)', 'KEY idx_base_cost (base_api_cost_kopecks)', 'KEY idx_difference (difference_kopecks)', 'KEY idx_difference_percent (difference_percent_basis_points)', 'KEY idx_threshold_created (threshold_status, order_created_at)' ) as $expected ) {
 	shipment_cost_analytics_storage_assert( str_contains( $schema, $expected ), 'Schema must contain index: ' . $expected );
 }
-shipment_cost_analytics_storage_assert( ShipmentCostAnalyticsTable::MIGRATION === '0041_create_shipment_cost_analytics_table.php' && is_file( dirname( __DIR__, 2 ) . '/database/migrations/' . ShipmentCostAnalyticsTable::MIGRATION ), 'Schema migration must be registered as a migration file.' );
+shipment_cost_analytics_storage_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' ), 'ShipmentCostAnalyticsTable' ), 'The initial schema must register the analytics table owner.' );
 
 $record = new ShipmentCostAnalyticsRecord( 10, 'WC-10', '2026-07-20 07:00:00', 'alpha', 'alpha_service', 'Alpha Service', 'alpha', 'A-10', 10000, 12000, 'RUB', 'carrier_api', 'create', '2026-07-20 08:00:00', 2000, 2000, 'over_threshold', '2026-07-21 07:00:00' );
 $repository->upsert( $record );

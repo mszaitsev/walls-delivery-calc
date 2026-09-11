@@ -39,7 +39,9 @@ final class DpdGeographyStageRepository {
 			KEY status (status)
 		) ' . $this->wpdb->get_charset_collate();
 
-		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+		if ( ! function_exists( 'dbDelta' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+		}
 		dbDelta( $sql );
 
 		return true;

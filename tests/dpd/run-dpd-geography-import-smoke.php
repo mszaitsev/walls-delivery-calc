@@ -1906,9 +1906,8 @@ $plugin_source = file_get_contents( __DIR__ . '/../../src/Core/Plugin.php' );
 dpd_import_assert( is_string( $plugin_source ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD dry-run shipment adapter is registered outside geography import.' );
 dpd_import_assert( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdCarrier' ), 'DPD runtime carrier is not registered by geography import' );
 
-$migration_0043_source = file_get_contents( __DIR__ . '/../../database/migrations/0043_allow_external_locations_without_gar_fias.php' );
-dpd_import_assert( is_string( $migration_0043_source ) && str_contains( $migration_0043_source, 'gar_object_id BIGINT(20) UNSIGNED NULL' ) && str_contains( $migration_0043_source, 'fias_id CHAR(36) NULL' ), 'migration 0043 keeps GAR/FIAS nullable for external locations.' );
-dpd_import_assert( is_string( $migration_0043_source ) && str_contains( $migration_0043_source, 'WHERE gar_object_id = 0' ) && str_contains( $migration_0043_source, "TRIM(fias_id) = ''" ) && str_contains( $migration_0043_source, "gar_id = ''" ), 'migration 0043 normalizes placeholder GAR/FIAS values idempotently.' );
+$initial_schema_source = file_get_contents( __DIR__ . '/../../database/migrations/0001_initial_schema.php' );
+dpd_import_assert( is_string( $initial_schema_source ) && str_contains( $initial_schema_source, 'gar_object_id bigint(20) unsigned NULL' ) && str_contains( $initial_schema_source, 'fias_id char(36) NULL' ), 'The 1.0 initial schema keeps GAR/FIAS nullable for external locations.' );
 $import_service_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportService.php' );
 $location_repository_source = file_get_contents( __DIR__ . '/../../src/Locations/Storage/LocationRepository.php' );
 dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_service_source, 'MATCH_BATCH_SIZE' ) && str_contains( $import_service_source, 'DpdGeographyLookupKeys::from_rows' ) && str_contains( $import_service_source, 'DpdGeographyMatchContext' ), 'DPD geography import builds ephemeral batch match contexts instead of serialized location indexes.' );

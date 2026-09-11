@@ -539,48 +539,12 @@ foreach (
 	jet_assert( $failed && ! preg_match( '/download failed|is empty|response is too large|returned HTML/', $message ), 'Jet cities CSV client must reject ' . $case[1] . ' with a Russian safe message.' );
 }
 
-$GLOBALS['wdc_db_delta'] = array();
-$migration_0044 = require dirname( __DIR__, 2 ) . '/database/migrations/0044_create_jet_logistic_geography_tables.php';
-jet_assert( is_callable( $migration_0044 ) && empty( $GLOBALS['wdc_db_delta'] ), 'Jet migration 0044 must return a callable and not execute schema on require.' );
-$migration_0044();
-jet_assert( function_exists( 'dbDelta' ) && 2 === count( $GLOBALS['wdc_db_delta'] ), 'Jet migration 0044 must create geography schemas only after explicit callback execution.' );
-$migration_0045 = require dirname( __DIR__, 2 ) . '/database/migrations/0045_create_jet_logistic_status_mappings.php';
-jet_assert( is_callable( $migration_0045 ) && 2 === count( $GLOBALS['wdc_db_delta'] ), 'Jet migration 0045 must return a callable and not execute schema on require.' );
-$migration_0045();
-jet_assert( 3 === count( $GLOBALS['wdc_db_delta'] ) && 0 === count( $GLOBALS['wpdb']->jet_statuses ), 'Jet migration 0045 must create status schema without restoring default mappings on schema creation.' );
-
 $repository_root = dirname( __DIR__, 2 ) . '/src/Carriers/JetLogistic';
-jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Geography/JetLogisticGeographyRepository.php' ), '\\dbDelta(' ), 'Jet geography repository must call global dbDelta.' );
-jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Geography/JetLogisticGeographyOverrideRepository.php' ), '\\dbDelta(' ), 'Jet geography override repository must call global dbDelta.' );
-jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Status/JetLogisticStatusMappingRepository.php' ), '\\dbDelta(' ), 'Jet status mapping repository must call global dbDelta.' );
-$migration_0046_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0046_add_import_token_to_jet_logistic_cities.php' );
-$migration_0046 = require dirname( __DIR__, 2 ) . '/database/migrations/0046_add_import_token_to_jet_logistic_cities.php';
-jet_assert( is_callable( $migration_0046 ), 'Jet migration 0046 must return a callable.' );
-jet_assert( str_contains( $migration_0046_source, 'import_token' ), 'Jet migration 0046 must add import_token column.' );
-jet_assert( str_contains( $migration_0046_source, 'KEY import_token' ), 'Jet migration 0046 must add import_token index.' );
-$migration_0047_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0047_simplify_jet_logistic_status_mappings.php' );
-$migration_0047 = require dirname( __DIR__, 2 ) . '/database/migrations/0047_simplify_jet_logistic_status_mappings.php';
-jet_assert( is_callable( $migration_0047 ), 'Jet migration 0047 must return a callable.' );
-$GLOBALS['wpdb']->jet_statuses = array(
-	'доставка груза на склад' => array( 'id' => 9001, 'external_status' => 'Доставка груза на склад', 'normalized_external_status' => 'доставка груза на склад', 'universal_status' => DeliveryStatus::READY_FOR_PICKUP, 'active' => 1, 'last_seen' => '2026-07-28 10:00:00', 'occurrence_count' => 5 ),
-);
-$migration_0047();
-jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад приемки'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['отправка груза со склада приемки'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад выдачи'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['груз выдан'] ), 'Jet migration 0047 must delete broad status default and insert precise defaults.' );
-jet_assert( empty( $GLOBALS['wpdb']->jet_status_columns['active'] ) && empty( $GLOBALS['wpdb']->jet_status_columns['last_seen'] ) && empty( $GLOBALS['wpdb']->jet_status_columns['occurrence_count'] ) && empty( $GLOBALS['wpdb']->jet_status_indexes['active_status'] ) && empty( $GLOBALS['wpdb']->jet_status_indexes['last_seen'] ), 'Jet migration 0047 must drop obsolete active/last_seen/occurrence_count columns and indexes idempotently.' );
-jet_assert( str_contains( $migration_0047_source, '0047' ) || str_contains( $migration_0047_source, 'active_status' ), 'Jet migration 0047 source must be present for migration registration by filename.' );
-$GLOBALS['wpdb']->jet_statuses = array(
-	'доставка груза на склад выдачи' => array( 'id' => 9101, 'external_status' => 'Доставка груза на склад выдачи', 'normalized_external_status' => 'доставка груза на склад выдачи', 'universal_status' => DeliveryStatus::READY_FOR_PICKUP ),
-	'груз выдан' => array( 'id' => 9102, 'external_status' => 'Груз выдан', 'normalized_external_status' => 'груз выдан', 'universal_status' => DeliveryStatus::DELIVERED ),
-	'доставка груза на склад приемки' => array( 'id' => 9103, 'external_status' => 'Доставка груза на склад приемки', 'normalized_external_status' => 'доставка груза на склад приемки', 'universal_status' => DeliveryStatus::HANDED_TO_COURIER ),
-);
-$GLOBALS['wpdb']->status_mapping_insert_calls = 0;
-$migration_0056 = require dirname( __DIR__, 2 ) . '/database/migrations/0056_add_jet_logistic_default_status_mappings.php';
-jet_assert( is_callable( $migration_0056 ) && empty( $GLOBALS['wpdb']->jet_statuses['отправка груза со склада приемки'] ), 'Jet migration 0056 must return a callable and not execute on require.' );
-$migration_0056();
-$migration_0056();
-jet_assert( 4 === count( $GLOBALS['wpdb']->jet_statuses ) && 1 === $GLOBALS['wpdb']->status_mapping_insert_calls, 'Jet migration 0056 must add only missing defaults and remain idempotent on repeat.' );
-jet_assert( DeliveryStatus::HANDED_TO_COURIER === (string) $GLOBALS['wpdb']->jet_statuses['доставка груза на склад приемки']['universal_status'], 'Jet migration 0056 must not overwrite an existing customized mapping.' );
-jet_assert( DeliveryStatus::IN_TRANSIT === (string) $GLOBALS['wpdb']->jet_statuses['отправка груза со склада приемки']['universal_status'], 'Jet migration 0056 must add missing in-transit source-departure default.' );
+jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Geography/JetLogisticGeographyRepository.php' ), '\dbDelta(' ), 'Jet geography repository must own its final schema.' );
+jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Geography/JetLogisticGeographyOverrideRepository.php' ), '\dbDelta(' ), 'Jet geography override repository must own its final schema.' );
+jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Status/JetLogisticStatusMappingRepository.php' ), 'DEFAULT_MAPPINGS' ), 'Jet status repository must own current default mappings.' );
+$initial_schema_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' );
+jet_assert( str_contains( $initial_schema_source, 'JetLogisticGeographyRepository' ) && str_contains( $initial_schema_source, 'JetLogisticGeographyOverrideRepository' ) && str_contains( $initial_schema_source, 'ensure_default_mappings' ), 'The initial schema must install all Jet schemas and current status defaults.' );
 
 $migration_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-jet-migration-' . str_replace( '.', '', uniqid( '', true ) );
 mkdir( $migration_dir );
@@ -676,7 +640,7 @@ jet_assert( ! empty( $second_override['success'] ) && ! empty( $GLOBALS['wpdb']-
 $enabled_countries = ( new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] ) )->countries( 501 );
 jet_assert( in_array( 'US', $enabled_countries, true ) && in_array( 'KZ', $enabled_countries, true ) && 1 === count( array_keys( $enabled_countries, 'KZ', true ) ), 'Jet manual override must add the location country without removing existing service countries or creating duplicates.' );
 $matcher = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyMatcher( new LocationRepository( $GLOBALS['wpdb'] ), $override_repo, $region_normalizer );
-$import_service = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService( $parser, $matcher, $geo, $country_sync );
+$import_service = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService( $parser, $matcher, $geo, $country_sync, new Logger() );
 $manual_target_identity = (string) $parser->parse( "city;region;country_code\nManual Target;Manual Region;KZ\n" )[0]['source_identity'];
 $override_repo->save( $manual_target_identity, 77, 'KZ' );
 $import_result = $import_service->import_csv( "city;region;country_code\nManual Target;Manual Region;KZ\n" );
@@ -830,9 +794,9 @@ $country_scope_matcher = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLo
 $country_scoped_mismatch = $country_scope_matcher->match( $parser->parse( "city;region;country_code\nАзово с.;Тестовая область;KZ\n" )[0] );
 jet_assert( 'unmatched' === (string) $country_scoped_mismatch['match_status'] && 'place_type_mismatch' === (string) $country_scoped_mismatch['match_source'], 'Jet explicit country scope must ignore same-type candidates from another country and diagnose mismatch inside requested country.' );
 $GLOBALS['wpdb']->locations = $location_backup;
-$duplicate_result = ( new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService( $parser, $cross_matcher, $geo, $country_sync ) )->import_csv( "city\nАктау-(Мангистауская область)\nАктау-(Мангистауская область)\n" );
+$duplicate_result = ( new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService( $parser, $cross_matcher, $geo, $country_sync, new Logger() ) )->import_csv( "city\nАктау-(Мангистауская область)\nАктау-(Мангистауская область)\n" );
 jet_assert( 2 === (int) $duplicate_result['rows_read'] && 1 === (int) $duplicate_result['rows_unique'] && 1 === (int) $duplicate_result['duplicates'], 'Jet import result must report read rows, unique rows and duplicates after source identity deduplication.' );
-$typed_import_service = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService( $parser, $cross_matcher, $geo, $country_sync );
+$typed_import_service = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService( $parser, $cross_matcher, $geo, $country_sync, new Logger() );
 $source_fingerprint = new ReflectionMethod( \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService::class, 'source_fingerprint' );
 $source_fingerprint->setAccessible( true );
 jet_assert( $source_fingerprint->invoke( $typed_import_service, $typed_identity_rows[0] ) !== $source_fingerprint->invoke( $typed_import_service, $typed_identity_rows[1] ), 'Jet duplicate fingerprint must include source_place_type.' );
@@ -1005,7 +969,7 @@ $checkout_session = new CheckoutSessionManager();
 $checkout_session->save_selected_city( array( 'id' => 184506, 'country_code' => 'KZ', 'city_name' => 'Атбасар', 'settlement_name' => 'Атбасар', 'place_name' => 'Атбасар', 'place_type' => 'п', 'place_level' => 5, 'region_name' => 'Акмолинская', 'display_name' => 'Акмолинская обл., п Атбасар', 'active' => true ) );
 $checkout_session->save_city_context( array( 'location_id' => '184506', 'country_code' => 'KZ', 'city_name' => 'Атбасар', 'settlement_name' => 'Атбасар', 'region_name' => 'Акмолинская', 'display_name' => 'Акмолинская обл., п Атбасар', 'source' => 'local_db' ) );
 $GLOBALS['wdc_wc_logs'] = array();
-$atbasar_request = ( new WooCommercePackageMapper( null, $checkout_session, null, new LocationRepository( $GLOBALS['wpdb'] ), null, new CheckoutLogger( new Logger() ), $checkout_search ) )->map(
+$atbasar_request = ( new WooCommercePackageMapper( null, $checkout_session, null, new LocationRepository( $GLOBALS['wpdb'] ), null, $checkout_search ) )->map(
 	array(
 		'destination' => array( 'country' => 'KZ', 'city' => 'Атбасар' ),
 		'contents_cost' => 1000,
@@ -1013,8 +977,7 @@ $atbasar_request = ( new WooCommercePackageMapper( null, $checkout_session, null
 		'contents' => array(),
 	)
 );
-$checkout_context_log = array_values( array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'debug' === (string) ( $log['level'] ?? '' ) && 'Checkout quote request location context resolved.' === (string) ( $log['message'] ?? '' ) ) )[0] ?? array();
-jet_assert( 184506 === (int) ( $atbasar_request->customer_context['selected_location_id'] ?? 0 ) && '184506' === (string) ( $checkout_context_log['context']['resolved_location_id'] ?? '' ) && 'п' === (string) ( $checkout_context_log['context']['resolved_place_type'] ?? '' ), 'WooCommercePackageMapper must carry selected KZ Атбасар location_id into QuoteRequest customer_context and log safe generic location diagnostics.' );
+jet_assert( 184506 === (int) ( $atbasar_request->customer_context['selected_location_id'] ?? 0 ) && array() === $GLOBALS['wdc_wc_logs'], 'WooCommercePackageMapper must carry selected KZ Атбасар location_id without emitting routine checkout diagnostics.' );
 jet_assert( 'Атбасар' === (string) ( $geo->active_for_location( 184506 )['source_city'] ?? '' ), 'Jet geography repository must resolve mapped Атбасар destination by canonical location_id=184506.' );
 
 $http = new JetFakeHttp(
@@ -1044,8 +1007,7 @@ jet_assert( 'Адрес склада выдачи - ' === (string) ( $pickup_lin
 $mapped_pickup = ( new WooCommerceRateMapper() )->map( $quote->rates[0] );
 jet_assert( 'https://jet.com.kz/контакты.html' === (string) ( $mapped_pickup['meta_data']['customer_link_comments'][0]['url'] ?? '' ), 'WooCommerceRateMapper must preserve Jet warehouse contacts Unicode URL in shipping rate metadata.' );
 jet_assert( DeliveryType::PICKUP === (string) ( $mapped_pickup['meta_data']['delivery_type'] ?? '' ) && false === ( $mapped_pickup['meta_data']['requires_pickup_point'] ?? null ), 'WooCommerceRateMapper must expose Jet pickup as pickup without requiring a concrete pickup point.' );
-$quote_debug = array_values( array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'debug' === (string) ( $log['level'] ?? '' ) && 'Jet Logistic quote calculated.' === (string) ( $log['message'] ?? '' ) ) )[0] ?? array();
-jet_assert( '1000' === (string) ( $quote_debug['context']['response_price_terminal'] ?? '' ) && '300' === (string) ( $quote_debug['context']['response_price_delivery'] ?? '' ) && '50' === (string) ( $quote_debug['context']['response_price_dop'] ?? '' ) && '65' === (string) ( $quote_debug['context']['insurance_rub'] ?? '' ) && '1115' === (string) ( $quote_debug['context']['calculated_pickup_base_rub'] ?? '' ) && '1415' === (string) ( $quote_debug['context']['calculated_courier_base_rub'] ?? '' ) && ! str_contains( wp_json_encode( $quote_debug, JSON_UNESCAPED_UNICODE ) ?: '', 'jet-test-token' ), 'Jet successful quote diagnostics must log safe request/response price components and insurance without token or raw response.' );
+jet_assert( array() === $GLOBALS['wdc_wc_logs'], 'Successful Jet quotes must not emit production logs.' );
 jet_assert( 'Новосибирск' === (string) $http->requests[0]['payload']['cityfrom'], 'Jet quote must send configured RU Jet source city as cityfrom.' );
 jet_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && false === $quote->rates[0]->requires_pickup_point, 'Jet pickup rate must not require a concrete pickup point.' );
 jet_assert( str_contains( $quote->rates[0]->title, 'Karaganda' ) && str_contains( $quote->rates[0]->comments[0] ?? '', 'Karaganda' ), 'Jet non-local terminal city must be in pickup title and comment.' );
@@ -1086,8 +1048,7 @@ $settings_repo->set( JetLogisticSettings::ALMATY_FREE_COURIER_KEY, false );
 $GLOBALS['wdc_wc_logs'] = array();
 $missing_location_http = new JetFakeHttp( array() );
 $missing_location_quote = ( new JetLogisticCarrier( $settings, new JetLogisticApiClient( $missing_location_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() ) )->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array() ) );
-$missing_location_debug = array_values( array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'debug' === (string) ( $log['level'] ?? '' ) && 'Jet Logistic quote precondition is incomplete.' === (string) ( $log['message'] ?? '' ) ) )[0] ?? array();
-jet_assert( ! $missing_location_quote->success && 'jet_destination_location_missing' === $missing_location_quote->error_code && 0 === count( $missing_location_http->requests ) && array() === array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'warning' === (string) $log['level'] ) && 'KZ' === (string) ( $missing_location_debug['context']['country_code'] ?? '' ) && 'Алматы' === (string) ( $missing_location_debug['context']['destination_text'] ?? '' ) && '' === (string) ( $missing_location_debug['context']['selected_location_id'] ?? '' ), 'Jet transient checkout without canonical location_id must not call API, log a warning, or lose safe missing-location context.' );
+jet_assert( ! $missing_location_quote->success && 'jet_destination_location_missing' === $missing_location_quote->error_code && 0 === count( $missing_location_http->requests ) && array() === $GLOBALS['wdc_wc_logs'], 'Jet transient checkout without canonical location_id must not call API or log an expected incomplete precondition.' );
 
 $GLOBALS['wdc_wc_logs'] = array();
 $mismatch_http = new JetFakeHttp(
@@ -1226,7 +1187,7 @@ $backend_recovery_orchestrator = new CheckoutOrchestrator(
 );
 $backend_recovery_session = new CheckoutSessionManager();
 $backend_recovery_session->clear_normalized_address();
-$backend_recovery_request = ( new WooCommercePackageMapper( null, $backend_recovery_session, null, new LocationRepository( $GLOBALS['wpdb'] ), null, null, $checkout_search ) )->map(
+$backend_recovery_request = ( new WooCommercePackageMapper( null, $backend_recovery_session, null, new LocationRepository( $GLOBALS['wpdb'] ), null, $checkout_search ) )->map(
 	array(
 		'destination' => array( 'country' => 'KZ', 'state' => 'Акмолинская', 'city' => 'поселок Атбасар' ),
 		'contents_cost' => 19500,

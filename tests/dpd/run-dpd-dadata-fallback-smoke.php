@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 define( 'ABSPATH', __DIR__ . '/../../' );
 defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'test-dpd-dadata-key' );
+require_once __DIR__ . '/../../src/Core/Autoloader.php';
+( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', __DIR__ . '/../../src' ) )->register();
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -36,6 +38,7 @@ require_once __DIR__ . '/../../src/Shipments/Dpd/DpdStatusMapping.php';
 require_once __DIR__ . '/../../src/Carriers/Cdek/CdekSettings.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/DpdSettings.php';
 require_once __DIR__ . '/../../src/Carriers/YandexDelivery/YandexDeliverySettings.php';
+require_once __DIR__ . '/../../src/Infrastructure/Settings/PlatformRuntimeSettings.php';
 require_once __DIR__ . '/../../src/Infrastructure/Settings/SettingsRepository.php';
 require_once __DIR__ . '/../../src/Infrastructure/Security/EncryptionService.php';
 require_once __DIR__ . '/../../src/Infrastructure/Logging/LogRedactor.php';
@@ -132,7 +135,7 @@ $delivery_codes = new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] );
 $service = new DpdDaDataDeliveryFallbackService(
 	new LocationRepository( $GLOBALS['wpdb'] ),
 	$delivery_codes,
-	new WpDpdDaDataDeliveryClient( new AddressSuggestionSettings( $settings, $encryption, $pool ), $pool, new Logger() )
+	new WpDpdDaDataDeliveryClient( new AddressSuggestionSettings( $settings, $encryption, $pool ), $pool )
 );
 
 $result = $service->resolve_location_id( 10 );

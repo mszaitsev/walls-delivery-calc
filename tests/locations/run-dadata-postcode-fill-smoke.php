@@ -58,10 +58,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function get_var( mixed $query ): int {
-			if ( is_string( $query ) && str_contains( $query, 'wdc_location_aliases' ) ) {
-				return 0;
-			}
-
 			return count( $this->rows );
 		}
 
@@ -294,7 +290,7 @@ postcode_smoke_assert( array( 1, 2 ) === array_map( static fn( array $row ): int
 $others = $repository->random_postcode_batch_for_non_cities( 20 );
 postcode_smoke_assert( 1 === count( $others ) && 3 === (int) $others[0]['id'], 'Non-cities random batch must exclude filled postal_code and marker.' );
 
-$client = new DaDataPostcodeClient( postcode_token_pool(), new Logger(), 3 );
+$client = new DaDataPostcodeClient( postcode_token_pool(), 3 );
 global $wdc_http_queue;
 $wdc_http_queue = array( postcode_response( 'Новосибирск', '630000' ) );
 $result = $client->find_postal_code( $wpdb->rows[1] );
@@ -314,7 +310,7 @@ $mismatch_db->rows = array(
 	1 => array( 'id' => 1, 'fias_id' => 'fias-mismatch', 'place_name' => 'Ожидаемое', 'settlement_name' => 'Ожидаемое', 'city_name' => '', 'place_type' => 'г', 'display_name' => 'Ожидаемое', 'postal_code' => '', 'active' => 1, 'searchable_text' => 'ожидаемое' ),
 );
 $wdc_http_queue = array( postcode_response( 'Другое', '111111', 'fias-mismatch' ) );
-$job = postcode_step( postcode_admin( $mismatch_repository, new DaDataPostcodeClient( postcode_token_pool(), new Logger(), 3 ) ), array( 'phase' => 'running', 'processed' => 0, 'updated' => 0, 'marked_no_index' => 0, 'skipped' => 0, 'errors' => 0, 'consecutive_errors' => 0, 'last_id' => 0, 'current_priority' => 'cities', 'tokens_exhausted' => false ) );
+$job = postcode_step( postcode_admin( $mismatch_repository, new DaDataPostcodeClient( postcode_token_pool(), 3 ) ), array( 'phase' => 'running', 'processed' => 0, 'updated' => 0, 'marked_no_index' => 0, 'skipped' => 0, 'errors' => 0, 'consecutive_errors' => 0, 'last_id' => 0, 'current_priority' => 'cities', 'tokens_exhausted' => false ) );
 postcode_smoke_assert( 1 === (int) $job['consecutive_errors'], 'Name mismatch must increment consecutive_errors.' );
 
 $fail_db = new wpdb();
@@ -323,7 +319,7 @@ for ( $i = 1; $i <= 30; ++$i ) {
 	$fail_db->rows[ $i ] = array( 'id' => $i, 'fias_id' => 'fias-fail-' . $i, 'place_name' => 'Ожидаемое ' . $i, 'settlement_name' => 'Ожидаемое ' . $i, 'city_name' => '', 'place_type' => 'г', 'display_name' => 'Ожидаемое ' . $i, 'postal_code' => '', 'active' => 1, 'searchable_text' => 'ожидаемое' );
 	$wdc_http_queue[] = postcode_response( 'Другое', '111111', 'fias-fail-' . $i );
 }
-$admin = postcode_admin( $fail_repository, new DaDataPostcodeClient( postcode_token_pool(), new Logger(), 3 ) );
+$admin = postcode_admin( $fail_repository, new DaDataPostcodeClient( postcode_token_pool(), 3 ) );
 $job = array( 'phase' => 'running', 'processed' => 0, 'updated' => 0, 'marked_no_index' => 0, 'skipped' => 0, 'errors' => 0, 'consecutive_errors' => 0, 'last_id' => 0, 'current_priority' => 'cities', 'tokens_exhausted' => false );
 while ( 'running' === (string) $job['phase'] ) {
 	$job = postcode_step( $admin, $job );
@@ -334,7 +330,7 @@ $wdc_http_queue = array(
 	array( 'response' => array( 'code' => 429 ), 'body' => '{"message":"daily limit exceeded"}' ),
 	array( 'response' => array( 'code' => 429 ), 'body' => '{"message":"daily quota exceeded"}' ),
 );
-$limit_result = ( new DaDataPostcodeClient( postcode_token_pool(), new Logger(), 3 ) )->find_postal_code( array( 'id' => 99, 'fias_id' => 'fias-limit', 'place_name' => 'Лимит', 'settlement_name' => 'Лимит', 'city_name' => '', 'postal_code' => '' ) );
+$limit_result = ( new DaDataPostcodeClient( postcode_token_pool(), 3 ) )->find_postal_code( array( 'id' => 99, 'fias_id' => 'fias-limit', 'place_name' => 'Лимит', 'settlement_name' => 'Лимит', 'city_name' => '', 'postal_code' => '' ) );
 postcode_smoke_assert( empty( $limit_result['success'] ) && ! empty( $limit_result['tokens_exhausted'] ), 'All tokens exhausted must finish with daily_limit_exhausted reason.' );
 
 $repository->clear_postal_code_marker();

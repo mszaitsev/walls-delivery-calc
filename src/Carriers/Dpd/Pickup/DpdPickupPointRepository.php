@@ -19,7 +19,9 @@ final class DpdPickupPointRepository {
 		if ( $this->has_test_rows() ) {
 			return;
 		}
-		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+		if ( ! function_exists( 'dbDelta' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+		}
 		$charset_collate = $this->wpdb->get_charset_collate();
 		$table = $this->table_name();
 

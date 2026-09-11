@@ -22,8 +22,6 @@ final class FiasHttpClient {
 	}
 
 	private function request( string $method, string $url, ?array $body, array $args ): array {
-		$this->logger->request_start( strtolower( $method ), array( 'host' => (string) ( function_exists( 'wp_parse_url' ) ? wp_parse_url( $url, PHP_URL_HOST ) : parse_url( $url, PHP_URL_HOST ) ) ) );
-
 		if ( 'GET' === $method && ! function_exists( 'wp_remote_get' ) ) {
 			return $this->failure( 'wp_remote_get is unavailable.', true );
 		}
@@ -63,8 +61,6 @@ final class FiasHttpClient {
 		$status_code = function_exists( 'wp_remote_retrieve_response_code' ) ? (int) wp_remote_retrieve_response_code( $response ) : (int) ( $response['response']['code'] ?? 0 );
 		$raw_body    = function_exists( 'wp_remote_retrieve_body' ) ? (string) wp_remote_retrieve_body( $response ) : (string) ( $response['body'] ?? '' );
 		$parsed_body = $this->parse_json( $raw_body );
-
-		$this->logger->response_status( strtolower( $method ), $status_code );
 
 		if ( null === $parsed_body && '' !== trim( $raw_body ) ) {
 			$this->logger->parse_error( strtolower( $method ), array( 'status_code' => $status_code ) );

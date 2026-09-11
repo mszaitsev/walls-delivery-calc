@@ -79,7 +79,6 @@ final class CdekOrderStatusService {
 		$updated = $this->maybe_add_created_note( $order, $updated, $status_code );
 		$this->repository->save_for_carrier( $order, CdekSettings::CARRIER_KEY, $updated );
 		$updated = $this->apply_carrier_actual_cost( $order, $entity, $updated, $now );
-		$this->log( 'info', 'CDEK order status update result.', array( 'status' => $status, 'request_state' => $request_state, 'order_status' => $status_code ) );
 
 		return array(
 			'success' => true,

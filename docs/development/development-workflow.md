@@ -1,6 +1,6 @@
 # Development Workflow
 
-Version: 0.133.9
+Version: 1.0.0
 
 This is the only canonical developer workflow for Walls Delivery Calc.
 

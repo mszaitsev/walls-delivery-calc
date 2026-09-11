@@ -81,7 +81,6 @@ final class DpdPickupPointImportService {
 		if ( '' === $token ) {
 			$report = $this->lock_busy_report( $context );
 			$this->settings->save_pickup_import_report( $report->to_array() );
-			$this->log( 'info', 'DPD pickup import skipped: lock busy.', array( 'context' => $context ) );
 
 			return $report;
 		}

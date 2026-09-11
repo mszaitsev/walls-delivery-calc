@@ -140,7 +140,7 @@ $token_pool->save_tokens_from_admin(
 	)
 );
 $suggestion_settings = new AddressSuggestionSettings( $settings, $encryption, $token_pool );
-$client = new DaDataSuggestionClient( $suggestion_settings, $token_pool, new Logger() );
+$client = new DaDataSuggestionClient( $suggestion_settings, $token_pool );
 dadata_suggestions_assert( 2 === $token_pool->total_tokens_count(), 'DaData suggestions must support multiple tokens.' );
 dadata_suggestions_assert( 2 === $token_pool->available_tokens_count(), 'DaData suggestions must report available tokens.' );
 dadata_suggestions_assert( 3 === $suggestion_settings->timeout(), 'DaData suggestions timeout must remain a global setting.' );
@@ -252,7 +252,7 @@ dadata_suggestions_assert( 'final_selection' === ( $missing_selection_payload['u
 $empty_settings = new SettingsRepository();
 $empty_settings->replace( array_merge( $empty_settings->all(), array( 'dadata_suggestions_enabled' => true, 'dadata_suggestions_tokens' => array() ) ) );
 $empty_pool = new DaDataTokenPool( $empty_settings, new EncryptionService() );
-$empty_client = new DaDataSuggestionClient( new AddressSuggestionSettings( $empty_settings, new EncryptionService(), $empty_pool ), $empty_pool, new Logger() );
+$empty_client = new DaDataSuggestionClient( new AddressSuggestionSettings( $empty_settings, new EncryptionService(), $empty_pool ), $empty_pool );
 $empty_response = $empty_client->suggest( 'address', 'test' );
 dadata_suggestions_assert( 'no_available_dadata_token' === $empty_response['error_code'], 'Client must return no_available_dadata_token when no enabled tokens exist.' );
 
@@ -269,7 +269,7 @@ $exhausted_pool->save_tokens_from_admin(
 	)
 );
 $exhausted_pool->increment_usage( 'only-token' );
-$exhausted_response = ( new DaDataSuggestionClient( new AddressSuggestionSettings( $exhausted_settings, new EncryptionService(), $exhausted_pool ), $exhausted_pool, new Logger() ) )->suggest( 'address', 'test' );
+$exhausted_response = ( new DaDataSuggestionClient( new AddressSuggestionSettings( $exhausted_settings, new EncryptionService(), $exhausted_pool ), $exhausted_pool ) )->suggest( 'address', 'test' );
 dadata_suggestions_assert( 'dadata_daily_limit_exhausted' === $exhausted_response['error_code'], 'Client must return dadata_daily_limit_exhausted when all tokens reached daily limit.' );
 
 $quota_settings = new SettingsRepository();
@@ -289,7 +289,7 @@ $GLOBALS['wdc_dadata_suggestions_http_response_queue'] = array(
 	array( 'response' => array( 'code' => 429 ), 'body' => '{"message":"Daily limit exceeded"}' ),
 	array( 'response' => array( 'code' => 200 ), 'body' => wp_json_encode( array( 'suggestions' => array() ) ) ),
 );
-$quota_response = ( new DaDataSuggestionClient( new AddressSuggestionSettings( $quota_settings, new EncryptionService(), $quota_pool ), $quota_pool, new Logger() ) )->suggest( 'address', 'test' );
+$quota_response = ( new DaDataSuggestionClient( new AddressSuggestionSettings( $quota_settings, new EncryptionService(), $quota_pool ), $quota_pool ) )->suggest( 'address', 'test' );
 dadata_suggestions_assert( true === $quota_response['success'], 'Client must retry with the next token after quota response.' );
 dadata_suggestions_assert( 2 === count( $GLOBALS['wdc_dadata_suggestions_http_requests'] ), 'Quota retry must send a second request.' );
 dadata_suggestions_assert( 'Token quota-second-key' === $GLOBALS['wdc_dadata_suggestions_http_requests'][1]['args']['headers']['Authorization'], 'Quota retry must use second token.' );
@@ -312,7 +312,7 @@ $timeout_pool->save_tokens_from_admin(
 );
 $GLOBALS['wdc_dadata_suggestions_http_requests'] = array();
 $GLOBALS['wdc_dadata_suggestions_http_response_queue'] = array( new RuntimeException( 'timeout' ) );
-$timeout_response = ( new DaDataSuggestionClient( new AddressSuggestionSettings( $timeout_settings, new EncryptionService(), $timeout_pool ), $timeout_pool, new Logger() ) )->suggest( 'address', 'timeout query' );
+$timeout_response = ( new DaDataSuggestionClient( new AddressSuggestionSettings( $timeout_settings, new EncryptionService(), $timeout_pool ), $timeout_pool ) )->suggest( 'address', 'timeout query' );
 dadata_suggestions_assert( 'dadata_timeout' === $timeout_response['error_code'], 'Timeout response must return dadata_timeout.' );
 dadata_suggestions_assert( 1 === $timeout_pool->usage_today( 'timeout-token' ), 'Timeout/error must increment selected token once after HTTP attempt.' );
 dadata_suggestions_assert( 'dadata_timeout' === ( $timeout_pool->last_request_today( 'timeout-token' )['error_code'] ?? '' ), 'Timeout audit must record error code.' );
@@ -330,7 +330,7 @@ $selection_limit_pool->save_tokens_from_admin(
 	)
 );
 $selection_limit_settings_obj = new AddressSuggestionSettings( $selection_limit_settings, new EncryptionService(), $selection_limit_pool );
-$selection_limit_client = new DaDataSuggestionClient( $selection_limit_settings_obj, $selection_limit_pool, new Logger() );
+$selection_limit_client = new DaDataSuggestionClient( $selection_limit_settings_obj, $selection_limit_pool );
 $GLOBALS['wdc_dadata_suggestions_http_requests'] = array();
 $selection_limit_client->suggest( 'address', 'selection limit' );
 dadata_suggestions_assert( 1 === $selection_limit_pool->usage_today( 'selection-first' ), 'First suggest must increment first token once before selection.' );
@@ -358,7 +358,7 @@ $street_selection_pool->save_tokens_from_admin(
 $street_selection_pool->set_last_used_token_id( 'street-selection-token' );
 $_POST = array( 'nonce' => 'test-nonce', 'level' => 'street', 'usage_type' => 'suggestion_click' );
 ob_start();
-( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( new AddressSuggestionSettings( $street_selection_settings, new EncryptionService(), $street_selection_pool ), new DaDataSuggestionClient( new AddressSuggestionSettings( $street_selection_settings, new EncryptionService(), $street_selection_pool ), $street_selection_pool, new Logger() ), new AddressSuggestionNormalizer() ), $street_selection_pool ) )->handle_selection();
+( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( new AddressSuggestionSettings( $street_selection_settings, new EncryptionService(), $street_selection_pool ), new DaDataSuggestionClient( new AddressSuggestionSettings( $street_selection_settings, new EncryptionService(), $street_selection_pool ), $street_selection_pool ), new AddressSuggestionNormalizer() ), $street_selection_pool ) )->handle_selection();
 ob_get_clean();
 dadata_suggestions_assert( 1 === $street_selection_pool->usage_today( 'street-selection-token' ), 'Street selection must count only the suggestion_click usage.' );
 dadata_suggestions_assert( 'selection' === ( $street_selection_pool->last_request_today( 'street-selection-token' )['stage'] ?? '' ), 'Street selection must not count final_selection usage.' );

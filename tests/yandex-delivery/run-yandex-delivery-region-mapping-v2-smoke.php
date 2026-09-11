@@ -95,6 +95,6 @@ yd_region_mapping_v2_assert( str_contains( $admin_source, 'sync_yandex_region_ma
 yd_region_mapping_v2_assert( str_contains( $plugin_source, 'YandexRegionMappingV2Repository::class' ), 'Plugin DI must register region mapping v2 repository.' );
 yd_region_mapping_v2_assert( str_contains( $mapper_source, 'YandexRegionMappingV2Repository' ) && str_contains( $mapper_source, 'find_wdc_regions_for_yandex' ), 'Mapper v2 must use region mapping v2 repository as the WDC region source.' );
 yd_region_mapping_v2_assert( str_contains( $repository_source, 'sync_from_sources' ) && str_contains( $repository_source, 'save_mapping' ), 'New region mapping repository must exist.' );
-yd_region_mapping_v2_assert( file_exists( dirname( __DIR__, 2 ) . '/database/migrations/0039_create_yandex_region_mapping_v2.php' ), 'Migration 0039 must exist.' );
+yd_region_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' ), 'YandexRegionMappingV2Repository' ), 'The initial schema must install the region mapping v2 repository schema.' );
 
 echo "Yandex Delivery region mapping v2 smoke OK\n";

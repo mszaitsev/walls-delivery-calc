@@ -165,7 +165,6 @@ final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		}
 
 		$payload = $this->builder->build( $request );
-		$this->log( 'debug', 'CDEK order create payload prepared.', array( 'request' => $this->request_summary( $request, $payload ) ) );
 		try {
 			$response = $this->client->registerOrder( $payload );
 		} catch ( CdekApiException $exception ) {

@@ -71,8 +71,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $rows = array();
 
 		/** @var array<int, array<string,mixed>> */
-		public array $alias_rows = array();
-
 		/** @var array<int, array<string,mixed>> */
 		public array $russian_post_pickup_rows = array();
 
@@ -106,11 +104,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public function insert( string $table, array $data, array $format ): int {
 			++$this->insert_id;
 			$data['id'] = $this->insert_id;
-			if ( str_contains( $table, 'wdc_location_aliases' ) ) {
-				$this->alias_rows[ $this->insert_id ] = $data;
-			} else {
-				$this->rows[ $this->insert_id ] = $data;
-			}
+			$this->rows[ $this->insert_id ] = $data;
 			return 1;
 		}
 
@@ -172,10 +166,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 				return in_array( $table, $this->missing_tables, true ) ? 0 : 1;
 			}
 
-			if ( is_string( $query ) && str_contains( $query, 'wdc_location_aliases' ) ) {
-				return count( $this->alias_rows );
-			}
-
 			if ( is_string( $query ) && str_contains( $query, 'COUNT(DISTINCT region_name)' ) ) {
 				$regions = array();
 				foreach ( $this->rows as $row ) {
@@ -193,10 +183,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public function query( mixed $query ): int {
 			$query = (string) $query;
 			$this->queries[] = $query;
-
-			if ( str_contains( $query, 'wdc_location_aliases' ) && ( str_starts_with( $query, 'DELETE FROM' ) || str_starts_with( $query, 'TRUNCATE TABLE' ) ) ) {
-				$this->alias_rows = array();
-			}
 
 			if ( str_contains( $query, 'wdc_locations' ) && ( str_starts_with( $query, 'DELETE FROM' ) || str_starts_with( $query, 'TRUNCATE TABLE' ) ) ) {
 				$this->rows = array();
@@ -752,7 +738,6 @@ locations_smoke_assert( ! str_contains( $locations_default_html, 'RU Р РѕС�
 locations_smoke_assert( ! str_contains( $locations_default_html, 'РєРѕРѕСЂРґРёРЅР°С‚ РЅРµС‚:' ), 'Locations admin default page must not calculate coordinate counters.' );
 locations_smoke_assert( array() === $wpdb->get_results_queries, 'Opening locations admin without search must not call paginated/full location search.' );
 $default_get_var_sql = implode( "\n", $wpdb->get_var_queries );
-locations_smoke_assert( ! str_contains( $default_get_var_sql, 'wdc_location_aliases' ), 'Opening locations admin without deep counts must not count aliases.' );
 locations_smoke_assert( ! str_contains( $default_get_var_sql, 'postal_code IS NULL' ) && ! str_contains( $default_get_var_sql, 'postal_code IS NOT NULL' ), 'Opening locations admin without deep counts must not run postal_code fill counters.' );
 locations_smoke_assert( ! str_contains( $default_get_var_sql, 'latitude IS NULL' ) && ! str_contains( $default_get_var_sql, 'latitude IS NOT NULL' ), 'Opening locations admin without deep counts must not run coordinate counters.' );
 locations_smoke_assert( 0 === $wpdb->country_counts_calls, 'Opening locations admin without deep counts must not rebuild/load country count index.' );
@@ -843,7 +828,7 @@ $rp_wpdb->russian_post_pickup_rows = array(
 );
 $GLOBALS['wdc_locations_probe_requests'] = array();
 $GLOBALS['wdc_locations_probe_success_postcodes'] = array( '630099', '630777' );
-$rp_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_wpdb );
+$rp_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_repository, new RussianPostCourierTariffProbeService(), $rp_wpdb );
 $rp_job = $rp_service->create_job();
 $rp_job = $rp_service->step( $rp_job );
 locations_smoke_assert( $rp_city_id === (int) ( $GLOBALS['wdc_locations_probe_requests'][0]['to'] === '630000' ? $rp_city_id : 0 ), 'Russian Post courier postcode fill must probe city base postcode first.' );
@@ -863,7 +848,7 @@ $rp_sequence_wpdb->russian_post_pickup_rows = array(
 $GLOBALS['wdc_locations_probe_requests'] = array();
 $GLOBALS['wdc_locations_probe_success_postcodes'] = array( '640002' );
 $GLOBALS['wdc_locations_probe_api_error_postcodes'] = array();
-$rp_sequence_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_sequence_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_sequence_wpdb );
+$rp_sequence_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_sequence_repository, new RussianPostCourierTariffProbeService(), $rp_sequence_wpdb );
 $rp_sequence_job = $rp_sequence_service->step( $rp_sequence_service->create_job() );
 locations_smoke_assert( '640002' === (string) $rp_sequence_wpdb->rows[ $rp_sequence_id ]['russianpost_courier_calc_postal_code'] && 0 === (int) ( $rp_sequence_job['failed'] ?? 0 ), 'Russian Post courier postcode fill must save first successful candidate after unavailable candidates.' );
 
@@ -874,7 +859,7 @@ $rp_after_unavailable_id = $rp_unavailable_repository->save( locations_smoke_loc
 $GLOBALS['wdc_locations_probe_requests'] = array();
 $GLOBALS['wdc_locations_probe_success_postcodes'] = array( '650100' );
 $GLOBALS['wdc_locations_probe_api_error_postcodes'] = array();
-$rp_unavailable_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_unavailable_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_unavailable_wpdb );
+$rp_unavailable_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_unavailable_repository, new RussianPostCourierTariffProbeService(), $rp_unavailable_wpdb );
 $rp_unavailable_job = $rp_unavailable_service->step( $rp_unavailable_service->create_job() );
 locations_smoke_assert( 1 === (int) ( $rp_unavailable_job['marked_no_index'] ?? 0 ) && 0 === (int) ( $rp_unavailable_job['failed'] ?? 0 ) && '' === (string) ( $rp_unavailable_wpdb->rows[ $rp_unavailable_id ]['russianpost_courier_calc_postal_code'] ?? '' ), 'Russian Post courier postcode fill must treat all-unavailable candidates as no-index, not failed.' );
 $rp_unavailable_job = $rp_unavailable_service->step( $rp_unavailable_job );
@@ -886,7 +871,7 @@ $rp_api_error_repository->save( locations_smoke_location( array( 'gar_object_id'
 $GLOBALS['wdc_locations_probe_requests'] = array();
 $GLOBALS['wdc_locations_probe_success_postcodes'] = array();
 $GLOBALS['wdc_locations_probe_api_error_postcodes'] = array( '660000' );
-$rp_api_error_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_api_error_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_api_error_wpdb );
+$rp_api_error_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_api_error_repository, new RussianPostCourierTariffProbeService(), $rp_api_error_wpdb );
 $rp_api_error_job = $rp_api_error_service->step( $rp_api_error_service->create_job() );
 locations_smoke_assert( 1 === (int) ( $rp_api_error_job['failed'] ?? 0 ) && 1 === (int) ( $rp_api_error_job['errors'] ?? 0 ) && 1 === (int) ( $rp_api_error_job['consecutive_errors'] ?? 0 ), 'Russian Post courier postcode fill must increment failed/errors/consecutive_errors for API errors.' );
 
@@ -894,7 +879,7 @@ $rp_marker_wpdb = new wpdb();
 $rp_marker_repository = new LocationRepository( $rp_marker_wpdb );
 $rp_marker_id = $rp_marker_repository->save( locations_smoke_location( array( 'gar_object_id' => 886101, 'fias_id' => 'fias-rp-marker', 'region_name' => 'Marker', 'country_code' => 'RU', 'city_type' => 'Рі', 'place_type' => 'Рі', 'place_name' => 'Marker', 'display_name' => 'Marker', 'postal_code' => '999999999' ) ) );
 $rp_normal_id = $rp_marker_repository->save( locations_smoke_location( array( 'gar_object_id' => 886102, 'fias_id' => 'fias-rp-normal', 'region_name' => 'Normal', 'country_code' => 'RU', 'city_type' => 'Рі', 'place_type' => 'Рі', 'place_name' => 'Normal', 'display_name' => 'Normal', 'postal_code' => '630100' ) ) );
-$rp_marker_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_marker_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_marker_wpdb );
+$rp_marker_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_marker_repository, new RussianPostCourierTariffProbeService(), $rp_marker_wpdb );
 $marker_next = $rp_marker_repository->next_russianpost_courier_calc_postcode_location( 0, 'cities' );
 locations_smoke_assert( is_array( $marker_next ) && $rp_normal_id === (int) ( $marker_next['id'] ?? 0 ), 'Russian Post courier postcode queue must skip locations with postal_code=999999999.' );
 $GLOBALS['wdc_locations_probe_requests'] = array();
@@ -975,7 +960,7 @@ foreach ( $wpdb->queries as $index => $query ) {
 }
 
 $missing_wpdb = new wpdb();
-$missing_wpdb->missing_tables = array( 'wdc_locations', 'wdc_location_aliases' );
+$missing_wpdb->missing_tables = array( 'wdc_locations' );
 $missing_stats = ( new LocationRepository( $missing_wpdb ) )->clear_all();
 locations_smoke_assert( null === $missing_stats['locations_deleted'], 'clear_all must not fatal when tables are missing.' );
 
@@ -998,7 +983,7 @@ ob_start();
 ) )->render_page();
 $clear_admin_html = (string) ob_get_clean();
 locations_smoke_assert( str_contains( $clear_admin_html, 'База населенных пунктов очищена.' ), 'Admin clear action must render success notice.' );
-locations_smoke_assert( 0 === $admin_repository->count_all(), 'Admin clear action must delete locations and aliases.' );
+locations_smoke_assert( 0 === $admin_repository->count_all(), 'Admin clear action must delete locations.' );
 
 $locations_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Admin/LocationsAdminPage.php' );
 locations_smoke_assert( str_contains( $locations_admin_source, 'wp_verify_nonce' ) && str_contains( $locations_admin_source, 'current_user_can( AdminMenu::CAPABILITY' ), 'Admin clear action must require nonce and capability.' );
@@ -1009,16 +994,10 @@ locations_smoke_assert( ! str_contains( $repository_source, 'pickup' ) && ! str_
 locations_smoke_assert( str_contains( $repository_source, 'find_exact_admin_identifier_matches' ) && str_contains( $repository_source, 'postal_code' ), 'LocationRepository must expose exact admin identifier lookup.' );
 locations_smoke_assert( str_contains( $repository_source, 'find_first_by_postal_code' ), 'LocationRepository must expose postcode lookup for pickup address-search fallback.' );
 locations_smoke_assert( method_exists( LocationRepository::class, 'find_active_by_place_and_region_matches' ) && method_exists( LocationRepository::class, 'resolve_active_by_place_and_region' ) && str_contains( $repository_source, 'find_active_by_place_and_region_matches( string $place_name, string $region_name, string $place_type = ' ) && str_contains( $repository_source, 'PlaceRegionMatchResult::TYPE_MISMATCH' ) && str_contains( $repository_source, 'PlaceRegionMatchResult::EMPTY_TYPE_FALLBACK' ) && str_contains( $repository_source, "'place_name', 'settlement_name', 'city_name'" ) && str_contains( $repository_source, 'joined_region_name' ) && str_contains( $repository_source, 'normalize_foreign_identity_type( $place_type' ), 'LocationRepository must expose active place+region resolution across countries without relying on city-only or wrong-type fallback.' );
-$locations_schema_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0002_create_locations_table.php' );
+$locations_schema_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' );
 locations_smoke_assert( str_contains( $locations_schema_source, 'KEY country_code (country_code)' ) && str_contains( $locations_schema_source, 'KEY active (active)' ) && str_contains( $locations_schema_source, 'KEY postal_code (postal_code)' ), 'Fresh locations schema must keep country_code, active, and postal_code indexes.' );
-locations_smoke_assert( str_contains( $locations_schema_source, 'KEY idx_active_country_code (active, country_code)' ), 'Fresh locations schema must include the active/country_code compound index.' );
+locations_smoke_assert( str_contains( $locations_schema_source, 'KEY idx_active_country_code (active,country_code)' ), 'Fresh locations schema must include the active/country_code compound index.' );
 locations_smoke_assert( str_contains( $locations_schema_source, 'russianpost_courier_calc_postal_code varchar(32) NOT NULL DEFAULT' ) && str_contains( $locations_schema_source, 'KEY postal_code_rp_courier_calc' ), 'Fresh locations schema must include Russian Post courier calc postcode column and compound index.' );
-$locations_index_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0024_add_locations_active_country_index.php' );
-locations_smoke_assert( str_contains( $locations_index_migration_source, 'SHOW TABLES LIKE' ) && str_contains( $locations_index_migration_source, 'SHOW COLUMNS' ) && str_contains( $locations_index_migration_source, 'SHOW INDEX' ) && str_contains( $locations_index_migration_source, 'ADD KEY idx_active_country_code' ), '0024 must add the active/country_code index idempotently.' );
-$locations_rp_courier_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0025_add_locations_russianpost_courier_calc_postal_code.php' );
-locations_smoke_assert( str_contains( $locations_rp_courier_migration_source, 'SHOW TABLES LIKE' ) && str_contains( $locations_rp_courier_migration_source, 'SHOW COLUMNS' ) && str_contains( $locations_rp_courier_migration_source, 'SHOW INDEX' ) && str_contains( $locations_rp_courier_migration_source, 'ADD COLUMN russianpost_courier_calc_postal_code' ), '0025 must add Russian Post courier calc postcode column idempotently.' );
-$locations_postcode_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0023_drop_unused_locations_postcode.php' );
-locations_smoke_assert( str_contains( $locations_postcode_migration_source, 'DROP COLUMN postcode' ) && str_contains( $locations_postcode_migration_source, 'postal_code' ), '0023 must remove only legacy postcode after preserving postal_code.' );
 $dadata_client_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/DaDataSuggestionClient.php' );
 locations_smoke_assert( str_contains( $dadata_client_source, 'location_fias_id' ) && str_contains( $dadata_client_source, 'restrict_value' ), 'DaData address search must support current-location filters.' );
 

@@ -90,14 +90,6 @@ final class CheckoutOrchestrator {
 				$service_request = $this->request_for_service( $service_request, $service, $delivery_type );
 			}
 			if ( $this->should_skip_api_quote_for_incomplete_manual_destination( $carrier, $service_request ) ) {
-				$this->logger->info(
-					'Carrier quote skipped for incomplete manual destination.',
-					array(
-						'carrier' => $carrier_key,
-						'service' => $service_key,
-						'delivery_type' => $delivery_type,
-					)
-				);
 				continue;
 			}
 			$carrier_cache_context = $carrier instanceof CarrierQuoteCacheContextProviderInterface ? $carrier->quote_cache_context( $service_request ) : array();
@@ -106,9 +98,6 @@ final class CheckoutOrchestrator {
 				$quote = $this->quote_cache->get( $service_request, $carrier_key, $delivery_type, $service_key, $carrier_cache_context );
 				if ( $quote instanceof DeliveryQuote ) {
 					++$cache_hits;
-					$this->logger->info( 'Quote cache hit.', array( 'carrier' => $carrier_key ) );
-				} else {
-					$this->logger->info( 'Quote cache miss.', array( 'carrier' => $carrier_key ) );
 				}
 			}
 
@@ -174,11 +163,9 @@ final class CheckoutOrchestrator {
 		$fallback_used = array() === $visible;
 		if ( $fallback_used ) {
 			$visible[] = $this->fallback_factory->create();
-			$this->logger->warning( 'Fallback rate used.', array( 'rates_count' => count( $rates ) ) );
 		}
 
 		$final = $this->sorter->sort( $visible, $sort );
-		$this->logger->info( 'Checkout rates calculated.', array( 'rates_count' => count( $final ), 'fallback_used' => $fallback_used ) );
 
 		return new CheckoutCalculationResult( $final, $fallback_used, $cache_hits, $audit, $carrier_errors );
 	}
