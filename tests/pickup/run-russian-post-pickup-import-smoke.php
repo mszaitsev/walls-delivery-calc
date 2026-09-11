@@ -106,6 +106,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 				$replacement = (string) ( $this->prepared_args[0] ?? '' );
 				$key = (string) ( $this->prepared_args[1] ?? '' );
 				$expected = (string) ( $this->prepared_args[2] ?? '' );
+				if ( is_callable( $GLOBALS['wdc_before_option_cas'] ?? null ) ) {
+					$before_option_cas = $GLOBALS['wdc_before_option_cas'];
+					unset( $GLOBALS['wdc_before_option_cas'] );
+					$before_option_cas( $key );
+				}
 				if ( ! array_key_exists( $key, $GLOBALS['wdc_options'] ) || (string) maybe_serialize( $GLOBALS['wdc_options'][ $key ] ) !== $expected ) {
 					return 0;
 				}
@@ -554,6 +559,87 @@ rp_pickup_assert( ! $importer->queue_background_import( 'ALL' ), 'A concurrent s
 rp_pickup_assert( $active_lock === get_option( RussianPostPickupImportLock::OPTION_NAME, array() ), 'A concurrent start must not replace the active job lock.' );
 $importer->reset_stale_or_running_import();
 $GLOBALS['wdc_scheduled_events'] = array();
+
+// A late init callback may pass its guard as job A, then resume after admin
+// cancellation and job B queueing. Its failure must never inherit B ownership.
+$late_init_importer = null;
+$queued_b_state = array();
+$queued_b_lock = array();
+$late_init_client = new RussianPostOtpravkaApiClient(
+	$settings,
+	static function ( string $url, string $type ) use ( &$late_init_importer, &$queued_b_state, &$queued_b_lock ): array {
+		if ( ! $late_init_importer instanceof RussianPostPickupImporter ) {
+			throw new RuntimeException( 'Late-init race importer is unavailable.' );
+		}
+		$late_init_importer->reset_stale_or_running_import();
+		if ( ! $late_init_importer->queue_background_import( 'ALL' ) ) {
+			throw new RuntimeException( 'Unable to queue replacement job B during late init race.' );
+		}
+		$queued_b_state = ( new RussianPostPickupImportStateService() )->current();
+		$queued_b_lock = get_option( RussianPostPickupImportLock::OPTION_NAME, array() );
+		throw new RuntimeException( 'Injected late init A failure after job B was queued.' );
+	}
+);
+$late_init_importer = new RussianPostPickupImporter( $settings, $late_init_client, $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, new RussianPostPickupImportLock( $GLOBALS['wpdb'] ) );
+rp_pickup_assert( $late_init_importer->queue_background_import( 'ALL' ), 'Late-init race must queue old job A.' );
+$late_init_a_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
+$late_init_a_thrown = false;
+try {
+	$late_init_importer->run_import_init( (string) $late_init_a_event['args'][0], (string) $late_init_a_event['args'][1] );
+} catch ( RuntimeException $exception ) {
+	$late_init_a_thrown = str_contains( $exception->getMessage(), 'lost state ownership' );
+}
+$after_late_init_state = $state_service->current();
+$after_late_init_lock = get_option( RussianPostPickupImportLock::OPTION_NAME, array() );
+rp_pickup_assert(
+	$late_init_a_thrown && 'queued' === (string) ( $after_late_init_state['status'] ?? '' ) && (string) ( $queued_b_state['import_id'] ?? '' ) === (string) ( $after_late_init_state['import_id'] ?? '' ) && $queued_b_lock === $after_late_init_lock,
+	sprintf( 'Late init A failure after job B queueing must leave B queued with its structured lock unchanged; actual status=%s state_job=%s lock_job=%s.', (string) ( $after_late_init_state['status'] ?? '' ), (string) ( $after_late_init_state['import_id'] ?? '' ), (string) ( $after_late_init_lock['job_id'] ?? '' ) )
+);
+
+$late_a_id = (string) $late_init_a_event['args'][0];
+$queued_b_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
+$replacement_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, new RussianPostPickupImportLock( $GLOBALS['wpdb'] ) );
+$polled_b_state = $replacement_importer->refresh_state_for_status();
+rp_pickup_assert( $after_late_init_state === $polled_b_state && $after_late_init_lock === get_option( RussianPostPickupImportLock::OPTION_NAME, array() ), 'Status polling between queue and init must preserve job B state and lock.' );
+
+$foreign_callbacks_thrown = array();
+foreach ( array( 'init', 'batch', 'finalize' ) as $foreign_callback ) {
+	try {
+		match ( $foreign_callback ) {
+			'init' => $replacement_importer->run_import_init( $late_a_id, 'ALL' ),
+			'batch' => $replacement_importer->run_import_batch( $late_a_id, 'ALL', 0 ),
+			'finalize' => $replacement_importer->run_import_finalize( $late_a_id, 'ALL' ),
+		};
+		$foreign_callbacks_thrown[ $foreign_callback ] = false;
+	} catch ( RuntimeException $exception ) {
+		$foreign_callbacks_thrown[ $foreign_callback ] = str_contains( $exception->getMessage(), 'does not own the active job' );
+	}
+	rp_pickup_assert( $after_late_init_state === $state_service->current() && $after_late_init_lock === get_option( RussianPostPickupImportLock::OPTION_NAME, array() ), 'Foreign late ' . $foreign_callback . ' A callback must not mutate job B state or structured lock.' );
+}
+rp_pickup_assert( ! in_array( false, $foreign_callbacks_thrown, true ), 'Late init, batch, and finalize A callbacks must use the same foreign-owner failure contract.' );
+
+$replacement_init = $replacement_importer->run_import_init( (string) $queued_b_event['args'][0], (string) $queued_b_event['args'][1] );
+$replacement_running_state = $state_service->current();
+rp_pickup_assert( ! empty( $replacement_init['success'] ) && 'running' === (string) $replacement_running_state['status'] && 'parse' === (string) $replacement_running_state['stage'] && (string) $queued_b_state['import_id'] === (string) $replacement_running_state['import_id'] && $replacement_importer->is_locked(), 'Job B init must renew its unchanged lock and enter running/parse after arbitrary polling and late A callbacks.' );
+$replacement_importer->reset_stale_or_running_import();
+$GLOBALS['wdc_scheduled_events'] = array();
+
+$cas_a_id = 'terminal-cas-a';
+$cas_b_id = 'terminal-cas-b';
+$state_service->queue( 'ALL', $cas_a_id );
+$cas_b_state = array_merge( $state_service->defaults(), array( 'status' => 'queued', 'stage' => 'queued', 'import_id' => $cas_b_id, 'type' => 'ALL', 'last_activity_at' => current_time( 'mysql' ) ) );
+$GLOBALS['wdc_before_option_cas'] = static function ( string $key ) use ( $cas_b_state ): void {
+	if ( RussianPostPickupImportStateService::OPTION_NAME === $key ) {
+		update_option( RussianPostPickupImportStateService::OPTION_NAME, $cas_b_state, false );
+	}
+};
+$terminal_cas_thrown = false;
+try {
+	$state_service->failed_if_owned( $cas_a_id, array( 'import_id' => $cas_a_id, 'type' => 'ALL', 'errors' => array( 'Injected A failure.' ) ) );
+} catch ( RuntimeException $exception ) {
+	$terminal_cas_thrown = str_contains( $exception->getMessage(), 'ownership changed during terminal transition' );
+}
+rp_pickup_assert( $terminal_cas_thrown && $cas_b_state === $state_service->current(), 'Owner-scoped terminal state CAS must not overwrite job B when state changes during the write.' );
 
 $GLOBALS['wdc_force_schedule_failure'] = true;
 rp_pickup_assert( ! $importer->queue_background_import( 'ALL' ), 'Scheduler failure must reject import start.' );

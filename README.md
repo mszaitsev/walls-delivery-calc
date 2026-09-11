@@ -2,7 +2,7 @@
 
 Walls Delivery Calc is a WooCommerce delivery-calculation and shipment-management plugin.
 
-Current release: **1.0.6**.
+Current release: **1.0.7**.
 
 Requirements:
 
@@ -20,7 +20,7 @@ From the repository root, run:
 powershell -ExecutionPolicy Bypass -File tools/build-release.ps1
 ```
 
-The command creates `dist/walls-delivery-calc-1.0.6.zip`. Install that archive through **WordPress → Plugins → Add Plugin → Upload Plugin**.
+The command creates `dist/walls-delivery-calc-1.0.7.zip`. Install that archive through **WordPress → Plugins → Add Plugin → Upload Plugin**.
 
 ## Development
 

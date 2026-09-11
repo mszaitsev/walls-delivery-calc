@@ -90,6 +90,7 @@ final class RussianPostPickupImporter {
 		try {
 			return $this->execute_import_init( $import_id, $type );
 		} catch ( \Throwable $exception ) {
+			$this->assert_callback_state_ownership( $import_id, 'init' );
 			try {
 				return $this->fail_unexpected_pipeline( $import_id, $type, $exception );
 			} finally {
@@ -242,10 +243,7 @@ final class RussianPostPickupImporter {
 		try {
 			return $this->execute_import_batch( $import_id, $type, $payload_offset );
 		} catch ( \Throwable $exception ) {
-			$current = $this->state?->current() ?? array();
-			if ( in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) && $import_id !== (string) ( $current['import_id'] ?? '' ) ) {
-				throw $exception;
-			}
+			$this->assert_callback_state_ownership( $import_id, 'batch' );
 			$this->record_worker_slice_metrics( 'error' );
 			try {
 				return $this->fail_unexpected_pipeline( $import_id, $type, $exception );
@@ -454,6 +452,7 @@ final class RussianPostPickupImporter {
 		try {
 			return $this->execute_import_finalize( $import_id, $type );
 		} catch ( \Throwable $exception ) {
+			$this->assert_callback_state_ownership( $import_id, 'finalize' );
 			try {
 				return $this->fail_unexpected_pipeline( $import_id, $type, $exception );
 			} finally {
@@ -490,7 +489,7 @@ final class RussianPostPickupImporter {
 		$result['finished_at'] = $this->now();
 		$this->cleanup_state_files( $state, false );
 		$this->settings->save_import_result( $result, true );
-		$this->state?->success( $result );
+		$this->state?->success_if_owned( $import_id, $result );
 		$this->lock_service()->release( $import_id );
 
 		return $result;
@@ -737,11 +736,13 @@ final class RussianPostPickupImporter {
 	private function fail_pipeline( array $result, bool $cleanup_tables = true ): array {
 		$result['success'] = false;
 		$result['finished_at'] = $this->now();
-		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		$job_id = (string) ( $result['import_id'] ?? $state['import_id'] ?? '' );
+		$job_id = (string) ( $result['import_id'] ?? '' );
+		$state = $this->assert_callback_state_ownership( $job_id, 'failure' );
+		$result['import_id'] = $job_id;
 		try {
+			$this->state?->failed_if_owned( $job_id, $result );
 			try {
-				$this->cleanup_state_files( array_merge( $state, $result ), $cleanup_tables );
+				$this->cleanup_state_files( $result, $cleanup_tables );
 			} catch ( \Throwable $exception ) {
 				$this->add_limited_error( $result['errors'], 'Import cleanup failed: ' . $exception->getMessage() );
 			}
@@ -750,11 +751,7 @@ final class RussianPostPickupImporter {
 			} catch ( \Throwable $exception ) {
 				$this->add_limited_error( $result['errors'], 'Unable to save import result: ' . $exception->getMessage() );
 			}
-			try {
-				$this->state?->failed( $result );
-			} catch ( \Throwable $exception ) {
-				$this->add_limited_error( $result['errors'], 'Unable to save failed import state: ' . $exception->getMessage() );
-			}
+			$this->state?->failed_if_owned( $job_id, $result );
 		} finally {
 			$this->lock_service()->release_terminal( $job_id );
 		}
@@ -764,11 +761,13 @@ final class RussianPostPickupImporter {
 
 	/** @return array<string,mixed> */
 	private function fail_unexpected_pipeline( string $import_id, string $type, \Throwable $exception ): array {
-		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
+		$state = $this->assert_callback_state_ownership( $import_id, 'unexpected failure' );
 		$result = array_merge(
 			$this->base_result( $this->normalize_type( $type ), $import_id ),
 			$state
 		);
+		$result['import_id'] = $import_id;
+		$result['type'] = $this->normalize_type( $type );
 		$errors = is_array( $result['errors'] ?? null ) ? $result['errors'] : array();
 		$this->add_limited_error( $errors, 'Unexpected Russian Post pickup import failure: ' . $exception->getMessage() );
 		$result['errors'] = $errors;
@@ -789,6 +788,9 @@ final class RussianPostPickupImporter {
 			'finalize' => 'running' === $status && in_array( $stage, array( 'upsert', 'deactivate' ), true ),
 			default => false,
 		};
+		if ( $is_active && $import_id !== $persisted_id ) {
+			throw new \RuntimeException( sprintf( 'Russian Post pickup import %s callback does not own the active job.', $callback ) );
+		}
 		if ( $is_active && $import_id === $persisted_id && ! $valid_stage ) {
 			$diagnostic = $this->background_guard_diagnostic( $callback, $import_id, $state, $payload_offset );
 			$this->state?->record_guard_diagnostic( $diagnostic );
@@ -817,9 +819,6 @@ final class RussianPostPickupImporter {
 		$this->state?->record_guard_diagnostic( $diagnostic );
 		$message = sprintf( 'Russian Post pickup import %s invariant failed.', $callback );
 
-		if ( $is_active && $import_id !== $persisted_id ) {
-			throw new \RuntimeException( $message . ' Callback import ID does not own the active job.' );
-		}
 		if ( $is_active && $import_id === $persisted_id ) {
 			$result = $this->state_to_result( $state, (string) ( $state['type'] ?? 'ALL' ), $persisted_id );
 			$errors = is_array( $result['errors'] ?? null ) ? $result['errors'] : array();
@@ -835,6 +834,17 @@ final class RussianPostPickupImporter {
 		$this->lock_service()->release_terminal( $import_id );
 
 		return array( 'success' => false, 'errors' => array( $message . ' Persisted job is already terminal.' ) );
+	}
+
+	/** @return array<string,mixed> */
+	private function assert_callback_state_ownership( string $import_id, string $context ): array {
+		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
+		$persisted_id = (string) ( $state['import_id'] ?? '' );
+		if ( '' !== $persisted_id && ! hash_equals( $persisted_id, $import_id ) ) {
+			throw new \RuntimeException( sprintf( 'Russian Post pickup import %s lost state ownership to another job.', $context ) );
+		}
+
+		return $state;
 	}
 
 	/** @param array<string,mixed> $state @return array<string,mixed> */

@@ -138,12 +138,22 @@ final class RussianPostPickupImportStateService {
 		return $this->finish( 'success', 'finished', $result );
 	}
 
+	/** @param array<string,mixed> $result @return array<string,mixed> */
+	public function success_if_owned( string $expected_import_id, array $result ): array {
+		return $this->finish( 'success', 'finished', $result, $expected_import_id );
+	}
+
 	/**
 	 * @param array<string,mixed> $result
 	 * @return array<string,mixed>
 	 */
 	public function failed( array $result ): array {
 		return $this->finish( 'failed', 'failed', $result );
+	}
+
+	/** @param array<string,mixed> $result @return array<string,mixed> */
+	public function failed_if_owned( string $expected_import_id, array $result ): array {
+		return $this->finish( 'failed', 'failed', $result, $expected_import_id );
 	}
 
 	/**
@@ -317,8 +327,12 @@ final class RussianPostPickupImportStateService {
 	 * @param array<string,mixed> $result
 	 * @return array<string,mixed>
 	 */
-	private function finish( string $status, string $stage, array $result ): array {
+	private function finish( string $status, string $stage, array $result, string $expected_import_id = '' ): array {
 		$state = $this->current();
+		if ( '' !== $expected_import_id && ! hash_equals( (string) ( $state['import_id'] ?? '' ), $expected_import_id ) ) {
+			throw new \RuntimeException( 'Russian Post pickup import state ownership changed before terminal transition.' );
+		}
+		$expected_state = $state;
 		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped', 'location_matched_fias', 'location_matched_postal_code', 'location_matched_region_city', 'location_match_no_match', 'location_match_ambiguous' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
@@ -358,9 +372,50 @@ final class RussianPostPickupImportStateService {
 		$state['parser_completed'] = ! empty( $result['parser_completed'] ) || ! empty( $state['parser_completed'] );
 		$state['errors'] = array_slice( array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ), 0, self::MAX_STORED_ERRORS );
 		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );
-		$this->save( $state );
+		if ( '' !== $expected_import_id ) {
+			if ( ! $this->compare_and_replace( $expected_state, $state ) ) {
+				throw new \RuntimeException( 'Russian Post pickup import state ownership changed during terminal transition.' );
+			}
+		} else {
+			$this->save( $state );
+		}
 
 		return $state;
+	}
+
+	/** @param array<string,mixed> $expected @param array<string,mixed> $replacement */
+	private function compare_and_replace( array $expected, array $replacement ): bool {
+		global $wpdb;
+		if ( ! isset( $wpdb->options ) || ! method_exists( $wpdb, 'prepare' ) || ! method_exists( $wpdb, 'query' ) ) {
+			if ( $this->current() !== $expected ) {
+				return false;
+			}
+
+			return update_option( self::OPTION_NAME, array_merge( $this->defaults(), $replacement ), false );
+		}
+
+		$serialize = static fn( array $value ): string => (string) ( function_exists( 'maybe_serialize' ) ? maybe_serialize( $value ) : serialize( $value ) );
+		$sql = $wpdb->prepare(
+			"UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s LIMIT 1",
+			$serialize( array_merge( $this->defaults(), $replacement ) ),
+			self::OPTION_NAME,
+			$serialize( $expected )
+		);
+		$result = $wpdb->query( $sql );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Russian Post pickup import state compare-update failed.' );
+		}
+		$this->clear_option_cache();
+
+		return 1 === (int) $result;
+	}
+
+	private function clear_option_cache(): void {
+		if ( function_exists( 'wp_cache_delete' ) ) {
+			wp_cache_delete( self::OPTION_NAME, 'options' );
+			wp_cache_delete( 'notoptions', 'options' );
+			wp_cache_delete( 'alloptions', 'options' );
+		}
 	}
 
 	private function normalize_type( string $type ): string {

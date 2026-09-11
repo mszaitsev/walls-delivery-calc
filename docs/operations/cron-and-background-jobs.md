@@ -1,6 +1,6 @@
 # Cron And Background Jobs
 
-Version: 1.0.6
+Version: 1.0.7
 
 WDC business clock times use `Asia/Novosibirsk`; scheduler APIs receive Unix timestamps. Owners register callbacks during plugin bootstrap and defer Action Scheduler inspection/creation until `action_scheduler_init`. Registration after that hook ensures the schedule immediately. Expected pre-initialization and disabled/no-work states are silent.
 
@@ -18,6 +18,8 @@ Russian Post pickup API imports validate complete Otpravka credentials before ac
 Since 1.0.5, the ordinary Russian Post parse/upsert continuation uses a bounded worker slice. One callback processes up to 15 batches of 500 objects while its 18-second soft wall-time and 80%-of-finite-`memory_limit` guard allow it. Every batch persists counters and the byte offset, updates activity, and renews the owner lease before the next batch. EOF schedules one finalize action; a budget stop schedules one batch continuation; cancellation, lock loss, or failure schedules none. The once-per-minute system cron with `DISABLE_WP_CRON=true` remains the production baseline.
 
 Manual Russian Post cancellation makes the persisted terminal state authoritative before cleanup. Late checkpoints cannot change a terminal state, and a worker rereads status and ownership before renewing its lease or starting another batch. Lock release uses owner-checked compare-delete; if a concurrent renew changed the same job's lease after an option-cache read, it invalidates only the precise option cache, rereads once, verifies the job ID again, and retries. Terminal status refresh applies the same cleanup, while a lock belonging to a newer job is never removed.
+
+Since 1.0.7, `init`, `batch`, and `finalize` use one foreign-callback policy: a callback whose immutable argument `import_id` differs from the persisted active job fails without recording diagnostics into, cleaning, failing, renewing, scheduling for, or unlocking that job. Unexpected-failure handling rechecks state ownership before building a result and before cleanup, and never lets mutable current state replace the callback owner ID.
 
 Ozon browser polling reads local progress only and never executes background work. Checkout reads published local pickup snapshots and never initiates imports.
 
