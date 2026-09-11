@@ -294,7 +294,7 @@ use WallsShop\WDC\Locations\Fias\FiasLogger;
 use WallsShop\WDC\Locations\Fias\FiasRateLimiter;
 use WallsShop\WDC\Locations\Gar\GarChangesClient;
 use WallsShop\WDC\Locations\Gar\GarSyncManager;
-use WallsShop\WDC\Locations\Import\FiasImportManager;
+use WallsShop\WDC\Locations\Import\FiasLegacyScheduleCleanup;
 use WallsShop\WDC\Locations\Import\GarPlacesCsvImporter;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Import\LocationIncrementalUpdateService;
@@ -959,7 +959,7 @@ final class Plugin {
 		$this->container->register( LocationIncrementalUpdateService::class, fn(): LocationIncrementalUpdateService => new LocationIncrementalUpdateService( null, $this->container->get( LocationIncrementalCandidateEnricher::class ), $this->container->get( DeliveryQuoteCacheManager::class ) ) );
 		$this->container->register( LocationsSnapshotExporter::class, fn(): LocationsSnapshotExporter => new LocationsSnapshotExporter() );
 		$this->container->register( LocationsSnapshotImporter::class, fn(): LocationsSnapshotImporter => new LocationsSnapshotImporter() );
-		$this->container->register( FiasImportManager::class, fn(): FiasImportManager => new FiasImportManager( $this->environment, $this->container->get( LocationRepository::class ), $this->container->get( ActionScheduler::class ) ) );
+		$this->container->register( FiasLegacyScheduleCleanup::class, fn(): FiasLegacyScheduleCleanup => new FiasLegacyScheduleCleanup( $this->container->get( ActionScheduler::class ) ) );
 		$this->container->register( GarChangesClient::class, fn(): GarChangesClient => new GarChangesClient( $this->container->get( FiasHttpClient::class ) ) );
 		$this->container->register( GarSyncManager::class, fn(): GarSyncManager => new GarSyncManager( $this->container->get( ActionScheduler::class ), $this->container->get( GarChangesClient::class ), $this->container->get( Logger::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( GarChangesService::class, fn(): GarChangesService => new GarChangesService() );
@@ -1053,7 +1053,6 @@ final class Plugin {
 				$this->container->get( LocationImportService::class ),
 				$this->container->get( FiasRateLimiter::class ),
 				$this->container->get( GarSyncManager::class ),
-				$this->container->get( FiasImportManager::class ),
 				$this->container->get( SettingsRepository::class ),
 				$this->container->get( FiasCredentials::class ),
 				$this->container->get( GarPlacesCsvImporter::class ),
@@ -1312,7 +1311,7 @@ final class Plugin {
 		$this->container->get( GarChangesService::class );
 		$this->container->get( CalendarScheduler::class )->register();
 		$this->container->get( GarSyncManager::class )->register();
-		$this->container->get( FiasImportManager::class )->register();
+		$this->container->get( FiasLegacyScheduleCleanup::class )->register();
 	}
 
 	public function activate(): void {

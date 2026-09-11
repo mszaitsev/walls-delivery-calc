@@ -415,11 +415,10 @@ pickup_diagnostics_assert( ! str_contains( $coordinate_enricher_source, "\$locat
 
 $location_repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Storage/LocationRepository.php' );
 $gar_import_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/GarPlacesCsvImporter.php' );
-$fias_import_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/FiasImportManager.php' );
 $snapshot_exporter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationsSnapshotExporter.php' );
 $snapshot_importer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationsSnapshotImporter.php' );
 pickup_diagnostics_assert(
-	! str_contains( $location_repository_source . $gar_import_source . $fias_import_source . $snapshot_exporter_source . $snapshot_importer_source, 'wdc_location_aliases' )
+	! str_contains( $location_repository_source . $gar_import_source . $snapshot_exporter_source . $snapshot_importer_source, 'wdc_location_aliases' )
 	&& str_contains( $location_repository_source, 'searchable_text' ),
 	'Canonical search/import/snapshot contracts must not depend on the retired alias table.'
 );

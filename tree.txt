@@ -762,7 +762,7 @@ C:.
 |   |   |       GarSyncManager.php
 |   |   |
 |   |   +---Import
-|   |   |       FiasImportManager.php
+|   |   |       FiasLegacyScheduleCleanup.php
 |   |   |       GarImportResult.php
 |   |   |       GarPlacesCsvImporter.php
 |   |   |       LocationImportService.php

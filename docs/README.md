@@ -1,6 +1,6 @@
 # Walls Delivery Calc Documentation
 
-0.155.20 makes the WDC Action Scheduler boundary datastore-aware. Scheduling owners defer bootstrap work to `action_scheduler_init`, run immediately when registered after initialization, and no longer call or warn about Action Scheduler during the expected pre-init phase.
+0.155.20 makes the WDC Action Scheduler boundary datastore-aware. Scheduling owners defer bootstrap work to `action_scheduler_init`, run immediately when registered after initialization, and no longer call or warn about Action Scheduler during the expected pre-init phase. The non-functional prepared-dataset placeholder is removed from runtime and the seven-row overview catalog; a lifecycle-safe versioned cleanup retires its legacy queued action and unused timestamp option.
 
 0.155.19 defines `Asia/Novosibirsk` as the WDC business timezone for scheduled clock times and admin schedule presentation. The overview page now lists every user-facing recurring task with its effective schedule, real next scheduler timestamp, and disabled/missing/scheduled status; short lifecycle batch and polling steps remain excluded.
 

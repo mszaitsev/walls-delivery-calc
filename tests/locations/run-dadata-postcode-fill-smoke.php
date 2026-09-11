@@ -264,7 +264,6 @@ function postcode_admin( LocationRepository $repository, DaDataPostcodeClient $c
 		null,
 		null,
 		null,
-		null,
 		$client
 	);
 }

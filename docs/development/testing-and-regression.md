@@ -1,6 +1,6 @@
 # Testing And Regression
 
-0.155.20 adds a framework regression for Action Scheduler lifecycle readiness: procedural functions present with an uninitialized datastore, pre-init deferral, post-init immediate execution, repeated registration, and genuine post-init unavailability. Ozon regression covers preserving a matching event and replacing a changed daily time without duplicates.
+0.155.20 adds a framework regression for Action Scheduler lifecycle readiness: procedural functions present with an uninitialized datastore, pre-init deferral, post-init immediate execution, repeated registration, and genuine post-init unavailability. Ozon regression covers preserving a matching event and replacing a changed daily time without duplicates. The same lifecycle smoke verifies one-time removal of the retired prepared-FIAS action and write-only timestamp option; scheduled-task regression freezes the remaining seven catalog keys and confirms the removed row is absent.
 
 0.155.19 adds focused scheduled-task timezone coverage for UTC and Europe/Amsterdam site contexts, local midnight boundaries, 23:30 conversion, admin formatting, explicit catalog keys, effective DPD slots, overview placement, and removal of Moscow/site/manual-offset scheduler assumptions. Continued branch work covers first-Monday monthly calendar scheduling and legacy daily-action replacement, next-year no-overwrite behavior, the 96-value shipment-status interval select, dynamic WP-Cron recurrence migration/rescheduling, exact catalog order, and cache/tasks/analytics overview placement.
 

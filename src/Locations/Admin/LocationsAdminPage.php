@@ -13,7 +13,6 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
 use WallsShop\WDC\Locations\Fias\FiasRateLimiter;
 use WallsShop\WDC\Locations\Gar\GarSyncManager;
-use WallsShop\WDC\Locations\Import\FiasImportManager;
 use WallsShop\WDC\Locations\Import\GarPlacesCsvImporter;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Import\LocationIncrementalUpdateService;
@@ -55,7 +54,6 @@ final class LocationsAdminPage {
 		private LocationImportService $import_service,
 		private ?FiasRateLimiter $fias_limiter = null,
 		private ?GarSyncManager $gar_sync = null,
-		private ?FiasImportManager $fias_import = null,
 		private ?SettingsRepository $settings = null,
 		private ?FiasCredentials $fias_credentials = null,
 		private ?GarPlacesCsvImporter $gar_importer = null,

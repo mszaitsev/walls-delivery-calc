@@ -18,7 +18,9 @@ Current jobs:
 
 The `ПВЗ Ozon` browser polling endpoint is read-only: it reads local generation progress and never executes Action Scheduler work. A stale-progress warning does not fail a generation, release its lease, or activate a snapshot.
 - calendar support uses one self-scheduling Action Scheduler single action at 09:00 Asia/Novosibirsk on the first Monday of each month. Bootstrap replaces the legacy daily action. Each run checks the next calendar year and generates only missing calendar types before scheduling the next month's first Monday;
-- GAR/FIAS support jobs through their managers.
+- GAR update checks through `GarSyncManager`.
+
+The former prepared-dataset placeholder did not inspect or import data and is no longer a job. A versioned cleanup, deferred to Action Scheduler readiness, removes any queued legacy action and its write-only last-check option.
 
 Cron handlers should call application services, not controllers or renderers.
 

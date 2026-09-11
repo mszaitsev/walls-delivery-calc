@@ -8,6 +8,7 @@ $GLOBALS['wdc_as_did_actions'] = array();
 $GLOBALS['wdc_as_current_action'] = null;
 $GLOBALS['wdc_as_calls'] = array( 'single' => 0, 'recurring' => 0, 'unschedule' => 0, 'has' => 0, 'next' => 0 );
 $GLOBALS['wdc_as_log_calls'] = 0;
+$GLOBALS['wdc_as_options'] = array( 'wdc_fias_prepared_import_last_check_at' => '2026-09-10 12:00:00' );
 
 final class ActionScheduler {
 	public static bool $initialized = false;
@@ -39,13 +40,18 @@ function wc_get_logger(): object {
 		public function log( string $level, string $message, array $context ): void { ++$GLOBALS['wdc_as_log_calls']; }
 	};
 }
+function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_as_options'][ $key ] ?? $default; }
+function update_option( string $key, mixed $value, bool $autoload = true ): bool { $GLOBALS['wdc_as_options'][ $key ] = $value; return true; }
+function delete_option( string $key ): bool { unset( $GLOBALS['wdc_as_options'][ $key ] ); return true; }
 
 require_once dirname( __DIR__, 2 ) . '/src/Infrastructure/Logging/LogRedactor.php';
 require_once dirname( __DIR__, 2 ) . '/src/Infrastructure/Logging/Logger.php';
 require_once dirname( __DIR__, 2 ) . '/src/Infrastructure/Queue/ActionScheduler.php';
+require_once dirname( __DIR__, 2 ) . '/src/Locations/Import/FiasLegacyScheduleCleanup.php';
 
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler as WdcActionScheduler;
+use WallsShop\WDC\Locations\Import\FiasLegacyScheduleCleanup;
 
 function action_scheduler_lifecycle_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) { throw new RuntimeException( $message ); }
@@ -84,6 +90,15 @@ $adapter->when_initialized( 'late-owner', static function () use ( &$after_init_
 $adapter->when_initialized( 'late-owner', static function () use ( &$after_init_runs ): void { ++$after_init_runs; } );
 action_scheduler_lifecycle_assert( 1 === $after_init_runs, 'An owner registered after AS init must run immediately and only once.' );
 
+$legacy_cleanup = new FiasLegacyScheduleCleanup( $adapter );
+$legacy_cleanup->register();
+action_scheduler_lifecycle_assert( 1 === $GLOBALS['wdc_as_calls']['unschedule'], 'Legacy prepared FIAS action must be unscheduled once after AS initialization.' );
+action_scheduler_lifecycle_assert( ! isset( $GLOBALS['wdc_as_options']['wdc_fias_prepared_import_last_check_at'] ), 'Dead prepared FIAS last-check option must be deleted.' );
+action_scheduler_lifecycle_assert( 1 === (int) ( $GLOBALS['wdc_as_options']['wdc_fias_prepared_import_cleanup_version'] ?? 0 ), 'FIAS cleanup marker must be persisted.' );
+$second_request_adapter = new WdcActionScheduler( new Logger() );
+( new FiasLegacyScheduleCleanup( $second_request_adapter ) )->register();
+action_scheduler_lifecycle_assert( 1 === $GLOBALS['wdc_as_calls']['unschedule'], 'Versioned FIAS cleanup must not repeat on later requests.' );
+
 ActionScheduler::$initialized = false;
 $GLOBALS['wdc_as_did_actions']['init'] = 1;
 $unavailable = new WdcActionScheduler( new Logger() );
@@ -96,10 +111,12 @@ foreach ( array(
 	'src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupScheduler.php',
 	'src/Calendar/Services/CalendarScheduler.php',
 	'src/Locations/Gar/GarSyncManager.php',
-	'src/Locations/Import/FiasImportManager.php',
 ) as $owner_file ) {
 	$source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/' . $owner_file );
 	action_scheduler_lifecycle_assert( str_contains( $source, 'when_initialized' ), $owner_file . ' must use the shared AS lifecycle boundary.' );
 }
+$cleanup_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/FiasLegacyScheduleCleanup.php' );
+action_scheduler_lifecycle_assert( ! is_file( dirname( __DIR__, 2 ) . '/src/Locations/Import/FiasImportManager.php' ), 'Dead FiasImportManager must be removed.' );
+action_scheduler_lifecycle_assert( str_contains( $cleanup_source, 'wdc_fias_prepared_import_check' ) && str_contains( $cleanup_source, 'when_initialized' ) && str_contains( $cleanup_source, 'unschedule' ) && ! str_contains( $cleanup_source, 'schedule_recurring' ), 'FIAS may remain only as versioned legacy unscheduling cleanup.' );
 
 echo "Action Scheduler lifecycle smoke passed.\n";
