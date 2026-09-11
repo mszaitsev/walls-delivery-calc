@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+defined( 'WDC_SCHEMA_VERSION' ) || define( 'WDC_SCHEMA_VERSION', '1.0.0' );
 
 $GLOBALS['wdc_test_options'] = array();
 $GLOBALS['wdc_test_actions'] = array();
@@ -682,6 +683,7 @@ $plugin = new Plugin( runtime_smoke_environment() );
 $plugin->register();
 $container = $plugin->container();
 runtime_smoke_assert( array() !== $GLOBALS['wdc_test_dbdelta_queries'], 'Initial schema must run before table-backed runtime services are registered.' );
+runtime_smoke_assert( '1.0.0' === ( $GLOBALS['wdc_test_options']['wdc_db_version'] ?? '' ), 'Plugin patch versions must not advance the unchanged schema baseline.' );
 runtime_smoke_assert( $container->get( AdminMenu::class ) instanceof AdminMenu, 'Composition root must build AdminMenu.' );
 $admin_menu = $container->get( AdminMenu::class );
 ob_start();

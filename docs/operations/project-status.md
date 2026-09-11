@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.0
+Version: 1.0.1
 
-Walls Delivery Calc is functionally complete for its first production release. The production source uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases.
+Walls Delivery Calc is in production at version 1.0.1. The production source uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.1 rebuilds location display/search fields for every active country instead of only active Russian rows; the schema baseline remains 1.0.0.
 
 Current production scope includes:
 

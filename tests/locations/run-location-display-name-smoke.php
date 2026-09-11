@@ -213,6 +213,51 @@ display_smoke_assert( 'Новосибирская обл, Новосибирск
 $wpdb = new wpdb();
 $repository = new LocationRepository( $wpdb );
 $repository->save( Location::from_array( array_merge( $location->to_array(), array( 'id' => null ) ) ) );
+$foreign_fixtures = array(
+	array( 'country_code' => 'KZ', 'region_name' => 'Алматинская', 'region_type' => 'обл', 'place_name' => 'Алматы', 'place_type' => 'город', 'display_name' => '', 'postal_code' => '050000', 'latitude' => 43.238949, 'longitude' => 76.889709 ),
+	array( 'country_code' => 'BY', 'region_name' => 'Минская', 'region_type' => 'обл', 'place_name' => 'Минск', 'place_type' => 'город', 'display_name' => 'old-by' ),
+	array( 'country_code' => 'AM', 'region_name' => 'Ереван', 'region_type' => '', 'place_name' => 'Ереван', 'place_type' => 'город', 'display_name' => 'old-am' ),
+	array( 'country_code' => 'KG', 'region_name' => 'Чуйская', 'region_type' => 'обл', 'place_name' => 'Бишкек', 'place_type' => 'город', 'display_name' => 'old-kg' ),
+);
+foreach ( $foreign_fixtures as $index => $fixture ) {
+	$repository->save(
+		Location::from_array(
+			array_merge(
+				array(
+					'gar_object_id' => 2000 + $index,
+					'fias_id'       => 'foreign-' . $index,
+					'region_code'   => 'F' . $index,
+					'place_level'   => 1,
+					'active'        => true,
+				),
+				$fixture
+			)
+		)
+	);
+}
+$repository->save(
+	Location::from_array(
+		array(
+			'gar_object_id' => 3000,
+			'fias_id'       => 'inactive-kz',
+			'country_code'  => 'KZ',
+			'region_code'   => 'FI',
+			'place_name'    => 'Неактивный',
+			'place_type'    => 'город',
+			'place_level'   => 1,
+			'display_name'  => 'inactive-old',
+			'active'        => false,
+		)
+	)
+);
+
+$default_batch = $repository->find_batch_after_id( 0, 500 );
+display_smoke_assert( 1 === count( $default_batch ) && 'RU' === $default_batch[0]->country_code, 'find_batch_after_id defaults must remain active RU rows with an existing display_name.' );
+$rebuild_batch = $repository->find_batch_after_id( 0, 500, '', false );
+display_smoke_assert( 5 === count( $rebuild_batch ), 'Explicit rebuild batch must contain all active countries, including an empty display_name.' );
+$rebuild_countries = array_values( array_unique( array_map( static fn( Location $item ): string => $item->country_code, $rebuild_batch ) ) );
+sort( $rebuild_countries );
+display_smoke_assert( array( 'AM', 'BY', 'KG', 'KZ', 'RU' ) === $rebuild_countries, 'Explicit rebuild batch must not apply a country filter.' );
 update_option( 'wdc_location_type_display_rules', $rules, false );
 
 $admin = new LocationsAdminPage(
@@ -227,16 +272,46 @@ ob_start();
 $admin->ajax_display_name_rebuild_start();
 $start_payload = json_decode( (string) ob_get_clean(), true );
 display_smoke_assert( 'running' === ( $start_payload['data']['phase'] ?? '' ) && isset( $start_payload['data']['job_id'] ), 'Display_name rebuild start must return JSON job state.' );
+display_smoke_assert( 5 === (int) ( $start_payload['data']['total'] ?? -1 ), 'Display_name rebuild total must equal the active all-country dataset.' );
 
 ob_start();
 $admin->ajax_display_name_rebuild_step();
 $step_payload = json_decode( (string) ob_get_clean(), true );
 $job = $step_payload['data'] ?? array();
 display_smoke_assert( 'finished' === ( $job['phase'] ?? '' ), 'Display_name rebuild job must finish for one-row fixture.' );
-display_smoke_assert( 1 === (int) ( $job['updated'] ?? 0 ), 'Display_name rebuild must update rows.' );
-$rebuilt_row = reset( $wpdb->locations );
+display_smoke_assert( 5 === (int) ( $job['processed'] ?? 0 ) && 5 === (int) ( $job['total'] ?? 0 ), 'Display_name rebuild progress must finish with processed equal to the active dataset total.' );
+display_smoke_assert( 5 === (int) ( $job['updated'] ?? 0 ), 'Display_name rebuild must update every active row.' );
+$rebuilt_row = $wpdb->locations[1] ?? null;
 display_smoke_assert( is_array( $rebuilt_row ) && 'Новосибирская обл, Новосибирский р-н, село Гусиный Брод' === ( $rebuilt_row['display_name'] ?? '' ), 'Display_name rebuild must update display_name, got: ' . ( is_array( $rebuilt_row ) ? (string) ( $rebuilt_row['display_name'] ?? '' ) : 'no row' ) );
 display_smoke_assert( is_array( $rebuilt_row ) && str_contains( (string) ( $rebuilt_row['searchable_text'] ?? '' ), 'гусиный брод' ), 'Display_name rebuild must update searchable_text.' );
+$active_rows = array_filter( $wpdb->locations, static fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 1 ) );
+foreach ( $active_rows as $active_row ) {
+	display_smoke_assert( '' !== trim( (string) ( $active_row['display_name'] ?? '' ) ), 'Every active location, including foreign and initially empty rows, must receive a rebuilt display_name.' );
+}
+$kz_row = $wpdb->locations[2] ?? array();
+display_smoke_assert( 'KZ' === ( $kz_row['country_code'] ?? '' ) && '050000' === ( $kz_row['postal_code'] ?? '' ) && 43.238949 === (float) ( $kz_row['latitude'] ?? 0 ) && 76.889709 === (float) ( $kz_row['longitude'] ?? 0 ), 'Display_name rebuild must preserve foreign identity, postcode, and coordinates.' );
+$inactive_row = $wpdb->locations[6] ?? array();
+display_smoke_assert( 'inactive-old' === ( $inactive_row['display_name'] ?? '' ), 'Inactive locations must not be rebuilt.' );
+
+update_option(
+	'wdc_locations_display_name_rebuild_job',
+	array(
+		'job_id'        => 'inconsistent-eof',
+		'total'         => 6,
+		'processed'     => 5,
+		'updated'       => 5,
+		'last_id'       => PHP_INT_MAX,
+		'phase'         => 'running',
+		'errors'        => array(),
+		'current_batch' => 0,
+	),
+	false
+);
+ob_start();
+$admin->ajax_display_name_rebuild_step();
+$eof_payload = json_decode( (string) ob_get_clean(), true );
+$eof_job = $eof_payload['data'] ?? array();
+display_smoke_assert( 'failed' === ( $eof_job['phase'] ?? '' ) && array() !== ( $eof_job['errors'] ?? array() ), 'Unexpected EOF before processed reaches total must fail instead of reporting finished.' );
 
 $_SERVER['REQUEST_METHOD'] = 'GET';
 $_GET = array( 'location_query' => 'Гусиный', 'location_per_page' => '10' );
