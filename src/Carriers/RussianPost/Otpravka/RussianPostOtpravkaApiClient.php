@@ -28,7 +28,7 @@ final class RussianPostOtpravkaApiClient {
 
 		$token     = $this->settings->access_token();
 		$basic_key = $this->settings->basic_key();
-		if ( '' === $token || '' === $basic_key ) {
+		if ( ! $this->settings->credentials_complete() ) {
 			return $this->failure( 0, '', '', 'Russian Post Otpravka credentials are incomplete.', '', 0, $url, $type, $started, '', 'credentials' );
 		}
 

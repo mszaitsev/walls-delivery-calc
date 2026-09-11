@@ -356,13 +356,13 @@ $migration_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-ozon-pickup-mig
 mkdir( $migration_dir );
 file_put_contents( $migration_dir . DIRECTORY_SEPARATOR . '0002_future_schema.php', "<?php\nreturn static function (): void { if ( '1' === get_option( 'wdc_future_fail_once', '1' ) ) { update_option( 'wdc_future_fail_once', '0', false ); throw new RuntimeException( 'fail once' ); } };\n" );
 try {
-	( new MigrationManager( '1.0.1-test', $migration_dir ) )->run();
+	( new MigrationManager( '1.0.2-test', $migration_dir ) )->run();
 	throw new RuntimeException( 'failed migration was marked applied' );
 } catch ( RuntimeException $exception ) {
 	oz_pickup_assert( 'fail once' === $exception->getMessage() && ! in_array( '0002_future_schema.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '1.0.0' === get_option( 'wdc_db_version', '' ), 'MigrationManager must not mark a failed future migration applied or advance db version.' );
 }
-( new MigrationManager( '1.0.1-test', $migration_dir ) )->run();
-oz_pickup_assert( in_array( '0002_future_schema.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '1.0.1-test' === get_option( 'wdc_db_version', '' ), 'MigrationManager must rerun failed future migration and mark it applied only after success.' );
+( new MigrationManager( '1.0.2-test', $migration_dir ) )->run();
+oz_pickup_assert( in_array( '0002_future_schema.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '1.0.2-test' === get_option( 'wdc_db_version', '' ), 'MigrationManager must rerun failed future migration and mark it applied only after success.' );
 @unlink( $migration_dir . DIRECTORY_SEPARATOR . '0002_future_schema.php' );
 @rmdir( $migration_dir );
 

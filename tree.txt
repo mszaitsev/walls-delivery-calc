@@ -1,5 +1,5 @@
 Repository file tree
-Generated for Walls Delivery Calc 1.0.1
+Generated for Walls Delivery Calc 1.0.2
 
 .
 |-- tree.txt
@@ -529,6 +529,7 @@ Generated for Walls Delivery Calc 1.0.1
 |-- src/Pickup/Rest/PickupPointsRestController.php
 |-- src/Pickup/RussianPost/RussianPostPassportPointNormalizer.php
 |-- src/Pickup/RussianPost/RussianPostPickupDiagnosticsService.php
+|-- src/Pickup/RussianPost/RussianPostPickupImportLock.php
 |-- src/Pickup/RussianPost/RussianPostPickupImporter.php
 |-- src/Pickup/RussianPost/RussianPostPickupImportStateService.php
 |-- src/Pickup/RussianPost/RussianPostPickupLocationResolver.php

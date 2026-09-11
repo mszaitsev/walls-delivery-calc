@@ -188,9 +188,6 @@ final class RussianPostPickupImportStateService {
 		$errors[] = $was_download ? 'Download stage timed out/stale. API download is unstable in this environment. Use manual ZIP upload import.' : ( $was_extract ? 'Extract stage timed out/stale. Check PHP ZipArchive extension or use extracted JSON/TXT import.' : ( $was_batch ? 'Batch stage timed out/stale.' : 'Previous import lock was stale and has been reset.' ) );
 		$state['errors'] = array_slice( array_map( 'strval', $errors ), 0, self::MAX_STORED_ERRORS );
 		$this->save( $state );
-		if ( function_exists( 'delete_transient' ) ) {
-			delete_transient( 'wdc_russian_post_pickup_import_lock' );
-		}
 
 		return $state;
 	}
