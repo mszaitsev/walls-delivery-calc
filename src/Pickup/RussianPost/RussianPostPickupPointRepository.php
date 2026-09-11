@@ -6,6 +6,8 @@ namespace WallsShop\WDC\Pickup\RussianPost;
 defined( 'ABSPATH' ) || exit;
 
 final class RussianPostPickupPointRepository {
+	private const INSERT_CHUNK_SIZE = 100;
+
 	private \wpdb $wpdb;
 
 	public function __construct( ?\wpdb $db = null ) {
@@ -68,6 +70,7 @@ final class RussianPostPickupPointRepository {
 		$table = '' !== $table ? $this->sanitize_table_name( $table ) : $this->main_table();
 		$stats = array( 'inserted' => 0, 'updated' => 0, 'skipped' => 0 );
 		$now = function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+		$prepared_rows = array();
 		foreach ( $rows as $row ) {
 			if ( ! is_array( $row ) ) {
 				++$stats['skipped'];
@@ -78,14 +81,57 @@ final class RussianPostPickupPointRepository {
 				++$stats['skipped'];
 				continue;
 			}
-			if ( $this->wpdb->insert( $table, $row, $this->formats( $row ) ) ) {
-				++$stats['inserted'];
-			} else {
-				++$stats['skipped'];
+			$prepared_rows[] = $row;
+		}
+
+		foreach ( array_chunk( $prepared_rows, self::INSERT_CHUNK_SIZE ) as $chunk ) {
+			$inserted = $this->insert_rows( $table, $chunk );
+			if ( false !== $inserted ) {
+				$stats['inserted'] += max( 0, min( count( $chunk ), $inserted ) );
+				$stats['skipped'] += max( 0, count( $chunk ) - $inserted );
+				continue;
+			}
+
+			// Preserve the former per-row failure semantics for an exceptional failed statement.
+			foreach ( $chunk as $row ) {
+				$row_inserted = (bool) $this->wpdb->insert( $table, $row, $this->formats( $row ) );
+				++$stats[ $row_inserted ? 'inserted' : 'skipped' ];
 			}
 		}
 
 		return $stats;
+	}
+
+	/** @param array<int,array<string,mixed>> $rows */
+	private function insert_rows( string $table, array $rows ): int|false {
+		if ( array() === $rows ) {
+			return 0;
+		}
+		$columns = array_keys( $rows[0] );
+		$formats = array_combine( $columns, $this->formats( $rows[0] ) );
+		$values = array();
+		$args = array();
+		foreach ( $rows as $row ) {
+			$cells = array();
+			foreach ( $columns as $column ) {
+				$value = $row[ $column ] ?? null;
+				if ( null === $value ) {
+					$cells[] = 'NULL';
+					continue;
+				}
+				$cells[] = (string) ( $formats[ $column ] ?? '%s' );
+				$args[] = $value;
+			}
+			$values[] = '(' . implode( ', ', $cells ) . ')';
+		}
+		$sql = sprintf(
+			'INSERT INTO %s (%s) VALUES %s ON DUPLICATE KEY UPDATE point_code = VALUES(point_code)',
+			$table,
+			implode( ', ', $columns ),
+			implode( ', ', $values )
+		);
+
+		return $this->wpdb->query( $this->wpdb->prepare( $sql, ...$args ) );
 	}
 
 	public function count_active( string $point_type = '' ): int {
@@ -585,17 +631,15 @@ final class RussianPostPickupPointRepository {
 	}
 
 	private function formats( array $row ): array {
-		$formats = array(
-			'point_code' => '%s', 'point_type' => '%s', 'postcode' => '%s', 'country_code' => '%s',
-			'region_name' => '%s', 'city_name' => '%s', 'street' => '%s', 'house' => '%s', 'address' => '%s',
-			'fias_location_guid' => '%s', 'fias_address_guid' => '%s', 'gar_region_id' => '%s',
-			'location_id' => '%d', 'latitude' => '%f', 'longitude' => '%f', 'geohash' => '%s', 'description' => '%s',
-			'work_time' => '%s',
-			'active' => '%d', 'source_hash' => '%s', 'last_seen_at' => '%s',
-			'created_at' => '%s', 'updated_at' => '%s',
-		);
+		return array_map( fn( string $column ): string => $this->format_for_column( $column ), array_keys( $row ) );
+	}
 
-		return array_values( array_intersect_key( $formats, $row ) );
+	private function format_for_column( string $column ): string {
+		return match ( $column ) {
+			'location_id', 'active' => '%d',
+			'latitude', 'longitude' => '%f',
+			default => '%s',
+		};
 	}
 
 	private function sanitize_table_name( string $table ): string {

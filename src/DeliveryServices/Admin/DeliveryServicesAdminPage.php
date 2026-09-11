@@ -85,6 +85,7 @@ use WallsShop\WDC\Packaging\PackagingApplicationResult;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupSchedule;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
@@ -1173,6 +1174,9 @@ final class DeliveryServicesAdminPage {
 			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import' ), true ) && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
 				$this->otpravka_settings->save_from_admin( $_POST );
 				$this->save_russian_post_pickup_type_settings( $id );
+				if ( 'save_russian_post_pickup' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
+					$this->pickup_importer->sync_schedule();
+				}
 				if ( 'run_russian_post_pickup_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
 					$this->pickup_importer->queue_background_import( $this->otpravka_settings->unload_type() );
 				}
@@ -4494,6 +4498,12 @@ final class DeliveryServicesAdminPage {
 		$locked = $this->pickup_importer instanceof RussianPostPickupImporter && $this->pickup_importer->is_locked();
 		$schedule_enabled = ! empty( $values[ RussianPostOtpravkaApiSettings::PICKUP_SCHEDULE_ENABLED_KEY ] );
 		$next_schedule = $schedule_enabled && function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( RussianPostPickupImporter::SCHEDULE_HOOK ) : false;
+		$effective_schedule = $this->pickup_importer instanceof RussianPostPickupImporter
+			? $this->pickup_importer->effective_schedule()
+			: array( 'weekday' => 1, 'time' => '09:00', 'explicit' => false );
+		$schedule_time_control = in_array( (string) $effective_schedule['time'], RussianPostPickupSchedule::time_options(), true )
+			? (string) $effective_schedule['time']
+			: RussianPostPickupSchedule::DEFAULT_TIME;
 		?>
 		<form method="post" enctype="multipart/form-data" style="max-width: 960px; margin-top:16px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -4523,6 +4533,16 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row">Статус импорта</th><td><div class="wdc-rp-pickup-import-status" data-wdc-rp-pickup-import-status data-wdc-rp-status="<?php echo esc_attr( (string) ( $state['status'] ?? 'idle' ) ); ?>"><details><summary data-wdc-rp-status-summary><?php echo esc_html( $this->pickup_import_status_summary( $state ) ); ?> <span class="spinner <?php echo $is_busy ? 'is-active' : ''; ?>" data-wdc-rp-spinner></span></summary><table class="widefat striped" style="max-width: 760px; margin-top: 8px;"><tbody><?php foreach ( $this->pickup_import_state_rows() as $key => $label ) : ?><tr><th scope="row"><?php echo esc_html( $label ); ?></th><td data-wdc-rp-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $this->pickup_import_state_value( $state, $key ) ); ?></td></tr><?php endforeach; ?></tbody></table><p><button type="button" class="button" data-wdc-rp-refresh-status>Обновить статус</button></p></details></div></td></tr>
 				<?php $this->select_row( 'russian_post_pickup_unload_type', 'Тип выгрузки', (string) ( $values[ RussianPostOtpravkaApiSettings::PICKUP_UNLOAD_TYPE_KEY ] ?? 'ALL' ), array( 'ALL', 'OPS', 'PVZ', 'APS' ) ); ?>
 				<?php $this->checkbox_row( 'russian_post_pickup_schedule_enabled', 'Обновлять еженедельно', ! empty( $values[ RussianPostOtpravkaApiSettings::PICKUP_SCHEDULE_ENABLED_KEY ] ) ); ?>
+				<tr><th scope="row"><label for="russian_post_pickup_schedule_weekday">День недели</label></th><td><select id="russian_post_pickup_schedule_weekday" name="russian_post_pickup_schedule_weekday">
+					<?php foreach ( RussianPostPickupSchedule::weekday_labels() as $weekday => $label ) : ?>
+						<option value="<?php echo esc_attr( (string) $weekday ); ?>" <?php selected( (int) $effective_schedule['weekday'], $weekday ); ?>><?php echo esc_html( $label ); ?></option>
+					<?php endforeach; ?>
+				</select></td></tr>
+				<tr><th scope="row"><label for="russian_post_pickup_schedule_time">Время</label></th><td><select id="russian_post_pickup_schedule_time" name="russian_post_pickup_schedule_time">
+					<?php foreach ( RussianPostPickupSchedule::time_options() as $time ) : ?>
+						<option value="<?php echo esc_attr( $time ); ?>" <?php selected( $schedule_time_control, $time ); ?>><?php echo esc_html( $time ); ?></option>
+					<?php endforeach; ?>
+				</select><p class="description">Время Новосибирска (GMT+7)</p></td></tr>
 				<?php if ( $schedule_enabled ) : ?>
 					<tr><th scope="row">Следующий запуск</th><td>
 						<?php if ( false !== $next_schedule ) : ?>
@@ -4637,6 +4657,10 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			'current_batch_size' => 'Размер текущего batch',
 			'last_batch_duration_ms' => 'Последний batch, мс',
 			'max_batch_duration_ms' => 'Максимальный batch, мс',
+			'worker_slice_batches' => 'Batch в текущем worker slice',
+			'worker_slice_objects' => 'Объектов в текущем worker slice',
+			'worker_slice_duration_ms' => 'Длительность worker slice, мс',
+			'worker_slice_stop_reason' => 'Причина остановки worker slice',
 			'payload_offset' => 'Смещение payload',
 			'staging_table' => 'Таблица staging',
 			'main_table' => 'Основная таблица',

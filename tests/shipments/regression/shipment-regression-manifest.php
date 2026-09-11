@@ -37,6 +37,8 @@ return array(
 	'russian-post.cancel' => array( 'path' => 'tests/shipments/run-russian-post-cancel-shipment-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.documents' => array( 'path' => 'tests/shipments/run-russian-post-documents-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.pickup-import' => array( 'path' => 'tests/pickup/run-russian-post-pickup-import-smoke.php', 'groups' => array( 'russian-post' ) ),
+	'russian-post.cross-job-callback-race' => array( 'path' => 'tests/pickup/run-russian-post-cross-job-callback-race-smoke.php', 'groups' => array( 'russian-post' ) ),
+	'russian-post.wp-file-api' => array( 'path' => 'tests/pickup/run-russian-post-wp-file-api-smoke.php', 'groups' => array( 'russian-post' ) ),
 
 	'cdek.foundation' => array( 'path' => 'tests/cdek/run-cdek-foundation-smoke.php', 'groups' => array( 'cdek' ) ),
 	'cdek.order-creation' => array( 'path' => 'tests/cdek/run-cdek-order-creation-smoke.php', 'groups' => array( 'cdek' ), 'timeout' => 120 ),

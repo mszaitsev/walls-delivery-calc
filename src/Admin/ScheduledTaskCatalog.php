@@ -14,6 +14,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPip
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupSchedule;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 
@@ -31,7 +32,8 @@ final class ScheduledTaskCatalog {
 		private OzonDeliverySettings $ozon_settings,
 		private OzonDeliveryPickupScheduler $ozon_scheduler,
 		private YandexDeliveryGeoPipelineV2Runner $yandex_runner,
-		private ShipmentStatusAutoSyncService $shipment_status_auto_sync
+		private ShipmentStatusAutoSyncService $shipment_status_auto_sync,
+		private ?RussianPostPickupSchedule $russian_post_schedule = null
 	) {
 	}
 
@@ -44,7 +46,7 @@ final class ScheduledTaskCatalog {
 
 		return array(
 			$this->task( 'shipment_statuses', 'Автосинхронизация статусов отправлений', 'Каждые ' . $this->shipment_status_auto_sync->format_interval_minutes( $this->shipment_status_auto_sync->interval_minutes() ), $status_enabled, $this->wp_next( ShipmentStatusAutoSyncCron::HOOK ) ),
-			$this->task( 'russian_post_pickup', 'Обновление ПВЗ Почты России', 'Раз в неделю', $this->russian_post_settings->schedule_enabled(), $this->wp_next( RussianPostPickupImporter::SCHEDULE_HOOK ) ),
+			$this->task( 'russian_post_pickup', 'Обновление ПВЗ Почты России', $this->russian_post_schedule()->description( $this->wp_next( RussianPostPickupImporter::SCHEDULE_HOOK ) ), $this->russian_post_settings->schedule_enabled(), $this->wp_next( RussianPostPickupImporter::SCHEDULE_HOOK ) ),
 			$this->task( 'ozon_pickup', 'Обновление ПВЗ Ozon Delivery', 'Ежедневно в ' . $this->ozon_settings->pickup_sync_time(), $this->ozon_settings->pickup_auto_sync_enabled(), $this->ozon_scheduler->next_run() ),
 			$this->task( 'yandex_geo', 'Полное обновление ПВЗ/географии Яндекс', $this->yandex_schedule( $yandex ), ! empty( $yandex['enabled'] ), $this->yandex_runner->next_run_timestamp() ),
 			$this->task( 'dpd_pickup', 'Обновление ПВЗ DPD', array() === $dpd_times ? '—' : implode( ', ', $dpd_times ), $this->dpd_settings->pickup_autosync_enabled() && array() !== $dpd_times, $this->next_dpd_run( $dpd_times ) ),
@@ -97,5 +99,9 @@ final class ScheduledTaskCatalog {
 		$timestamp = wp_next_scheduled( $hook, $args );
 
 		return false === $timestamp ? null : (int) $timestamp;
+	}
+
+	private function russian_post_schedule(): RussianPostPickupSchedule {
+		return $this->russian_post_schedule ??= new RussianPostPickupSchedule( $this->russian_post_settings, $this->timezone );
 	}
 }

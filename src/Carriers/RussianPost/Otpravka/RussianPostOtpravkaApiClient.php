@@ -371,6 +371,9 @@ final class RussianPostOtpravkaApiClient {
 	 */
 	private function download_with_wp_http( string $url, string $type, string $token, string $basic_key, int $timeout ): array {
 		$started = microtime( true );
+		if ( ! $this->ensure_wordpress_file_api() ) {
+			return $this->failure( 0, '', '', 'WordPress File API is unavailable.', '', 0, $url, $type, $started, '', 'wp_http' );
+		}
 		$temp = wp_tempnam( 'wdc-russian-post-passport.zip' );
 		if ( ! is_string( $temp ) || '' === $temp ) {
 			return $this->failure( 0, '', '', 'Unable to create temporary file.', '', 0, $url, $type, $started, '', 'wp_http' );
@@ -433,6 +436,9 @@ final class RussianPostOtpravkaApiClient {
 	 */
 	private function download_with_curl( string $url, string $type, string $token, string $basic_key, int $timeout ): array {
 		$started = microtime( true );
+		if ( ! $this->ensure_wordpress_file_api() ) {
+			return $this->failure( 0, '', '', 'WordPress File API is unavailable.', '', 0, $url, $type, $started, '', 'curl' );
+		}
 		$temp = wp_tempnam( 'wdc-russian-post-passport.zip' );
 		if ( ! is_string( $temp ) || '' === $temp ) {
 			return $this->failure( 0, '', '', 'Unable to create temporary file.', '', 0, $url, $type, $started, '', 'curl' );
@@ -449,11 +455,14 @@ final class RussianPostOtpravkaApiClient {
 			$this->delete_temp_file( $temp );
 			return $this->failure( 0, '', '', 'Unable to initialize cURL.', '', 0, $url, $type, $started, '', 'curl' );
 		}
-		curl_setopt_array(
+		$configured = curl_setopt_array(
 			$curl,
 			array(
-				CURLOPT_FILE => $handle,
-				CURLOPT_RETURNTRANSFER => false,
+				CURLOPT_WRITEFUNCTION => static function ( mixed $unused, string $chunk ) use ( $handle ): int {
+					$written = fwrite( $handle, $chunk );
+
+					return false === $written ? 0 : $written;
+				},
 				CURLOPT_FOLLOWLOCATION => true,
 				CURLOPT_CONNECTTIMEOUT => min( 15, $timeout ),
 				CURLOPT_TIMEOUT => $timeout,
@@ -464,6 +473,19 @@ final class RussianPostOtpravkaApiClient {
 				),
 			)
 		);
+		if ( ! $configured ) {
+			$errno = (int) curl_errno( $curl );
+			$error = (string) curl_error( $curl );
+			curl_close( $curl );
+			fclose( $handle );
+			$this->delete_temp_file( $temp );
+
+			$result = $this->failure( 0, '', '', '' !== $error ? $error : 'Unable to configure cURL streaming download.', '', 0, $url, $type, $started, '', 'curl' );
+			$result['curl_errno'] = $errno;
+			$result['curl_error'] = $error;
+
+			return $result;
+		}
 		$ok = curl_exec( $curl );
 		$errno = (int) curl_errno( $curl );
 		$error = (string) curl_error( $curl );
@@ -751,6 +773,19 @@ final class RussianPostOtpravkaApiClient {
 
 	private function duration_ms( float $started ): int {
 		return $started > 0 ? max( 0, (int) round( ( microtime( true ) - $started ) * 1000 ) ) : 0;
+	}
+
+	private function ensure_wordpress_file_api(): bool {
+		if ( function_exists( 'wp_tempnam' ) ) {
+			return true;
+		}
+
+		$file_api = ABSPATH . 'wp-admin/includes/file.php';
+		if ( is_readable( $file_api ) ) {
+			require_once $file_api;
+		}
+
+		return function_exists( 'wp_tempnam' );
 	}
 
 	private function delete_temp_file( string $temp_file ): void {

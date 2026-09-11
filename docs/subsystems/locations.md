@@ -2,7 +2,7 @@
 
 `postal_code` is enrichment-owned and is never a GAR changed field. The retired location alias index is not generated, exported, created by the 1.0 schema, or used by runtime. Search uses `searchable_text` and canonical hierarchy fields; backup/restore and incremental apply swap locations only.
 
-Version: 1.0.2
+Version: 1.0.10
 
 The manual **Пересобрать display_name** job pages every active canonical location across all countries, including rows whose current `display_name` is empty. Its total uses the same active all-country dataset, and an unexpected end of pagination before `processed` reaches `total` fails the job instead of reporting a false success. Rebuild updates only `display_name`, `searchable_text`, and `updated_at` through `LocationRepository::update_display_fields()`.
 
@@ -85,6 +85,7 @@ Jet Logistic owns separate geography tables for vendor city snapshots and manual
 - Pickup maps/lists must stay scoped to WDC UI and must not override global WooCommerce controls.
 - Russian Post pickup import/settings live under `Службы доставки → Почта России → ПВЗ / ОПС`; pickup database diagnostics live under `Службы доставки → Почта России → Диагностика базы ПВЗ`.
 - Russian Post pickup imports are non-overlapping. API imports reject incomplete Otpravka credentials before queueing; the background lifecycle owns an atomic job-ID lock and releases it for success, failure, cancellation, or stale timeout. A terminal legacy job lock is recovered by status refresh or the next start without removing the lock of a queued/running job.
+- Its optional weekly API import uses an explicit ISO weekday and quarter-hour time in `Asia/Novosibirsk`; fresh settings default to Monday 09:00, while a pre-1.0.10 installation retains its existing event until the schedule form is explicitly saved.
 
 ## Pickup Styling Ownership
 

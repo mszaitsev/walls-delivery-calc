@@ -1,12 +1,12 @@
 # Troubleshooting
 
-Version: 1.0.2
+Version: 1.0.10
 
 Start with the safe status/diagnostic panel owned by the affected subsystem. Never enable raw payload logging or expose carrier credentials, tokens, cookies, full addresses, phone numbers, email, or payment data to diagnose a failure.
 
 ## Installation and migrations
 
-On activation, verify the plugin reports version 1.0.2 and that the unchanged schema baseline `wdc_db_version` remains `1.0.0`. A fresh install runs only `database/migrations/0001_initial_schema.php`. If activation reports a migration failure, inspect the WordPress database error and table privileges; do not edit migration options manually or replay deleted 0.x migration files.
+On activation, verify the plugin reports version 1.0.10 and that the unchanged schema baseline `wdc_db_version` remains `1.0.0`. A fresh install runs only `database/migrations/0001_initial_schema.php`. If activation reports a migration failure, inspect the WordPress database error and table privileges; do not edit migration options manually or replay deleted 0.x migration files.
 
 The initial migration is idempotent for an already-correct development database and never drops/truncates business tables. Retired pre-1.0 tables that already exist are inert and may be removed separately only after an operator backup and explicit decision.
 
@@ -27,6 +27,10 @@ If pickup points do not appear, verify that the selected rate has canonical pick
 Check WooCommerce → Status → Scheduled Actions for the documented current hooks. Expected pre-initialization, disabled, lock-busy, and no-work states are silent. Investigate technical warnings for transport/API/parse/contract failures, lost leases, retry exhaustion, database errors, or Action Scheduler unavailability after initialization.
 
 Ozon pickup import uses an active published generation plus a separate building generation. Failed/cancelled builds must not replace the active snapshot. DPD, Russian Post, Yandex, and calendar jobs must remain bounded and non-overlapping.
+
+Russian Post API pickup import requires the PHP Zip extension (`ZipArchive`). The background worker loads the WordPress File API itself; if `ZipArchive` is unavailable, the import must finish with `PHP ZipArchive extension is not available.` and release its lock rather than attempting a shell unzip fallback.
+
+For a Russian Post pickup import, a queued/running state must have the same `import_id` as its unexpired option lease. The lease stays active across init, parse batches, and finalize and is removed only on terminal success/failure/cancellation. Guard diagnostics are retained in the import state when a callback receives the wrong job ID, loses its lease, or cannot access the payload; do not manually invoke importer hooks to recover a job.
 
 ## Shipments
 

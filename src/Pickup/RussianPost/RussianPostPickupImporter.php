@@ -5,6 +5,8 @@ namespace WallsShop\WDC\Pickup\RussianPost;
 
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+use WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 
 defined( 'ABSPATH' ) || exit;
@@ -16,6 +18,9 @@ final class RussianPostPickupImporter {
 	public const FINALIZE_HOOK = 'wdc_russian_post_pickup_import_finalize';
 	private const BATCH_SIZE = 500;
 	private const MAX_STORED_ERRORS = 10;
+	private const SOFT_TIME_BUDGET_SECONDS = 18.0;
+	private const MAX_BATCHES_PER_SLICE = 15;
+	private const MEMORY_BUDGET_FRACTION = 0.8;
 
 	public function __construct(
 		private RussianPostOtpravkaApiSettings $settings,
@@ -25,7 +30,9 @@ final class RussianPostPickupImporter {
 		private ?RussianPostPickupImportStateService $state = null,
 		private ?ActionScheduler $scheduler = null,
 		private ?RussianPostPickupLocationResolver $location_resolver = null,
-		private ?RussianPostPickupImportLock $import_lock = null
+		private ?RussianPostPickupImportLock $import_lock = null,
+		private mixed $execution_budget_factory = null,
+		private ?RussianPostPickupSchedule $pickup_schedule = null
 	) {
 	}
 
@@ -42,16 +49,14 @@ final class RussianPostPickupImporter {
 	}
 
 	public function sync_schedule(): void {
-		if ( ! function_exists( 'wp_next_scheduled' ) || ! function_exists( 'wp_schedule_event' ) ) {
-			return;
-		}
-		$scheduled = wp_next_scheduled( self::SCHEDULE_HOOK );
-		if ( $this->settings->schedule_enabled() && false === $scheduled ) {
-			wp_schedule_event( time() + ( defined( 'HOUR_IN_SECONDS' ) ? HOUR_IN_SECONDS : 3600 ), 'weekly', self::SCHEDULE_HOOK );
-		}
-		if ( ! $this->settings->schedule_enabled() && false !== $scheduled && function_exists( 'wp_clear_scheduled_hook' ) ) {
-			wp_clear_scheduled_hook( self::SCHEDULE_HOOK );
-		}
+		$this->schedule_service()->sync();
+	}
+
+	/** @return array{weekday:int,time:string,explicit:bool} */
+	public function effective_schedule(): array {
+		$existing = function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( self::SCHEDULE_HOOK ) : false;
+
+		return $this->schedule_service()->effective_settings( $existing );
 	}
 
 	/**
@@ -77,18 +82,19 @@ final class RussianPostPickupImporter {
 	 * @return array<string,mixed>
 	 */
 	public function run_import_init( string $import_id = '', string $type = 'ALL' ): array {
-		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		if ( '' === $import_id || $import_id !== (string) ( $state['import_id'] ?? '' ) || ! in_array( (string) ( $state['status'] ?? '' ), array( 'queued', 'running' ), true ) || ! $this->lock_service()->owns( $import_id ) ) {
-			return array( 'success' => false, 'errors' => array( 'Import init ignored: stale import state or lock owner.' ) );
+		$guard_failure = $this->guard_background_callback( 'init', $import_id );
+		if ( null !== $guard_failure ) {
+			return $guard_failure;
 		}
 
 		try {
 			return $this->execute_import_init( $import_id, $type );
 		} catch ( \Throwable $exception ) {
+			$this->assert_callback_state_ownership( $import_id, 'init' );
 			try {
 				return $this->fail_unexpected_pipeline( $import_id, $type, $exception );
 			} finally {
-				$this->lock_service()->release_terminal( $import_id );
+				$this->lock_service()->release_terminal( $import_id, 'init_unexpected_failure' );
 			}
 		}
 	}
@@ -131,6 +137,10 @@ final class RussianPostPickupImporter {
 				$result['payload_size'] = $payload_size;
 				$result['payload_offset'] = 0;
 				$this->state?->update( 'parse', $result );
+				if ( ! $this->lock_service()->renew( $import_id, 'init_uploaded_payload_before_batch' ) ) {
+					$result['errors'][] = 'Import init lost its owner lock before scheduling the batch.';
+					return $this->fail_pipeline( $result );
+				}
 				if ( ! $this->schedule_single( self::BATCH_HOOK, array( $import_id, $type, 0 ) ) ) {
 					$result['errors'][] = 'Unable to schedule background import batch job.';
 					return $this->fail_pipeline( $result );
@@ -206,6 +216,10 @@ final class RussianPostPickupImporter {
 			$result['payload_size'] = is_file( $payload_file ) ? (int) filesize( $payload_file ) : 0;
 			$result['payload_offset'] = 0;
 			$this->state?->update( 'parse', $result );
+			if ( ! $this->lock_service()->renew( $import_id, 'init_extracted_payload_before_batch' ) ) {
+				$result['errors'][] = 'Import init lost its owner lock before scheduling the batch.';
+				return $this->fail_pipeline( $result );
+			}
 			if ( ! $this->schedule_single( self::BATCH_HOOK, array( $import_id, $type, 0 ) ) ) {
 				$result['errors'][] = 'Unable to schedule background import batch job.';
 				return $this->fail_pipeline( $result );
@@ -221,18 +235,20 @@ final class RussianPostPickupImporter {
 	 * @return array<string,mixed>
 	 */
 	public function run_import_batch( string $import_id = '', string $type = 'ALL', int $payload_offset = 0 ): array {
-		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		if ( '' === $import_id || $import_id !== (string) ( $state['import_id'] ?? '' ) || ! in_array( (string) ( $state['status'] ?? '' ), array( 'queued', 'running' ), true ) || ! $this->lock_service()->owns( $import_id ) ) {
-			return array( 'success' => false, 'errors' => array( 'Import batch ignored: stale import state or lock owner.' ) );
+		$guard_failure = $this->guard_background_callback( 'batch', $import_id, $payload_offset );
+		if ( null !== $guard_failure ) {
+			return $guard_failure;
 		}
 
 		try {
 			return $this->execute_import_batch( $import_id, $type, $payload_offset );
 		} catch ( \Throwable $exception ) {
+			$this->assert_callback_state_ownership( $import_id, 'batch' );
+			$this->record_worker_slice_metrics( 'error' );
 			try {
 				return $this->fail_unexpected_pipeline( $import_id, $type, $exception );
 			} finally {
-				$this->lock_service()->release_terminal( $import_id );
+				$this->lock_service()->release_terminal( $import_id, 'batch_unexpected_failure' );
 			}
 		}
 	}
@@ -242,22 +258,123 @@ final class RussianPostPickupImporter {
 	 */
 	private function execute_import_batch( string $import_id, string $type, int $payload_offset ): array {
 		$type = $this->normalize_type( $type );
+		$budget = $this->new_execution_budget();
+		$slice_started_at = $this->now();
+		$slice_started = microtime( true );
+		$slice_batches = 0;
+		$slice_objects = 0;
+		$last_batch_size = 0;
+		$persisted_state = $this->state?->current() ?? array();
+		$payload_offset = max( 0, (int) ( $persisted_state['payload_offset'] ?? $payload_offset ) );
+		$this->state?->record_worker_slice_metrics(
+			array(
+				'worker_slice_started_at' => $slice_started_at,
+				'worker_slice_duration_ms' => 0,
+				'worker_slice_batches' => 0,
+				'worker_slice_objects' => 0,
+				'worker_slice_stop_reason' => '',
+			)
+		);
+
+		while ( $budget->can_continue() ) {
+			$batch = $this->process_one_batch( $import_id, $type, $payload_offset, $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+			if ( empty( $batch['success'] ) ) {
+				$batch_result = is_array( $batch['result'] ?? null ) ? $batch['result'] : array();
+				$this->record_worker_slice_metrics( 'error', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+				$result = $this->state_to_result( $this->state?->current() ?? array(), $type, $import_id );
+				$result['errors'] = is_array( $batch_result['errors'] ?? null ) ? $batch_result['errors'] : $result['errors'];
+				return $this->fail_pipeline( $result );
+			}
+
+			$payload_offset = (int) $batch['offset'];
+			$last_batch_size = (int) $batch['batch_size'];
+			++$slice_batches;
+			$slice_objects += (int) $batch['objects'];
+			$budget->mark_unit_processed();
+
+			$current = $this->state?->current() ?? array();
+			$current_id = (string) ( $current['import_id'] ?? '' );
+			$is_active = in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true );
+			if ( $current_id !== $import_id ) {
+				throw new \RuntimeException( 'Russian Post pickup import worker lost state ownership between batches.' );
+			}
+			if ( ! $is_active ) {
+				$this->record_worker_slice_metrics( 'cancelled', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+				return array( 'success' => false, 'cancelled' => true, 'stop_reason' => 'cancelled', 'offset' => $payload_offset );
+			}
+			if ( ! $this->lock_service()->owns( $import_id ) ) {
+				$this->record_worker_slice_metrics( 'lock_lost', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+				$result = $this->state_to_result( $this->state?->current() ?? $current, $type, $import_id );
+				$result['errors'][] = 'Russian Post pickup import worker lost its owner lock between batches.';
+				return $this->fail_pipeline( $result );
+			}
+			$renewed = $this->lock_service()->renew( $import_id, 'batch_worker_checkpoint' );
+			if ( ! $renewed ) {
+				$current = $this->state?->current() ?? array();
+				if ( $import_id === (string) ( $current['import_id'] ?? '' ) && ! in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+					$this->record_worker_slice_metrics( 'cancelled', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+					return array( 'success' => false, 'cancelled' => true, 'stop_reason' => 'cancelled', 'offset' => $payload_offset );
+				}
+				$this->record_worker_slice_metrics( 'lock_lost', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+				$result = $this->state_to_result( $current, $type, $import_id );
+				$result['errors'][] = 'Import batch lost its owner lock before continuing the worker slice.';
+				return $this->fail_pipeline( $result );
+			}
+
+			$current = $this->state?->current() ?? array();
+			if ( $import_id !== (string) ( $current['import_id'] ?? '' ) ) {
+				throw new \RuntimeException( 'Russian Post pickup import worker lost state ownership after lease renewal.' );
+			}
+			if ( ! in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+				$this->record_worker_slice_metrics( 'cancelled', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+				return array( 'success' => false, 'cancelled' => true, 'stop_reason' => 'cancelled', 'offset' => $payload_offset );
+			}
+
+			if ( ! empty( $batch['eof'] ) ) {
+				$this->record_worker_slice_metrics( 'eof', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+				if ( ! $this->schedule_single( self::FINALIZE_HOOK, array( $import_id, $type ) ) ) {
+					$result = $this->state_to_result( $this->state?->current() ?? array(), $type, $import_id );
+					$result['errors'][] = 'Unable to schedule background import finalize job.';
+					return $this->fail_pipeline( $result );
+				}
+
+				return array( 'success' => true, 'eof' => true, 'offset' => $payload_offset, 'batch_size' => (int) $batch['batch_size'], 'worker_slice_batches' => $slice_batches, 'worker_slice_objects' => $slice_objects, 'stop_reason' => 'eof' );
+			}
+		}
+
+		$stop_reason = $budget->stop_reason();
+		$this->record_worker_slice_metrics( $stop_reason, $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+		if ( ! $this->schedule_single( self::BATCH_HOOK, array( $import_id, $type, $payload_offset ) ) ) {
+			$result = $this->state_to_result( $this->state?->current() ?? array(), $type, $import_id );
+			$result['errors'][] = 'Unable to schedule next background import batch job.';
+			return $this->fail_pipeline( $result );
+		}
+
+		return array( 'success' => true, 'eof' => false, 'offset' => $payload_offset, 'batch_size' => $last_batch_size, 'worker_slice_batches' => $slice_batches, 'worker_slice_objects' => $slice_objects, 'stop_reason' => $stop_reason );
+	}
+
+	/**
+	 * Processes and checkpoints exactly one parser/upsert unit without scheduling continuation.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private function process_one_batch( string $import_id, string $type, int $payload_offset, string $slice_started_at, float $slice_started, int $slice_batches, int $slice_objects ): array {
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
 		$payload_file = (string) ( $state['payload_file'] ?? '' );
 		$result = $this->state_to_result( $state, $type, $import_id );
 		if ( '' === $payload_file || ! is_file( $payload_file ) ) {
 			$result['errors'][] = 'Passport payload file is missing.';
-			return $this->fail_pipeline( $result );
+			return array( 'success' => false, 'result' => $result );
 		}
 
 		$started = microtime( true );
 		$read = $this->read_next_passport_objects( $payload_file, max( 0, $payload_offset ), self::BATCH_SIZE );
 		if ( empty( $read['found_array'] ) ) {
 			$result['errors'][] = 'Passport payload does not contain passportElements.';
-			return $this->fail_pipeline( $result );
+			return array( 'success' => false, 'result' => $result );
 		}
 
-		$rows = array();
+		$normalized_rows = array();
 		$batch_errors = array();
 		$parsed = 0;
 		$skipped = 0;
@@ -275,6 +392,14 @@ final class RussianPostPickupImporter {
 				++$skipped;
 				continue;
 			}
+			$normalized_rows[] = $row;
+		}
+
+		if ( $this->location_resolver instanceof RussianPostPickupLocationResolver ) {
+			$this->location_resolver->prefetch_fias_for_rows( $normalized_rows );
+		}
+		$rows = array();
+		foreach ( $normalized_rows as $row ) {
 			if ( $this->location_resolver instanceof RussianPostPickupLocationResolver ) {
 				$match = $this->location_resolver->resolve( $row );
 				$this->increment_location_match_stats( $location_stats, $match );
@@ -288,14 +413,11 @@ final class RussianPostPickupImporter {
 		$staging_table = (string) ( $state['staging_table'] ?? '' );
 		if ( '' === $staging_table ) {
 			$result['errors'][] = 'Russian Post pickup staging table is missing from import state.';
-			return $this->fail_pipeline( $result );
+			return array( 'success' => false, 'result' => $result );
 		}
 		$upsert = $this->repository->insert_batch( $rows, $staging_table );
 		$duration_ms = (int) round( ( microtime( true ) - $started ) * 1000 );
 		$errors = array_merge( is_array( $state['errors'] ?? null ) ? $state['errors'] : array(), $batch_errors );
-		if ( $duration_ms > 10000 ) {
-			$this->add_limited_error( $errors, 'Slow upsert batch: ' . $duration_ms . ' ms, batch_size=' . count( $rows ) );
-		}
 
 		$result['parsed'] += $parsed;
 		$result['inserted'] += (int) $upsert['inserted'];
@@ -312,39 +434,35 @@ final class RussianPostPickupImporter {
 		$result['current_batch_size'] = count( $rows );
 		$result['last_batch_duration_ms'] = $duration_ms;
 		$result['max_batch_duration_ms'] = max( (int) ( $state['max_batch_duration_ms'] ?? 0 ), $duration_ms );
+		$result['worker_slice_started_at'] = $slice_started_at;
+		$result['worker_slice_duration_ms'] = max( 0, (int) round( ( microtime( true ) - $slice_started ) * 1000 ) );
+		$result['worker_slice_batches'] = $slice_batches + 1;
+		$result['worker_slice_objects'] = $slice_objects + count( $read['objects'] );
+		$result['worker_slice_stop_reason'] = '';
 		$result['parser_completed'] = ! empty( $read['eof'] );
 		$result['errors'] = array_slice( array_map( 'strval', $errors ), 0, self::MAX_STORED_ERRORS );
 		$this->state?->update( 'upsert', $result );
 
-		if ( ! empty( $read['eof'] ) ) {
-			if ( ! $this->schedule_single( self::FINALIZE_HOOK, array( $import_id, $type ) ) ) {
-				$result['errors'][] = 'Unable to schedule background import finalize job.';
-				return $this->fail_pipeline( $result );
-			}
-		} elseif ( ! $this->schedule_single( self::BATCH_HOOK, array( $import_id, $type, (int) $read['offset'] ) ) ) {
-			$result['errors'][] = 'Unable to schedule next background import batch job.';
-			return $this->fail_pipeline( $result );
-		}
-
-		return array( 'success' => true, 'eof' => ! empty( $read['eof'] ), 'offset' => (int) $read['offset'], 'batch_size' => count( $rows ) );
+		return array( 'success' => true, 'eof' => ! empty( $read['eof'] ), 'offset' => (int) $read['offset'], 'batch_size' => count( $rows ), 'objects' => count( $read['objects'] ) );
 	}
 
 	/**
 	 * @return array<string,mixed>
 	 */
 	public function run_import_finalize( string $import_id = '', string $type = 'ALL' ): array {
-		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		if ( '' === $import_id || $import_id !== (string) ( $state['import_id'] ?? '' ) || ! in_array( (string) ( $state['status'] ?? '' ), array( 'queued', 'running' ), true ) || ! $this->lock_service()->owns( $import_id ) ) {
-			return array( 'success' => false, 'errors' => array( 'Import finalize ignored: stale import state or lock owner.' ) );
+		$guard_failure = $this->guard_background_callback( 'finalize', $import_id );
+		if ( null !== $guard_failure ) {
+			return $guard_failure;
 		}
 
 		try {
 			return $this->execute_import_finalize( $import_id, $type );
 		} catch ( \Throwable $exception ) {
+			$this->assert_callback_state_ownership( $import_id, 'finalize' );
 			try {
 				return $this->fail_unexpected_pipeline( $import_id, $type, $exception );
 			} finally {
-				$this->lock_service()->release_terminal( $import_id );
+				$this->lock_service()->release_terminal( $import_id, 'finalize_unexpected_failure' );
 			}
 		}
 	}
@@ -377,8 +495,8 @@ final class RussianPostPickupImporter {
 		$result['finished_at'] = $this->now();
 		$this->cleanup_state_files( $state, false );
 		$this->settings->save_import_result( $result, true );
-		$this->state?->success( $result );
-		$this->lock_service()->release( $import_id );
+		$this->state?->success_if_owned( $import_id, $result );
+		$this->lock_service()->release( $import_id, 'finalize_success' );
 
 		return $result;
 	}
@@ -394,16 +512,35 @@ final class RussianPostPickupImporter {
 	 */
 	public function refresh_state_for_status(): array {
 		$before = $this->state?->current() ?? array();
+		$is_active = in_array( (string) ( $before['status'] ?? '' ), array( 'queued', 'running' ), true );
+		$import_id = (string) ( $before['import_id'] ?? '' );
+		$lock = $this->lock_service()->diagnostics( $import_id );
+		if ( $is_active && ! empty( $lock['lock_owned'] ) && '' !== (string) ( $lock['lock_job_id'] ?? '' ) && (int) ( $lock['lock_expires_at'] ?? 0 ) > time() ) {
+			return $before;
+		}
+
 		$state = $this->state?->reset_stale_if_needed() ?? array();
 		$became_stale = in_array( (string) ( $before['status'] ?? '' ), array( 'queued', 'running' ), true ) && 'failed' === (string) ( $state['status'] ?? '' );
 		if ( $became_stale ) {
 			try {
 				$this->cleanup_state_files( $state );
 			} finally {
-				$this->lock_service()->release_terminal( (string) ( $state['import_id'] ?? '' ) );
+				$this->lock_service()->release_terminal( (string) ( $state['import_id'] ?? '' ), 'status_stale_cleanup' );
 			}
+		} elseif ( $is_active && ! empty( $lock['lock_owned'] ) && in_array( (string) ( $state['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+			return $state;
+		} elseif ( $is_active && in_array( (string) ( $state['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+			$diagnostic = $this->background_guard_diagnostic( 'status', $import_id, $state, (int) ( $state['payload_offset'] ?? 0 ) );
+			$this->state?->record_guard_diagnostic( $diagnostic );
+			$result = $this->state_to_result( $state, (string) ( $state['type'] ?? 'ALL' ), $import_id );
+			$errors = is_array( $result['errors'] ?? null ) ? $result['errors'] : array();
+			$this->add_limited_error( $errors, 'Active Russian Post pickup import lost its owner lock.' );
+			$result['errors'] = $errors;
+			$this->fail_pipeline( $result );
+
+			return $this->state?->current() ?? $result;
 		} elseif ( in_array( (string) ( $state['status'] ?? '' ), array( 'success', 'failed' ), true ) ) {
-			$this->lock_service()->release_terminal( (string) ( $state['import_id'] ?? '' ) );
+			$this->lock_service()->release_terminal( (string) ( $state['import_id'] ?? '' ), 'status_terminal_self_heal' );
 		}
 
 		return is_array( $state ) ? $state : array();
@@ -416,12 +553,14 @@ final class RussianPostPickupImporter {
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
 		$job_id = (string) ( $state['import_id'] ?? '' );
 		try {
-			$cancelled = $this->state instanceof RussianPostPickupImportStateService ? $this->state->cancel_by_admin() : array();
-			$this->cleanup_state_files( $state, true );
+			$cancelled = $this->state instanceof RussianPostPickupImportStateService ? $this->state->cancel_by_admin( $job_id ) : array();
+			if ( $job_id === (string) ( $cancelled['import_id'] ?? '' ) && 'failed' === (string) ( $cancelled['status'] ?? '' ) ) {
+				$this->cleanup_state_files( $state, true );
+			}
 
 			return $cancelled;
 		} finally {
-			$this->lock_service()->release_terminal( $job_id );
+			$this->lock_service()->release_terminal( $job_id, 'manual_cancel' );
 		}
 	}
 
@@ -526,7 +665,7 @@ final class RussianPostPickupImporter {
 
 	/** @param array<string,mixed> $context */
 	private function queue_import( string $type, string $import_id, array $context ): bool {
-		if ( ! $this->lock_service()->acquire( $import_id ) ) {
+		if ( ! $this->lock_service()->acquire( $import_id, 'queue_import' ) ) {
 			return false;
 		}
 
@@ -570,7 +709,7 @@ final class RussianPostPickupImporter {
 			return false;
 		} finally {
 			if ( ! $queued ) {
-				$this->lock_service()->release( $import_id );
+				$this->lock_service()->release( $import_id, 'queue_failure' );
 				$this->delete_temp_file( (string) ( $context['temp_zip_file'] ?? $context['payload_file'] ?? '' ) );
 			}
 		}
@@ -603,11 +742,13 @@ final class RussianPostPickupImporter {
 	private function fail_pipeline( array $result, bool $cleanup_tables = true ): array {
 		$result['success'] = false;
 		$result['finished_at'] = $this->now();
-		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		$job_id = (string) ( $result['import_id'] ?? $state['import_id'] ?? '' );
+		$job_id = (string) ( $result['import_id'] ?? '' );
+		$state = $this->assert_callback_state_ownership( $job_id, 'failure' );
+		$result['import_id'] = $job_id;
 		try {
+			$this->state?->failed_if_owned( $job_id, $result );
 			try {
-				$this->cleanup_state_files( array_merge( $state, $result ), $cleanup_tables );
+				$this->cleanup_state_files( $result, $cleanup_tables );
 			} catch ( \Throwable $exception ) {
 				$this->add_limited_error( $result['errors'], 'Import cleanup failed: ' . $exception->getMessage() );
 			}
@@ -616,13 +757,9 @@ final class RussianPostPickupImporter {
 			} catch ( \Throwable $exception ) {
 				$this->add_limited_error( $result['errors'], 'Unable to save import result: ' . $exception->getMessage() );
 			}
-			try {
-				$this->state?->failed( $result );
-			} catch ( \Throwable $exception ) {
-				$this->add_limited_error( $result['errors'], 'Unable to save failed import state: ' . $exception->getMessage() );
-			}
+			$this->state?->failed_if_owned( $job_id, $result );
 		} finally {
-			$this->lock_service()->release_terminal( $job_id );
+			$this->lock_service()->release_terminal( $job_id, 'fail_pipeline' );
 		}
 
 		return $result;
@@ -630,16 +767,113 @@ final class RussianPostPickupImporter {
 
 	/** @return array<string,mixed> */
 	private function fail_unexpected_pipeline( string $import_id, string $type, \Throwable $exception ): array {
-		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
+		$state = $this->assert_callback_state_ownership( $import_id, 'unexpected failure' );
 		$result = array_merge(
 			$this->base_result( $this->normalize_type( $type ), $import_id ),
 			$state
 		);
+		$result['import_id'] = $import_id;
+		$result['type'] = $this->normalize_type( $type );
 		$errors = is_array( $result['errors'] ?? null ) ? $result['errors'] : array();
 		$this->add_limited_error( $errors, 'Unexpected Russian Post pickup import failure: ' . $exception->getMessage() );
 		$result['errors'] = $errors;
 
 		return $this->fail_pipeline( $result );
+	}
+
+	/** @return array<string,mixed>|null */
+	private function guard_background_callback( string $callback, string $import_id, int $payload_offset = 0 ): ?array {
+		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
+		$persisted_id = (string) ( $state['import_id'] ?? '' );
+		$status = (string) ( $state['status'] ?? '' );
+		$stage = (string) ( $state['stage'] ?? '' );
+		$is_active = in_array( $status, array( 'queued', 'running' ), true );
+		$valid_stage = match ( $callback ) {
+			'init' => 'queued' === $status && 'queued' === $stage,
+			'batch' => 'running' === $status && in_array( $stage, array( 'parse', 'upsert' ), true ),
+			'finalize' => 'running' === $status && in_array( $stage, array( 'upsert', 'deactivate' ), true ),
+			default => false,
+		};
+		if ( $is_active && $import_id !== $persisted_id ) {
+			throw new \RuntimeException( sprintf( 'Russian Post pickup import %s callback does not own the active job.', $callback ) );
+		}
+		if ( $is_active && $import_id === $persisted_id && ! $valid_stage ) {
+			$diagnostic = $this->background_guard_diagnostic( $callback, $import_id, $state, $payload_offset );
+			$this->state?->record_guard_diagnostic( $diagnostic );
+			throw new \RuntimeException( sprintf( 'Russian Post pickup import %s invariant failed. Persisted stage is not valid for this callback.', $callback ) );
+		}
+
+		$renewed = false;
+		$renew_error = '';
+		if ( '' !== $import_id && $import_id === $persisted_id && $is_active ) {
+			try {
+				$renewed = $this->lock_service()->renew( $import_id, $callback . '_guard' );
+			} catch ( \Throwable $exception ) {
+				$renew_error = $exception->getMessage();
+			}
+		}
+		$payload_file = (string) ( $state['payload_file'] ?? '' );
+		$payload_ready = 'batch' !== $callback || ( '' !== $payload_file && is_file( $payload_file ) && is_readable( $payload_file ) );
+		if ( $renewed && $payload_ready ) {
+			return null;
+		}
+
+		$diagnostic = $this->background_guard_diagnostic( $callback, $import_id, $state, $payload_offset );
+		if ( '' !== $renew_error ) {
+			$diagnostic['lock_renew_error'] = $renew_error;
+		}
+		$this->state?->record_guard_diagnostic( $diagnostic );
+		$message = sprintf( 'Russian Post pickup import %s invariant failed.', $callback );
+
+		if ( $is_active && $import_id === $persisted_id ) {
+			$result = $this->state_to_result( $state, (string) ( $state['type'] ?? 'ALL' ), $persisted_id );
+			$errors = is_array( $result['errors'] ?? null ) ? $result['errors'] : array();
+			$reason = ! $payload_ready
+				? 'Required payload file is missing or unreadable.'
+				: 'Owner lock is missing, expired, or could not be renewed.';
+			$this->add_limited_error( $errors, $message . ' ' . $reason );
+			$result['errors'] = $errors;
+
+			return $this->fail_pipeline( $result );
+		}
+
+		$this->lock_service()->release_terminal( $import_id, 'guard_terminal_cleanup:' . $callback );
+
+		return array( 'success' => false, 'errors' => array( $message . ' Persisted job is already terminal.' ) );
+	}
+
+	/** @return array<string,mixed> */
+	private function assert_callback_state_ownership( string $import_id, string $context ): array {
+		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
+		$persisted_id = (string) ( $state['import_id'] ?? '' );
+		if ( '' !== $persisted_id && ! hash_equals( $persisted_id, $import_id ) ) {
+			throw new \RuntimeException( sprintf( 'Russian Post pickup import %s lost state ownership to another job.', $context ) );
+		}
+
+		return $state;
+	}
+
+	/** @param array<string,mixed> $state @return array<string,mixed> */
+	private function background_guard_diagnostic( string $callback, string $received_import_id, array $state, int $payload_offset ): array {
+		$lock = $this->lock_service()->diagnostics( $received_import_id );
+		$payload_file = (string) ( $state['payload_file'] ?? '' );
+
+		return array_merge(
+			array(
+				'callback' => $callback,
+				'received_import_id' => $received_import_id,
+				'persisted_import_id' => (string) ( $state['import_id'] ?? '' ),
+				'persisted_status' => (string) ( $state['status'] ?? '' ),
+				'persisted_stage' => (string) ( $state['stage'] ?? '' ),
+				'current_timestamp' => time(),
+				'doing_cron' => defined( 'DOING_CRON' ) && DOING_CRON,
+				'php_sapi' => PHP_SAPI,
+				'payload_file_exists' => '' !== $payload_file && is_file( $payload_file ),
+				'payload_file_readable' => '' !== $payload_file && is_readable( $payload_file ),
+				'payload_offset' => max( 0, $payload_offset ),
+			),
+			$lock
+		);
 	}
 
 	private function lock_service(): RussianPostPickupImportLock {
@@ -648,6 +882,43 @@ final class RussianPostPickupImporter {
 		}
 
 		return $this->import_lock;
+	}
+
+	private function new_execution_budget(): BackgroundExecutionBudget {
+		if ( is_callable( $this->execution_budget_factory ) ) {
+			$budget = ( $this->execution_budget_factory )();
+			if ( $budget instanceof BackgroundExecutionBudget ) {
+				return $budget;
+			}
+		}
+
+		$memory_limit = function_exists( 'ini_get' ) ? (string) ini_get( 'memory_limit' ) : '';
+
+		return new BackgroundExecutionBudget(
+			self::SOFT_TIME_BUDGET_SECONDS,
+			self::MAX_BATCHES_PER_SLICE,
+			BackgroundExecutionBudget::memory_threshold_from_limit( $memory_limit, self::MEMORY_BUDGET_FRACTION )
+		);
+	}
+
+	private function schedule_service(): RussianPostPickupSchedule {
+		return $this->pickup_schedule ??= new RussianPostPickupSchedule( $this->settings, new TimezoneService() );
+	}
+
+	private function record_worker_slice_metrics( string $stop_reason, string $started_at = '', float $started = 0.0, int $batches = 0, int $objects = 0 ): void {
+		if ( ! $this->state instanceof RussianPostPickupImportStateService ) {
+			return;
+		}
+		$current = $this->state->current();
+		$this->state->record_worker_slice_metrics(
+			array(
+				'worker_slice_started_at' => '' !== $started_at ? $started_at : (string) ( $current['worker_slice_started_at'] ?? '' ),
+				'worker_slice_duration_ms' => $started > 0.0 ? max( 0, (int) round( ( microtime( true ) - $started ) * 1000 ) ) : (int) ( $current['worker_slice_duration_ms'] ?? 0 ),
+				'worker_slice_batches' => $batches > 0 ? $batches : (int) ( $current['worker_slice_batches'] ?? 0 ),
+				'worker_slice_objects' => $objects > 0 ? $objects : (int) ( $current['worker_slice_objects'] ?? 0 ),
+				'worker_slice_stop_reason' => $stop_reason,
+			)
+		);
 	}
 
 	private function delete_temp_file( string $temp_file ): void {
@@ -695,6 +966,10 @@ final class RussianPostPickupImporter {
 		}
 		if ( ! is_file( $temp_file ) ) {
 			$result['extract_error'] = 'ZIP file is missing before extract.';
+			return $result;
+		}
+		if ( ! $this->ensure_wordpress_file_api() ) {
+			$result['extract_error'] = 'WordPress File API is unavailable.';
 			return $result;
 		}
 
@@ -779,6 +1054,19 @@ final class RussianPostPickupImporter {
 
 	private function ziparchive_available(): bool {
 		return class_exists( \ZipArchive::class ) && empty( $GLOBALS['wdc_rp_force_ziparchive_unavailable'] );
+	}
+
+	private function ensure_wordpress_file_api(): bool {
+		if ( function_exists( 'wp_tempnam' ) ) {
+			return true;
+		}
+
+		$file_api = ABSPATH . 'wp-admin/includes/file.php';
+		if ( is_readable( $file_api ) ) {
+			require_once $file_api;
+		}
+
+		return function_exists( 'wp_tempnam' );
 	}
 
 	private function is_path_inside( string $path, string $base ): bool {
@@ -1014,6 +1302,11 @@ final class RussianPostPickupImporter {
 			'current_batch_size' => 0,
 			'last_batch_duration_ms' => 0,
 			'max_batch_duration_ms' => 0,
+			'worker_slice_started_at' => '',
+			'worker_slice_duration_ms' => 0,
+			'worker_slice_batches' => 0,
+			'worker_slice_objects' => 0,
+			'worker_slice_stop_reason' => '',
 			'parser_completed' => false,
 			'errors' => array(),
 			'started_at' => $this->now(),

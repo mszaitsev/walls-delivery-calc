@@ -8,6 +8,7 @@ defined( 'ABSPATH' ) || exit;
 final class RussianPostPickupImportStateService {
 	public const OPTION_NAME = 'wdc_russian_post_pickup_import_state';
 	private const MAX_STORED_ERRORS = 10;
+	private const MAX_GUARD_DIAGNOSTICS = 5;
 	private const STALE_AFTER_SECONDS = 7200;
 	private const DOWNLOAD_STALE_AFTER_SECONDS = 300;
 	private const EXTRACT_STALE_AFTER_SECONDS = 300;
@@ -86,6 +87,9 @@ final class RussianPostPickupImportStateService {
 	 */
 	public function update( string $stage, array $counters = array() ): array {
 		$state = $this->current();
+		if ( in_array( (string) ( $state['status'] ?? '' ), array( 'success', 'failed' ), true ) ) {
+			return $state;
+		}
 		$state['status'] = in_array( (string) $state['status'], array( 'queued', 'running' ), true ) ? 'running' : (string) $state['status'];
 		$state['stage'] = $this->normalize_stage( $stage );
 		$state['last_activity_at'] = $this->now();
@@ -96,12 +100,12 @@ final class RussianPostPickupImportStateService {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
+		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'worker_slice_duration_ms', 'worker_slice_batches', 'worker_slice_objects', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'source', 'original_upload_name', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'download_url', 'download_started_at', 'download_response_message', 'download_error', 'download_backend', 'first_backend_error', 'curl_error', 'extract_started_at', 'extract_zip_file', 'extract_backend', 'extract_error', 'extracted_payload_file', 'extracted_payload_entry_name' ) as $key ) {
+		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'source', 'original_upload_name', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'worker_slice_started_at', 'worker_slice_stop_reason', 'download_url', 'download_started_at', 'download_response_message', 'download_error', 'download_backend', 'first_backend_error', 'curl_error', 'extract_started_at', 'extract_zip_file', 'extract_backend', 'extract_error', 'extracted_payload_file', 'extracted_payload_entry_name' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = (string) $counters[ $key ];
 			}
@@ -134,6 +138,11 @@ final class RussianPostPickupImportStateService {
 		return $this->finish( 'success', 'finished', $result );
 	}
 
+	/** @param array<string,mixed> $result @return array<string,mixed> */
+	public function success_if_owned( string $expected_import_id, array $result ): array {
+		return $this->finish( 'success', 'finished', $result, $expected_import_id );
+	}
+
 	/**
 	 * @param array<string,mixed> $result
 	 * @return array<string,mixed>
@@ -142,11 +151,19 @@ final class RussianPostPickupImportStateService {
 		return $this->finish( 'failed', 'failed', $result );
 	}
 
+	/** @param array<string,mixed> $result @return array<string,mixed> */
+	public function failed_if_owned( string $expected_import_id, array $result ): array {
+		return $this->finish( 'failed', 'failed', $result, $expected_import_id );
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function cancel_by_admin(): array {
+	public function cancel_by_admin( string $expected_import_id = '' ): array {
 		$state = $this->current();
+		if ( '' !== $expected_import_id && ! hash_equals( (string) ( $state['import_id'] ?? '' ), $expected_import_id ) ) {
+			return $state;
+		}
 		$now = $this->now();
 		$state['status'] = 'failed';
 		$state['stage'] = 'failed';
@@ -155,6 +172,36 @@ final class RussianPostPickupImportStateService {
 		$errors = is_array( $state['errors'] ?? null ) ? $state['errors'] : array();
 		$errors[] = 'Import was manually cancelled/reset by admin.';
 		$state['errors'] = array_slice( array_map( 'strval', $errors ), 0, self::MAX_STORED_ERRORS );
+		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );
+		$this->save( $state );
+
+		return $state;
+	}
+
+	/** @param array<string,mixed> $diagnostic */
+	public function record_guard_diagnostic( array $diagnostic ): array {
+		$state = $this->current();
+		$diagnostics = is_array( $state['guard_diagnostics'] ?? null ) ? $state['guard_diagnostics'] : array();
+		$diagnostics[] = $diagnostic;
+		$state['guard_diagnostics'] = array_slice( $diagnostics, -self::MAX_GUARD_DIAGNOSTICS );
+		$this->save( $state );
+
+		return $state;
+	}
+
+	/** @param array<string,mixed> $metrics @return array<string,mixed> */
+	public function record_worker_slice_metrics( array $metrics ): array {
+		$state = $this->current();
+		foreach ( array( 'worker_slice_duration_ms', 'worker_slice_batches', 'worker_slice_objects' ) as $key ) {
+			if ( array_key_exists( $key, $metrics ) ) {
+				$state[ $key ] = max( 0, (int) $metrics[ $key ] );
+			}
+		}
+		foreach ( array( 'worker_slice_started_at', 'worker_slice_stop_reason' ) as $key ) {
+			if ( array_key_exists( $key, $metrics ) ) {
+				$state[ $key ] = (string) $metrics[ $key ];
+			}
+		}
 		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );
 		$this->save( $state );
 
@@ -246,6 +293,11 @@ final class RussianPostPickupImportStateService {
 			'current_batch_size' => 0,
 			'last_batch_duration_ms' => 0,
 			'max_batch_duration_ms' => 0,
+			'worker_slice_started_at' => '',
+			'worker_slice_duration_ms' => 0,
+			'worker_slice_batches' => 0,
+			'worker_slice_objects' => 0,
+			'worker_slice_stop_reason' => '',
 			'parser_completed' => false,
 			'downloaded' => 0,
 			'parsed' => 0,
@@ -259,6 +311,7 @@ final class RussianPostPickupImportStateService {
 			'location_match_no_match' => 0,
 			'location_match_ambiguous' => 0,
 			'errors' => array(),
+			'guard_diagnostics' => array(),
 			'memory_peak' => 0,
 		);
 	}
@@ -267,19 +320,24 @@ final class RussianPostPickupImportStateService {
 	 * @param array<string,mixed> $state
 	 */
 	private function save( array $state ): void {
-		update_option( self::OPTION_NAME, array_merge( $this->defaults(), $state ), false );
+		update_option( self::OPTION_NAME, $this->normalize_for_storage( $state ), false );
 	}
 
 	/**
 	 * @param array<string,mixed> $result
 	 * @return array<string,mixed>
 	 */
-	private function finish( string $status, string $stage, array $result ): array {
-		$state = $this->current();
+	private function finish( string $status, string $stage, array $result, string $expected_import_id = '' ): array {
+		$stored = get_option( self::OPTION_NAME, array() );
+		$expected_state = is_array( $stored ) ? $stored : array();
+		$state = array_merge( $this->defaults(), $expected_state );
+		if ( '' !== $expected_import_id && ! hash_equals( (string) ( $state['import_id'] ?? '' ), $expected_import_id ) ) {
+			throw new \RuntimeException( 'Russian Post pickup import state ownership changed before terminal transition.' );
+		}
 		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped', 'location_matched_fias', 'location_matched_postal_code', 'location_matched_region_city', 'location_match_no_match', 'location_match_ambiguous' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
-		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
+		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'worker_slice_duration_ms', 'worker_slice_batches', 'worker_slice_objects', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
 		$state['status'] = $status;
@@ -297,6 +355,8 @@ final class RussianPostPickupImportStateService {
 		$state['backup_table'] = (string) ( $result['backup_table'] ?? $state['backup_table'] ?? '' );
 		$state['swap_started_at'] = (string) ( $result['swap_started_at'] ?? $state['swap_started_at'] ?? '' );
 		$state['swap_finished_at'] = (string) ( $result['swap_finished_at'] ?? $state['swap_finished_at'] ?? '' );
+		$state['worker_slice_started_at'] = (string) ( $result['worker_slice_started_at'] ?? $state['worker_slice_started_at'] ?? '' );
+		$state['worker_slice_stop_reason'] = (string) ( $result['worker_slice_stop_reason'] ?? $state['worker_slice_stop_reason'] ?? '' );
 		$state['download_url'] = (string) ( $result['download_url'] ?? $state['download_url'] ?? '' );
 		$state['download_started_at'] = (string) ( $result['download_started_at'] ?? $state['download_started_at'] ?? '' );
 		$state['download_response_message'] = (string) ( $result['download_response_message'] ?? $state['download_response_message'] ?? '' );
@@ -313,9 +373,58 @@ final class RussianPostPickupImportStateService {
 		$state['parser_completed'] = ! empty( $result['parser_completed'] ) || ! empty( $state['parser_completed'] );
 		$state['errors'] = array_slice( array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ), 0, self::MAX_STORED_ERRORS );
 		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );
-		$this->save( $state );
+		$state = $this->normalize_for_storage( $state );
+		if ( '' !== $expected_import_id ) {
+			if ( ! $this->compare_and_replace( $expected_state, $state ) ) {
+				throw new \RuntimeException( 'Russian Post pickup import state ownership changed during terminal transition.' );
+			}
+		} else {
+			$this->save( $state );
+		}
 
 		return $state;
+	}
+
+	/** @param array<string,mixed> $expected @param array<string,mixed> $replacement */
+	private function compare_and_replace( array $expected, array $replacement ): bool {
+		global $wpdb;
+		if ( ! isset( $wpdb->options ) || ! method_exists( $wpdb, 'prepare' ) || ! method_exists( $wpdb, 'query' ) ) {
+			if ( get_option( self::OPTION_NAME, array() ) !== $expected ) {
+				return false;
+			}
+
+			return update_option( self::OPTION_NAME, $this->normalize_for_storage( $replacement ), false );
+		}
+
+		$serialize = static fn( array $value ): string => (string) ( function_exists( 'maybe_serialize' ) ? maybe_serialize( $value ) : serialize( $value ) );
+		$sql = $wpdb->prepare(
+			"UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s LIMIT 1",
+			$serialize( $this->normalize_for_storage( $replacement ) ),
+			self::OPTION_NAME,
+			$serialize( $expected )
+		);
+		$result = $wpdb->query( $sql );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Russian Post pickup import state compare-update failed.' );
+		}
+		$this->clear_option_cache();
+
+		return 1 === (int) $result;
+	}
+
+	/** @param array<string,mixed> $state @return array<string,mixed> */
+	private function normalize_for_storage( array $state ): array {
+		$defaults = $this->defaults();
+
+		return array_replace( $defaults, array_intersect_key( $state, $defaults ) );
+	}
+
+	private function clear_option_cache(): void {
+		if ( function_exists( 'wp_cache_delete' ) ) {
+			wp_cache_delete( self::OPTION_NAME, 'options' );
+			wp_cache_delete( 'notoptions', 'options' );
+			wp_cache_delete( 'alloptions', 'options' );
+		}
 	}
 
 	private function normalize_type( string $type ): string {

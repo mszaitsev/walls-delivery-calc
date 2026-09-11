@@ -9,6 +9,8 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 defined( 'ABSPATH' ) || exit;
 
 final class RussianPostPickupLocationResolver {
+	private const FIAS_PREFETCH_CHUNK_SIZE = 200;
+
 	private \wpdb $wpdb;
 
 	/** @var array<string,array{status:string,strategy:string,location_id:int|null,location:Location|null}> */
@@ -41,6 +43,49 @@ final class RussianPostPickupLocationResolver {
 		$result = $this->resolve( $row );
 
 		return 'unique' === $result['status'] ? $result['location_id'] : null;
+	}
+
+	/**
+	 * Warms the request-local exact FIAS cache for one importer batch.
+	 *
+	 * Unresolved or non-canonical values intentionally remain uncached so resolve()
+	 * can retain the existing normalized-expression compatibility fallback.
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 */
+	public function prefetch_fias_for_rows( array $rows ): void {
+		$raw_by_cache_key = array();
+		foreach ( $rows as $row ) {
+			$raw = trim( (string) ( $row['fias_location_guid'] ?? '' ) );
+			$normalized = $this->normalize_guid( $raw );
+			if ( '' === $normalized || isset( $this->fias_cache[ $normalized ] ) ) {
+				continue;
+			}
+			$raw_by_cache_key[ $normalized ] = $raw;
+		}
+		$this->prefetch_exact_fias_values( array_values( array_unique( $raw_by_cache_key ) ) );
+
+		$normalized_fallbacks = array();
+		foreach ( $raw_by_cache_key as $normalized => $raw ) {
+			if ( ! isset( $this->fias_cache[ $normalized ] ) && $normalized !== $raw ) {
+				$normalized_fallbacks[] = $normalized;
+			}
+		}
+		$this->prefetch_exact_fias_values( array_values( array_unique( $normalized_fallbacks ) ) );
+	}
+
+	/** @param array<int,string> $values */
+	private function prefetch_exact_fias_values( array $values ): void {
+		foreach ( array_chunk( $values, self::FIAS_PREFETCH_CHUNK_SIZE ) as $chunk ) {
+			$locations = $this->locations->find_by_exact_fias_ids( $chunk );
+			++$this->stats['fias_queries'];
+			foreach ( $locations as $location ) {
+				$cache_key = $this->normalize_guid( $location->fias_id );
+				if ( '' !== $cache_key && null !== $location->id && $location->id > 0 ) {
+					$this->fias_cache[ $cache_key ] = $this->result( 'unique', 'fias', $location );
+				}
+			}
+		}
 	}
 
 	/**

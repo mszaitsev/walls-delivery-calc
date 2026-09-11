@@ -22,7 +22,7 @@ final class RussianPostPickupImportLock {
 		$this->wpdb = $wpdb;
 	}
 
-	public function acquire( string $job_id ): bool {
+	public function acquire( string $job_id, string $reason = 'acquire' ): bool {
 		$job_id = trim( $job_id );
 		if ( '' === $job_id || $this->has_legacy_lock() ) {
 			return false;
@@ -44,7 +44,11 @@ final class RussianPostPickupImportLock {
 			return false;
 		}
 
-		return $this->compare_and_delete( $current ) && add_option( self::OPTION_NAME, $value, '', 'no' );
+		if ( ! $this->compare_and_delete( $current, $job_id, $reason . ':expired_takeover' ) ) {
+			return false;
+		}
+
+		return add_option( self::OPTION_NAME, $value, '', 'no' );
 	}
 
 	public function is_locked(): bool {
@@ -69,21 +73,62 @@ final class RussianPostPickupImportLock {
 		return null !== $current || $this->has_legacy_lock();
 	}
 
-	public function release( string $job_id ): void {
-		$current = get_option( self::OPTION_NAME, array() );
-		if ( is_array( $current ) && hash_equals( (string) ( $current['job_id'] ?? '' ), $job_id ) ) {
-			$this->compare_and_delete( $current );
+	public function renew( string $job_id, string $reason = 'renew' ): bool {
+		$current = get_option( self::OPTION_NAME, null );
+		$now = time();
+		if ( ! is_array( $current ) || (int) ( $current['expires_at'] ?? 0 ) <= $now || ! hash_equals( (string) ( $current['job_id'] ?? '' ), $job_id ) ) {
+			return false;
+		}
+
+		$renewed = $current;
+		$renewed['expires_at'] = $now + self::TTL_SECONDS;
+		if ( (int) $current['expires_at'] >= (int) $renewed['expires_at'] ) {
+			return true;
+		}
+
+		return $this->compare_and_replace( $current, $renewed );
+	}
+
+	/** @return array{lock_exists:bool,lock_job_id:string,lock_expires_at:int,lock_owned:bool} */
+	public function diagnostics( string $job_id ): array {
+		$current = get_option( self::OPTION_NAME, null );
+		$legacy = $this->has_legacy_lock();
+
+		return array(
+			'lock_exists' => null !== $current || $legacy,
+			'lock_job_id' => is_array( $current ) ? (string) ( $current['job_id'] ?? '' ) : '',
+			'lock_expires_at' => is_array( $current ) ? (int) ( $current['expires_at'] ?? 0 ) : 0,
+			'lock_owned' => $this->owns( $job_id ),
+		);
+	}
+
+	public function release( string $job_id, string $reason = 'release' ): void {
+		for ( $attempt = 0; $attempt < 2; ++$attempt ) {
+			$current = get_option( self::OPTION_NAME, null );
+			if ( is_array( $current ) && '' !== (string) ( $current['job_id'] ?? '' ) && ! hash_equals( (string) $current['job_id'], $job_id ) ) {
+				return;
+			}
+			if ( ! is_array( $current ) ) {
+				return;
+			}
+			if ( $this->compare_and_delete( $current, $job_id, $reason ) ) {
+				return;
+			}
+
+			// A concurrent owner-safe renew may have changed expires_at after
+			// this request cached the option. Refresh once, then re-check job_id.
+			$this->clear_option_cache();
 		}
 	}
 
-	public function release_terminal( string $job_id ): void {
-		$this->release( $job_id );
+	public function release_terminal( string $job_id, string $reason = 'terminal_release' ): void {
+		$this->release( $job_id, $reason );
 		if ( $this->has_legacy_lock() ) {
 			delete_transient( self::LEGACY_TRANSIENT_NAME );
 		}
 		$current = get_option( self::OPTION_NAME, null );
 		if ( null !== $current && ! is_array( $current ) ) {
-			$this->compare_and_delete( $current );
+			$this->compare_and_delete( $current, $job_id, $reason . ':legacy_scalar' );
 		}
 	}
 
@@ -91,7 +136,7 @@ final class RussianPostPickupImportLock {
 		return function_exists( 'get_transient' ) && false !== get_transient( self::LEGACY_TRANSIENT_NAME );
 	}
 
-	private function compare_and_delete( mixed $expected ): bool {
+	private function compare_and_delete( mixed $expected, string $requested_job_id, string $reason ): bool {
 		if ( ! isset( $this->wpdb->options ) || ! method_exists( $this->wpdb, 'prepare' ) || ! method_exists( $this->wpdb, 'query' ) ) {
 			if ( get_option( self::OPTION_NAME, array() ) !== $expected ) {
 				return false;
@@ -113,6 +158,42 @@ final class RussianPostPickupImportLock {
 		}
 		if ( 1 !== (int) $result ) {
 			return false;
+		}
+		$this->clear_option_cache();
+
+		return true;
+	}
+
+	/** @param array<string,mixed> $expected @param array<string,mixed> $replacement */
+	private function compare_and_replace( array $expected, array $replacement ): bool {
+		if ( ! isset( $this->wpdb->options ) || ! method_exists( $this->wpdb, 'prepare' ) || ! method_exists( $this->wpdb, 'query' ) ) {
+			if ( get_option( self::OPTION_NAME, array() ) !== $expected ) {
+				return false;
+			}
+
+			return update_option( self::OPTION_NAME, $replacement, false );
+		}
+
+		$serialize = static fn( array $value ): string => (string) ( function_exists( 'maybe_serialize' ) ? maybe_serialize( $value ) : serialize( $value ) );
+		$this->wpdb->last_error = '';
+		$sql = $this->wpdb->prepare(
+			"UPDATE {$this->wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s LIMIT 1",
+			$serialize( $replacement ),
+			self::OPTION_NAME,
+			$serialize( $expected )
+		);
+		$result = $this->wpdb->query( $sql );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Russian Post pickup import lock compare-renew failed.' );
+		}
+		if ( 1 !== (int) $result ) {
+			$this->clear_option_cache();
+			$current = get_option( self::OPTION_NAME, null );
+
+			return is_array( $current )
+				&& hash_equals( (string) ( $expected['job_id'] ?? '' ), (string) ( $current['job_id'] ?? '' ) )
+				&& hash_equals( (string) ( $expected['token'] ?? '' ), (string) ( $current['token'] ?? '' ) )
+				&& (int) ( $current['expires_at'] ?? 0 ) > time();
 		}
 		$this->clear_option_cache();
 

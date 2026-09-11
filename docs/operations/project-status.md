@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.2
+Version: 1.0.10
 
-The current Walls Delivery Calc release source is version 1.0.2. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.2 makes the Russian Post pickup import lock owner-aware, guarantees owned-lock release on terminal lifecycle paths, and safely recovers a legacy lock attached to a terminal failed job; the schema baseline remains 1.0.0.
+The current Walls Delivery Calc release source is version 1.0.10. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. The accepted 1.0.9 Russian Post exact-FIAS prefetch and bulk staging writes remain in production; temporary performance and lock-forensic diagnostics are removed. Russian Post weekly pickup refresh now has an explicit weekday and quarter-hour time in `Asia/Novosibirsk`, with Monday 09:00 as the fresh default and preservation of an existing weekly event until the new settings are explicitly saved. Matching decisions, worker-slice limits, lock lifecycle, and schema baseline remain unchanged.
 
 Current production scope includes:
 

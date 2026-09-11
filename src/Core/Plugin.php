@@ -331,6 +331,7 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupSchedule;
 use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
@@ -775,7 +776,8 @@ final class Plugin {
 		$this->container->register( RussianPostPassportPointNormalizer::class, fn(): RussianPostPassportPointNormalizer => new RussianPostPassportPointNormalizer() );
 		$this->container->register( RussianPostPickupImportStateService::class, fn(): RussianPostPickupImportStateService => new RussianPostPickupImportStateService() );
 		$this->container->register( RussianPostPickupImportLock::class, fn(): RussianPostPickupImportLock => new RussianPostPickupImportLock() );
-		$this->container->register( RussianPostPickupImporter::class, fn(): RussianPostPickupImporter => new RussianPostPickupImporter( $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( RussianPostOtpravkaApiClient::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( RussianPostPassportPointNormalizer::class ), $this->container->get( RussianPostPickupImportStateService::class ), $this->container->get( ActionScheduler::class ), $this->container->get( RussianPostPickupLocationResolver::class ), $this->container->get( RussianPostPickupImportLock::class ) ) );
+		$this->container->register( RussianPostPickupSchedule::class, fn(): RussianPostPickupSchedule => new RussianPostPickupSchedule( $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( TimezoneService::class ) ) );
+		$this->container->register( RussianPostPickupImporter::class, fn(): RussianPostPickupImporter => new RussianPostPickupImporter( $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( RussianPostOtpravkaApiClient::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( RussianPostPassportPointNormalizer::class ), $this->container->get( RussianPostPickupImportStateService::class ), $this->container->get( ActionScheduler::class ), $this->container->get( RussianPostPickupLocationResolver::class ), $this->container->get( RussianPostPickupImportLock::class ), null, $this->container->get( RussianPostPickupSchedule::class ) ) );
 		$this->container->register( RussianPostCountryMappingRepository::class, fn(): RussianPostCountryMappingRepository => new RussianPostCountryMappingRepository() );
 		$this->container->register( RussianPostCountryMappingService::class, fn(): RussianPostCountryMappingService => new RussianPostCountryMappingService( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostApiClient::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostCountryDirectory::class, fn(): RussianPostCountryDirectory => new RussianPostCountryDirectory( $this->container->get( RussianPostApiClient::class ), $this->container->get( Logger::class ), $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ), $this->container->get( RussianPostSettings::class ) ) );
@@ -1035,7 +1037,7 @@ final class Plugin {
 				$this->container->get( ScheduledTaskCatalog::class )
 			)
 		);
-		$this->container->register( ScheduledTaskCatalog::class, fn(): ScheduledTaskCatalog => new ScheduledTaskCatalog( $this->container->get( ActionScheduler::class ), $this->container->get( TimezoneService::class ), $this->container->get( SettingsRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryPickupScheduler::class ), $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), $this->container->get( ShipmentStatusAutoSyncService::class ) ) );
+		$this->container->register( ScheduledTaskCatalog::class, fn(): ScheduledTaskCatalog => new ScheduledTaskCatalog( $this->container->get( ActionScheduler::class ), $this->container->get( TimezoneService::class ), $this->container->get( SettingsRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryPickupScheduler::class ), $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), $this->container->get( ShipmentStatusAutoSyncService::class ), $this->container->get( RussianPostPickupSchedule::class ) ) );
 		$this->container->register(
 			CalendarAdminPage::class,
 			fn(): CalendarAdminPage => new CalendarAdminPage(

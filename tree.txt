@@ -1,5 +1,5 @@
 Repository file tree
-Generated for Walls Delivery Calc 1.0.2
+Generated for Walls Delivery Calc 1.0.8
 
 .
 |-- tree.txt
@@ -77,7 +77,9 @@ Generated for Walls Delivery Calc 1.0.2
 |-- docs/operations/technical-debt.md
 |-- docs/operations/troubleshooting.md
 |-- docs/README.md
+|-- docs/research/background-execution-optimization.md
 |-- docs/research/fias-auto-update-history.md
+|-- docs/research/russian-post-import-performance-profile.md
 |-- docs/research/walls-delivery-calc-tech-spec-history.md
 |-- docs/subsystems/checkout.md
 |-- docs/subsystems/locations.md
@@ -458,6 +460,7 @@ Generated for Walls Delivery Calc 1.0.2
 |-- src/Domain/Status/StatusEvent.php
 |-- src/Domain/Status/StatusMapping.php
 |-- src/Export-GarPlaces.ps1
+|-- src/Infrastructure/Background/BackgroundExecutionBudget.php
 |-- src/Infrastructure/Database/MigrationManager.php
 |-- src/Infrastructure/Logging/Logger.php
 |-- src/Infrastructure/Logging/LogRedactor.php
@@ -535,6 +538,7 @@ Generated for Walls Delivery Calc 1.0.2
 |-- src/Pickup/RussianPost/RussianPostPickupLocationResolver.php
 |-- src/Pickup/RussianPost/RussianPostPickupPointRepository.php
 |-- src/Pickup/RussianPost/RussianPostPickupPointTypeSettings.php
+|-- src/Pickup/RussianPost/RussianPostPickupSchedule.php
 |-- src/Pickup/RussianPost/RussianPostWorkTimeFormatter.php
 |-- src/Pickup/Schedule/CompactWeeklyScheduleFormatter.php
 |-- src/Pickup/Search/PickupAddressSearchService.php
@@ -768,6 +772,7 @@ Generated for Walls Delivery Calc 1.0.2
 |-- tests/fixtures/TestDemoCarrier.php
 |-- tests/fixtures/TestPickupProvider.php
 |-- tests/infrastructure/run-action-scheduler-lifecycle-smoke.php
+|-- tests/infrastructure/run-background-execution-budget-smoke.php
 |-- tests/jet-logistic/run-jet-logistic-smoke.php
 |-- tests/locations/run-dadata-postcode-fill-smoke.php
 |-- tests/locations/run-gar-import-smoke.php
@@ -832,7 +837,12 @@ Generated for Walls Delivery Calc 1.0.2
 |-- tests/pickup/run-pickup-diagnostics-smoke.php
 |-- tests/pickup/run-pickup-rest-smoke.php
 |-- tests/pickup/run-pickup-smoke.php
+|-- tests/pickup/run-russian-post-cancel-lock-race-smoke.php
+|-- tests/pickup/run-russian-post-cross-job-callback-race-smoke.php
+|-- tests/pickup/run-russian-post-import-optimization-smoke.php
 |-- tests/pickup/run-russian-post-pickup-import-smoke.php
+|-- tests/pickup/run-russian-post-weekly-schedule-smoke.php
+|-- tests/pickup/run-russian-post-wp-file-api-smoke.php
 |-- tests/rules/run-rules-admin-smoke.php
 |-- tests/rules/run-rules-smoke.php
 |-- tests/runtime/run-no-legacy-smoke.php
