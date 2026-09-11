@@ -697,6 +697,10 @@ final class RussianPostPickupImporter {
 			$result['extract_error'] = 'ZIP file is missing before extract.';
 			return $result;
 		}
+		if ( ! $this->ensure_wordpress_file_api() ) {
+			$result['extract_error'] = 'WordPress File API is unavailable.';
+			return $result;
+		}
 
 		$zip = new \ZipArchive();
 		$open = $zip->open( $temp_file );
@@ -779,6 +783,19 @@ final class RussianPostPickupImporter {
 
 	private function ziparchive_available(): bool {
 		return class_exists( \ZipArchive::class ) && empty( $GLOBALS['wdc_rp_force_ziparchive_unavailable'] );
+	}
+
+	private function ensure_wordpress_file_api(): bool {
+		if ( function_exists( 'wp_tempnam' ) ) {
+			return true;
+		}
+
+		$file_api = ABSPATH . 'wp-admin/includes/file.php';
+		if ( is_readable( $file_api ) ) {
+			require_once $file_api;
+		}
+
+		return function_exists( 'wp_tempnam' );
 	}
 
 	private function is_path_inside( string $path, string $base ): bool {

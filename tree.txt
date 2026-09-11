@@ -1,5 +1,5 @@
 Repository file tree
-Generated for Walls Delivery Calc 1.0.2
+Generated for Walls Delivery Calc 1.0.3
 
 .
 |-- tree.txt
@@ -833,6 +833,7 @@ Generated for Walls Delivery Calc 1.0.2
 |-- tests/pickup/run-pickup-rest-smoke.php
 |-- tests/pickup/run-pickup-smoke.php
 |-- tests/pickup/run-russian-post-pickup-import-smoke.php
+|-- tests/pickup/run-russian-post-wp-file-api-smoke.php
 |-- tests/rules/run-rules-admin-smoke.php
 |-- tests/rules/run-rules-smoke.php
 |-- tests/runtime/run-no-legacy-smoke.php
