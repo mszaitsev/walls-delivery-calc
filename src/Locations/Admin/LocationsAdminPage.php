@@ -1063,7 +1063,7 @@ final class LocationsAdminPage {
 		$this->guard_ajax();
 		$job = array(
 			'job_id'          => md5( 'display-name-' . microtime( true ) ),
-			'total'           => $this->repository->count_all(),
+			'total'           => $this->repository->count_batch_locations( '', false ),
 			'processed'       => 0,
 			'updated'         => 0,
 			'last_id'         => 0,
@@ -1551,7 +1551,7 @@ final class LocationsAdminPage {
 
 		try {
 			$formatter = LocationDisplayNameFormatter::from_rules( $this->type_display_rules() );
-			$locations = $this->repository->find_batch_after_id( (int) ( $job['last_id'] ?? 0 ), 500 );
+			$locations = $this->repository->find_batch_after_id( (int) ( $job['last_id'] ?? 0 ), 500, '', false );
 			$updated = 0;
 			$last_id = (int) ( $job['last_id'] ?? 0 );
 			foreach ( $locations as $location ) {
@@ -1568,8 +1568,11 @@ final class LocationsAdminPage {
 			$job['updated'] = (int) ( $job['updated'] ?? 0 ) + $updated;
 			$job['last_id'] = $last_id;
 			$job['current_batch'] = count( $locations );
-			if ( array() === $locations || (int) $job['processed'] >= (int) ( $job['total'] ?? 0 ) ) {
+			if ( (int) $job['processed'] >= (int) ( $job['total'] ?? 0 ) ) {
 				$job['phase'] = 'finished';
+			} elseif ( array() === $locations ) {
+				$job['phase'] = 'failed';
+				$job['errors'][] = 'Display name rebuild ended before all active locations were processed.';
 			}
 		} catch ( RuntimeException $exception ) {
 			$job['phase'] = 'failed';

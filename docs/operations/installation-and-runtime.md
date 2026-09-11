@@ -1,6 +1,6 @@
 # Installation And Runtime
 
-Version: 1.0.0
+Version: 1.0.1
 
 ## Requirements
 
@@ -16,7 +16,7 @@ Build the package from the repository root:
 powershell -ExecutionPolicy Bypass -File tools/build-release.ps1
 ```
 
-This creates `dist/walls-delivery-calc-1.0.0.zip` with one top-level `walls-delivery-calc/` directory. Install it through **Plugins → Add Plugin → Upload Plugin**, then activate **Walls Delivery Calc**. No dependency installation or asset compilation is required on the server.
+This creates `dist/walls-delivery-calc-1.0.1.zip` with one top-level `walls-delivery-calc/` directory. Install it through **Plugins → Add Plugin → Upload Plugin**, then activate **Walls Delivery Calc**. No dependency installation or asset compilation is required on the server.
 
 The package contains only runtime files: the main plugin entry, `uninstall.php`, `src/`, `assets/`, and `database/`. It intentionally excludes tests, documentation, VCS files, local output, and development configuration. `src/Export-GarPlaces.ps1` is included because the Locations admin UI offers it as a protected download.
 

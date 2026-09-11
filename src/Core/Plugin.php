@@ -487,7 +487,7 @@ final class Plugin {
 		$this->container->register( ShopProcessingOrderQueueCounter::class, fn(): ShopProcessingOrderQueueCounter => new ShopProcessingOrderQueueCounter( $this->container->get( Logger::class ) ) );
 		$this->container->register( ShopProcessingDaysResolver::class, fn(): ShopProcessingDaysResolver => new ShopProcessingDaysResolver( $this->container->get( SettingsRepository::class ), $this->container->get( ShopProcessingOrderQueueCounter::class ) ) );
 		$this->container->register( EncryptionService::class, fn(): EncryptionService => new EncryptionService() );
-		$this->container->register( MigrationManager::class, fn(): MigrationManager => new MigrationManager( $this->environment->version(), $this->environment->plugin_dir() . 'database/migrations' ) );
+		$this->container->register( MigrationManager::class, fn(): MigrationManager => new MigrationManager( WDC_SCHEMA_VERSION, $this->environment->plugin_dir() . 'database/migrations' ) );
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
 		$this->container->register( CalendarRepository::class, fn(): CalendarRepository => new CalendarRepository() );
 		$this->container->register( LocationRepository::class, fn(): LocationRepository => new LocationRepository() );
