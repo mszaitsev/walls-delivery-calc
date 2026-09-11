@@ -23,6 +23,10 @@ final class FiasImportManager {
 
 	public function register(): void {
 		add_action( self::WEEKLY_HOOK, array( $this, 'check_prepared_dataset' ) );
+		$this->scheduler->when_initialized( self::class, array( $this, 'ensure_schedule' ) );
+	}
+
+	public function ensure_schedule(): void {
 		if ( ! $this->scheduler->has_scheduled( self::WEEKLY_HOOK ) ) {
 			$this->scheduler->schedule_recurring( time() + $this->day(), $this->week(), self::WEEKLY_HOOK );
 		}

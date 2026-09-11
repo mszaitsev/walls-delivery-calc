@@ -1,5 +1,7 @@
 # Dependency Injection
 
+0.155.20 keeps the existing shared `ActionScheduler` adapter injection and extends that adapter with one request-scoped lifecycle coordinator. Scheduler owners identify their deferred callback by class, preventing repeated registration within the same bootstrap request.
+
 0.155.17 adds no service or composition-root wiring. The existing injected `CheckoutAddressRuntime` provides the explicitly read-only package normalization boundary, the existing `LocationRepository` remains the authority for canonical coordinates, and the existing generic map adapters expose zoom through their provider contract.
 
 0.155.16 correction: postal_code is enrichment-owned, never a GAR changed field. The retired location alias index is no longer generated, exported or used by runtime. Search uses searchable_text and canonical hierarchy fields. Backup/restore and incremental apply swap locations only. Migration 0064 drops only the canonical live alias table; pending migrations run even at unchanged plugin version. Legacy alias backup/temporary tables are retained inert. Finish or cancel an older update before deployment and start a fresh GAR analysis; do not resume its pre-correction diff.
@@ -8,7 +10,7 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.155.19
+Version: 0.155.20
 
 `TimezoneService` is injected into clock-based scheduler owners. `ScheduledTaskCatalog` receives scheduler/settings owners through the composition root and is injected into `AdminMenu`; it does not own settings or execute/reschedule jobs.
 

@@ -1,5 +1,7 @@
 # Walls Delivery Calc Documentation
 
+0.155.20 makes the WDC Action Scheduler boundary datastore-aware. Scheduling owners defer bootstrap work to `action_scheduler_init`, run immediately when registered after initialization, and no longer call or warn about Action Scheduler during the expected pre-init phase.
+
 0.155.19 defines `Asia/Novosibirsk` as the WDC business timezone for scheduled clock times and admin schedule presentation. The overview page now lists every user-facing recurring task with its effective schedule, real next scheduler timestamp, and disabled/missing/scheduled status; short lifecycle batch and polling steps remain excluded.
 
 0.155.18 makes PEK pickup and courier quote availability independent. A missing destination terminal or pickup preparation failure removes only `pek:pickup`; PEK courier still calls the official calculator with canonical `delivery.address`/`delivery.coordinates`, and the calculator response remains the authority for courier availability.
@@ -8,7 +10,7 @@
 
 0.155.16 correction: postal_code is enrichment-owned, never a GAR changed field. The retired location alias index is no longer generated, exported or used by runtime. Search uses searchable_text and canonical hierarchy fields. Backup/restore and incremental apply swap locations only. Migration 0064 drops only the canonical live alias table; pending migrations run even at unchanged plugin version. Legacy alias backup/temporary tables are retained inert. Finish or cancel an older update before deployment and start a fresh GAR analysis; do not resume its pre-correction diff.
 
-Version: 0.155.19
+Version: 0.155.20
 
 0.155.16 introduces the one-click GAR update, NEW-only candidate enrichment, bounded stages, resumable DaData limits and exclusive maintenance ownership. See [Locations](subsystems/locations.md).
 

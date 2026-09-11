@@ -1161,6 +1161,9 @@ C:.
     +---fias
     |       run-fias-smoke.php
     |
+    +---infrastructure
+    |       run-action-scheduler-lifecycle-smoke.php
+    |
     +---fixtures
     |   |   gar_places_sample.csv
     |   |   TestDemoCarrier.php

@@ -15,11 +15,17 @@ use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Calendar\CalendarDay;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
+use WallsShop\WDC\Infrastructure\Queue\ActionScheduler as WdcActionScheduler;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+
+if ( ! class_exists( 'ActionScheduler' ) ) {
+	final class ActionScheduler {
+		public static function is_initialized(): bool { return true; }
+	}
+}
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -280,7 +286,7 @@ foreach ( array( '.wdc-calendar-day.is-working', '.wdc-calendar-day.is-non-worki
 	calendar_smoke_assert( str_contains( $calendar_css, $needle ), 'Calendar CSS must contain centered square day style: ' . $needle );
 }
 
-$scheduler = new CalendarScheduler( new ActionScheduler( new Logger() ), $calendar, $timezone );
+$scheduler = new CalendarScheduler( new WdcActionScheduler( new Logger() ), $calendar, $timezone );
 foreach ( array(
 	array( '2026-09-01 00:00:00', '2026-09-07 09:00' ),
 	array( '2026-09-07 08:00:00', '2026-09-07 09:00' ),

@@ -1,10 +1,12 @@
 # Cron And Background Jobs
 
-Version: 0.155.19
+Version: 0.155.20
 
 WDC business clock times are interpreted in `Asia/Novosibirsk`; scheduler APIs continue to receive Unix timestamps. Local-clock owners share `TimezoneService`. Relative intervals retain interval semantics, and all next-run values in WDC admin are formatted in Novosibirsk time.
 
 Background jobs are registered from `Plugin::register_hooks()` and `Plugin::boot_modules()`.
+
+Action Scheduler owners register their task callbacks during WDC bootstrap, then defer schedule inspection and creation through the shared wrapper until the official `action_scheduler_init` hook. If an owner is registered after that hook, its ensure callback runs immediately. The expected pre-init state is silent; genuine unavailability after WordPress `init` is logged once per wrapper operation.
 
 Current jobs:
 

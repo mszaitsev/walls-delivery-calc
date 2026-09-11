@@ -30,7 +30,10 @@ final class GarSyncManager {
 
 	public function register(): void {
 		add_action( self::DAILY_HOOK, array( $this, 'check_for_changes' ) );
+		$this->scheduler->when_initialized( self::class, array( $this, 'ensure_schedule' ) );
+	}
 
+	public function ensure_schedule(): void {
 		if ( ! $this->scheduler->has_scheduled( self::DAILY_HOOK ) ) {
 			$this->scheduler->schedule_recurring( time() + $this->hour(), $this->day(), self::DAILY_HOOK );
 		}

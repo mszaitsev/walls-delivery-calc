@@ -14,25 +14,37 @@ namespace WallsShop\WDC\Infrastructure\Queue {
 		public array $single = array();
 		/** @var list<array{hook:string,args:array<int,mixed>,group:string}> */
 		public array $unscheduled = array();
+		/** @var list<array{timestamp:int,interval:int,hook:string,args:array<int,mixed>,group:string}> */
+		public array $recurring = array();
+		public ?int $next = null;
+		public bool $initialized = false;
+		/** @var array<string,callable> */
+		private array $callbacks = array();
+		/** @var array<string,true> */
+		private array $completed = array();
 
 		public function has_scheduled( string $hook, array $args = array(), string $group = '' ): bool { return false; }
-		public function next_scheduled( string $hook, array $args = array(), string $group = '' ): ?int { return null; }
-		public function schedule_recurring( int $timestamp, int $interval, string $hook, array $args = array(), string $group = '' ): ?int { return 1; }
+		public function next_scheduled( string $hook, array $args = array(), string $group = '' ): ?int { return $this->next; }
+		public function schedule_recurring( int $timestamp, int $interval, string $hook, array $args = array(), string $group = '' ): ?int { $this->recurring[] = compact( 'timestamp', 'interval', 'hook', 'args', 'group' ); $this->next = $timestamp; return 1; }
 		public function schedule_single( int $timestamp, string $hook, array $args = array(), string $group = '' ): ?int { $this->single[] = array( 'hook' => $hook, 'args' => $args, 'group' => $group ); return 1; }
-		public function unschedule( string $hook, array $args = array(), string $group = '' ): void { $this->unscheduled[] = array( 'hook' => $hook, 'args' => $args, 'group' => $group ); }
+		public function unschedule( string $hook, array $args = array(), string $group = '' ): void { $this->unscheduled[] = array( 'hook' => $hook, 'args' => $args, 'group' => $group ); $this->next = null; }
+		public function when_initialized( string $owner, callable $callback ): void { if ( isset( $this->completed[ $owner ] ) ) { return; } if ( $this->initialized ) { $this->completed[ $owner ] = true; $callback(); return; } $this->callbacks[ $owner ] = $callback; }
+		public function initialize(): void { $this->initialized = true; foreach ( $this->callbacks as $owner => $callback ) { if ( ! isset( $this->completed[ $owner ] ) ) { $this->completed[ $owner ] = true; $callback(); } } $this->callbacks = array(); }
 	}
 }
 
 namespace WallsShop\WDC\Calendar\Services {
 	final class TimezoneService {
 		public function next_local_time_timestamp( string $time, ?\DateTimeImmutable $now = null ): int { return 1; }
+		public function format_timestamp( int $timestamp, string $format = 'd.m.Y H:i' ): string { return gmdate( $format, $timestamp ); }
 	}
 }
 
 namespace WallsShop\WDC\Carriers\OzonDelivery {
 	final class OzonDeliverySettings {
-		public function pickup_auto_sync_enabled(): bool { return false; }
-		public function pickup_sync_time(): string { return '02:00'; }
+		public function __construct( private bool $enabled = false, private string $time = '02:00' ) {}
+		public function pickup_auto_sync_enabled(): bool { return $this->enabled; }
+		public function pickup_sync_time(): string { return $this->time; }
 	}
 }
 
@@ -84,6 +96,24 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup {
 			throw new \RuntimeException( $message );
 		}
 	}
+
+	$existing_timestamp = gmmktime( 2, 0, 0, 9, 12, 2026 );
+	$scheduler_adapter = new ActionScheduler();
+	$scheduler_adapter->next = $existing_timestamp;
+	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, new OzonDeliveryPickupImportService(), new OzonDeliveryPickupImportLock(), new OzonDeliverySettings( true, '02:00' ), new TimezoneService() );
+	$scheduler->register();
+	oz_owner_assert( array() === $scheduler_adapter->recurring, 'Ozon register before AS init must not touch scheduling.' );
+	$scheduler_adapter->initialize();
+	oz_owner_assert( array() === $scheduler_adapter->recurring && array() === $scheduler_adapter->unscheduled, 'Matching existing Ozon daily action must be preserved after deferred ensure.' );
+
+	$scheduler_adapter = new ActionScheduler();
+	$scheduler_adapter->initialized = true;
+	$scheduler_adapter->next = $existing_timestamp;
+	$scheduler = new OzonDeliveryPickupScheduler( $scheduler_adapter, new OzonDeliveryPickupImportService(), new OzonDeliveryPickupImportLock(), new OzonDeliverySettings( true, '03:00' ), new TimezoneService() );
+	$scheduler->register();
+	oz_owner_assert( 1 === count( $scheduler_adapter->unscheduled ) && 1 === count( $scheduler_adapter->recurring ), 'Ozon register after AS init must immediately reschedule a changed local time.' );
+	$scheduler->register();
+	oz_owner_assert( 1 === count( $scheduler_adapter->recurring ), 'Repeated Ozon registration must not duplicate the daily action.' );
 
 	$scheduler_adapter = new ActionScheduler();
 	$importer = new OzonDeliveryPickupImportService();
