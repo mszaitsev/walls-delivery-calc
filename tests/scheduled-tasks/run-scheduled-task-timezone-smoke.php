@@ -36,13 +36,19 @@ $overview = (string) file_get_contents( $root . '/src/Admin/AdminMenu.php' );
 $dpd = (string) file_get_contents( $root . '/src/Carriers/Dpd/Pickup/DpdPickupPointAutoSync.php' );
 $yandex = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2Runner.php' );
 $ozon = (string) file_get_contents( $root . '/src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupScheduler.php' );
-foreach ( array( 'calendar', 'gar', 'fias', 'shipment_statuses', 'dpd_pickup', 'yandex_geo', 'russian_post_pickup', 'ozon_pickup' ) as $key ) {
+$expected_keys = array( 'shipment_statuses', 'russian_post_pickup', 'ozon_pickup', 'yandex_geo', 'dpd_pickup', 'gar', 'fias', 'calendar' );
+foreach ( $expected_keys as $key ) {
 	scheduled_task_timezone_assert( str_contains( $catalog, "'" . $key . "'" ), 'Catalog must include known task key: ' . $key );
 }
+scheduled_task_timezone_assert( str_contains( $catalog, "TASK_KEYS = array( '" . implode( "', '", $expected_keys ) . "' )" ), 'Catalog inventory contract must preserve the exact presentation order.' );
+scheduled_task_timezone_assert( str_contains( $catalog, "'Каждые ' . \$this->shipment_status_auto_sync->format_interval_minutes" ) && str_contains( $catalog, "'Первый понедельник месяца в 09:00'" ), 'Catalog must show the effective status interval and monthly calendar schedule.' );
 scheduled_task_timezone_assert( str_contains( $catalog, "'Отключена'" ) && str_contains( $catalog, "'Не запланировано'" ) && str_contains( $catalog, "'Запланировано'" ), 'Catalog must distinguish disabled, missing, and scheduled states.' );
 scheduled_task_timezone_assert( str_contains( $catalog, 'pickup_autosync_times()' ) && ! str_contains( $catalog, 'pickup_autosync_time_options()' ), 'Overview must use effective DPD slots only.' );
 scheduled_task_timezone_assert( str_contains( $overview, 'Запланированные задачи' ) && str_contains( $overview, 'Время указано по Новосибирску (GMT+7).' ), 'Overview must contain the exact heading and timezone note.' );
-scheduled_task_timezone_assert( strpos( $overview, '$this->shipment_cost_analytics->render();' ) < strpos( $overview, 'Запланированные задачи' ), 'Scheduled tasks must render after existing overview content.' );
+$cache_position = strpos( $overview, 'Очистить кеш тарифов доставки' );
+$tasks_position = strpos( $overview, 'Запланированные задачи' );
+$analytics_position = strpos( $overview, '$this->shipment_cost_analytics->render();' );
+scheduled_task_timezone_assert( false !== $cache_position && false !== $tasks_position && false !== $analytics_position && $cache_position < $tasks_position && $tasks_position < $analytics_position, 'Overview order must be cache button, scheduled tasks, shipment analytics.' );
 scheduled_task_timezone_assert( ! str_contains( $dpd, "modify( '+3 hours' )" ) && ! str_contains( $dpd, "modify( '-3 hours' )" ), 'DPD must not use manual offsets.' );
 scheduled_task_timezone_assert( ! str_contains( $yandex, 'Europe/Moscow' ) && str_contains( $yandex, 'TimezoneService' ), 'Yandex must use the canonical timezone owner.' );
 scheduled_task_timezone_assert( ! str_contains( $ozon, 'wp_timezone' ) && str_contains( $ozon, 'TimezoneService' ), 'Ozon must not use the site timezone.' );

@@ -91,10 +91,6 @@ final class CalendarService {
 		}
 
 		$today = $this->timezone->now();
-		if ( '12-01' !== $today->format( 'm-d' ) ) {
-			return;
-		}
-
 		$next_year = (int) $today->modify( '+1 year' )->format( 'Y' );
 
 		foreach ( CalendarTypes::all() as $calendar_type ) {

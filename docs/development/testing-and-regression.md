@@ -1,6 +1,6 @@
 # Testing And Regression
 
-0.155.19 adds focused scheduled-task timezone coverage for UTC and Europe/Amsterdam site contexts, local midnight boundaries, 23:30 conversion, admin formatting, explicit catalog keys, effective DPD slots, overview placement, and removal of Moscow/site/manual-offset scheduler assumptions.
+0.155.19 adds focused scheduled-task timezone coverage for UTC and Europe/Amsterdam site contexts, local midnight boundaries, 23:30 conversion, admin formatting, explicit catalog keys, effective DPD slots, overview placement, and removal of Moscow/site/manual-offset scheduler assumptions. Continued branch work covers first-Monday monthly calendar scheduling and legacy daily-action replacement, next-year no-overwrite behavior, the 96-value shipment-status interval select, dynamic WP-Cron recurrence migration/rescheduling, exact catalog order, and cache/tasks/analytics overview placement.
 
 0.155.18 extends PEK checkout regression with the complete pickup/courier mode matrix, selected-terminal repricing, full-address and canonical-location courier payloads, pickup provider errors, findzone failure isolation, and the representative RU Tavricheskoe case. Fake HTTP proves that no-terminal Tavricheskoe calls courier calculation once with `isDelivery=true` and no `receiverWarehouseId`; order-admin recalculation covers the same courier-only result through the shared runtime.
 

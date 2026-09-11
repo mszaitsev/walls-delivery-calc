@@ -4,6 +4,7 @@ declare(strict_types=1);
 use WallsShop\WDC\Calendar\CalendarTypes;
 use WallsShop\WDC\Calendar\Admin\CalendarAdminPage;
 use WallsShop\WDC\Calendar\Services\CalendarService;
+use WallsShop\WDC\Calendar\Services\CalendarScheduler;
 use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
 use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Calendar\Services\TimezoneService;
@@ -14,6 +15,8 @@ use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Calendar\CalendarDay;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
@@ -84,6 +87,27 @@ function update_option( string $name, mixed $value, bool $autoload = true ): boo
 	global $wdc_test_options;
 	$wdc_test_options[ $name ] = $value;
 	return true;
+}
+
+$GLOBALS['wdc_calendar_actions'] = array();
+$GLOBALS['wdc_calendar_unschedule_calls'] = 0;
+function as_schedule_single_action( int $timestamp, string $hook, array $args = array(), string $group = '' ): int {
+	$GLOBALS['wdc_calendar_actions'][ $hook ] = array( 'timestamp' => $timestamp, 'type' => 'single' );
+	return 1;
+}
+function as_schedule_recurring_action( int $timestamp, int $interval, string $hook, array $args = array(), string $group = '' ): int {
+	$GLOBALS['wdc_calendar_actions'][ $hook ] = array( 'timestamp' => $timestamp, 'type' => 'recurring', 'interval' => $interval );
+	return 2;
+}
+function as_unschedule_all_actions( string $hook, array $args = array(), string $group = '' ): void {
+	unset( $GLOBALS['wdc_calendar_actions'][ $hook ] );
+	$GLOBALS['wdc_calendar_unschedule_calls']++;
+}
+function as_has_scheduled_action( string $hook, array $args = array(), string $group = '' ): bool {
+	return isset( $GLOBALS['wdc_calendar_actions'][ $hook ] );
+}
+function as_next_scheduled_action( string $hook, array $args = array(), string $group = '' ): int|false {
+	return $GLOBALS['wdc_calendar_actions'][ $hook ]['timestamp'] ?? false;
 }
 
 function current_time( string $type ): string {
@@ -255,5 +279,36 @@ $calendar_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/adm
 foreach ( array( '.wdc-calendar-day.is-working', '.wdc-calendar-day.is-non-working', 'display: flex', 'align-items: center', 'justify-content: center', 'aspect-ratio: 1 / 1', 'transition:' ) as $needle ) {
 	calendar_smoke_assert( str_contains( $calendar_css, $needle ), 'Calendar CSS must contain centered square day style: ' . $needle );
 }
+
+$scheduler = new CalendarScheduler( new ActionScheduler( new Logger() ), $calendar, $timezone );
+foreach ( array(
+	array( '2026-09-01 00:00:00', '2026-09-07 09:00' ),
+	array( '2026-09-07 08:00:00', '2026-09-07 09:00' ),
+	array( '2026-09-07 10:00:00', '2026-10-05 09:00' ),
+	array( '2026-06-01 00:00:00', '2026-06-01 09:00' ),
+	array( '2026-12-10 00:00:00', '2027-01-04 09:00' ),
+) as [ $now, $expected ] ) {
+	$timestamp = $scheduler->next_run_timestamp( new DateTimeImmutable( $now, $timezone->timezone() ) );
+	calendar_smoke_assert( $expected === $timezone->format_timestamp( $timestamp, 'Y-m-d H:i' ), 'Monthly calendar next run mismatch for ' . $now );
+}
+
+$next_year = (int) $timezone->now()->modify( '+1 year' )->format( 'Y' );
+$before_generation = count( $wpdb->rows );
+$calendar->generate_next_year_if_needed();
+$after_generation = count( $wpdb->rows );
+calendar_smoke_assert( $after_generation > $before_generation && $repository->has_year( CalendarTypes::CARRIER_RU, $next_year ) && $repository->has_year( CalendarTypes::SHOP, $next_year ), 'Missing next-year calendars must be generated on a monthly run.' );
+$calendar->generate_next_year_if_needed();
+calendar_smoke_assert( $after_generation === count( $wpdb->rows ), 'A later monthly run must not overwrite existing next-year calendars.' );
+
+$GLOBALS['wdc_calendar_actions'][ CalendarScheduler::HOOK ] = array( 'timestamp' => time() + 86400, 'type' => 'recurring', 'interval' => 86400 );
+unset( $wdc_test_options['wdc_calendar_schedule_version'] );
+$scheduler->schedule();
+calendar_smoke_assert( 1 === $GLOBALS['wdc_calendar_unschedule_calls'] && 'single' === $GLOBALS['wdc_calendar_actions'][ CalendarScheduler::HOOK ]['type'], 'Legacy daily calendar action must be removed and replaced with one monthly single action.' );
+$scheduled_after_migration = $GLOBALS['wdc_calendar_actions'][ CalendarScheduler::HOOK ]['timestamp'];
+$scheduler->schedule();
+calendar_smoke_assert( $scheduled_after_migration === $GLOBALS['wdc_calendar_actions'][ CalendarScheduler::HOOK ]['timestamp'], 'Repeated calendar ensure must not create a duplicate action.' );
+unset( $GLOBALS['wdc_calendar_actions'][ CalendarScheduler::HOOK ] );
+$scheduler->run();
+calendar_smoke_assert( $after_generation === count( $wpdb->rows ) && 'single' === $GLOBALS['wdc_calendar_actions'][ CalendarScheduler::HOOK ]['type'], 'Calendar hook must preserve existing years and self-schedule the next monthly action.' );
 
 echo "Calendar smoke test passed.\n";

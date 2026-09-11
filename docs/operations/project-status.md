@@ -1,6 +1,6 @@
 # Project Status
 
-0.155.19: WDC scheduled clock times and scheduled/admin presentation use `Asia/Novosibirsk` independently of WordPress, PHP, or server timezone. The overview exposes all eight user-facing recurring jobs and real scheduler state; internal one-off batch/retry/polling steps remain intentionally hidden.
+0.155.19: WDC scheduled clock times and scheduled/admin presentation use `Asia/Novosibirsk` independently of WordPress, PHP, or server timezone. The overview exposes all eight user-facing recurring jobs and real scheduler state between cache cleanup and shipment analytics; internal one-off batch/retry/polling steps remain intentionally hidden. Calendar generation is a self-scheduling single action on the first Monday monthly at 09:00 and checks the next year without overwriting it. Shipment status autosync supports persisted 00:15–24:00 intervals in 15-minute steps with dynamic WP-Cron rescheduling.
 
 0.155.18: PEK pickup and courier availability are independent. Pickup still requires an eligible destination `receiverWarehouseId`; no terminal or a pickup preparation error does not prevent a courier request built from canonical `delivery.address`/`delivery.coordinates`. Checkout and order-admin recalculation share the corrected PEK runtime, with Tavricheskoe covered as courier-only by fake HTTP regression.
 

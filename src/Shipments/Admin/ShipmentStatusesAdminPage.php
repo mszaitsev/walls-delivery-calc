@@ -9,6 +9,7 @@ use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -21,7 +22,8 @@ final class ShipmentStatusesAdminPage {
 	public function __construct(
 		private SettingsRepository $settings,
 		private ShipmentStatusAutoSyncService $auto_sync,
-		private ShipmentOrderStatusMappingService $order_status_mapping
+		private ShipmentOrderStatusMappingService $order_status_mapping,
+		private ShipmentStatusAutoSyncCron $auto_sync_cron
 	) {
 	}
 
@@ -89,8 +91,12 @@ final class ShipmentStatusesAdminPage {
 					<tr>
 						<th scope="row"><?php echo esc_html__( 'Периодичность', 'walls-delivery-calc' ); ?></th>
 						<td>
-							<p><?php echo esc_html__( 'Периодичность обновления: каждые 6 часов.', 'walls-delivery-calc' ); ?></p>
-							<p class="description"><?php echo esc_html__( 'Настраиваемая периодичность будет добавлена позже.', 'walls-delivery-calc' ); ?></p>
+							<select name="<?php echo esc_attr( ShipmentStatusAutoSyncService::INTERVAL_KEY ); ?>">
+								<?php foreach ( $this->auto_sync->interval_options() as $minutes ) : ?>
+									<option value="<?php echo esc_attr( (string) $minutes ); ?>" <?php selected( $this->auto_sync->interval_minutes(), $minutes ); ?>><?php echo esc_html( $this->auto_sync->format_interval_minutes( $minutes ) ); ?></option>
+								<?php endforeach; ?>
+							</select>
+							<p class="description"><?php echo esc_html__( 'Интервал автоматической синхронизации статусов отправлений.', 'walls-delivery-calc' ); ?></p>
 						</td>
 					</tr>
 					<tr>
@@ -272,6 +278,12 @@ final class ShipmentStatusesAdminPage {
 			ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY,
 			$statuses
 		);
+		$interval = $this->auto_sync->sanitize_interval_minutes(
+			$_POST[ ShipmentStatusAutoSyncService::INTERVAL_KEY ] ?? null,
+			$this->auto_sync->interval_minutes()
+		);
+		$this->settings->set( ShipmentStatusAutoSyncService::INTERVAL_KEY, $interval );
+		$this->auto_sync_cron->reschedule();
 
 		return __( 'Настройки статусов сохранены.', 'walls-delivery-calc' );
 	}

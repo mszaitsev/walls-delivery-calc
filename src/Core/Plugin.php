@@ -1034,7 +1034,7 @@ final class Plugin {
 				$this->container->get( ScheduledTaskCatalog::class )
 			)
 		);
-		$this->container->register( ScheduledTaskCatalog::class, fn(): ScheduledTaskCatalog => new ScheduledTaskCatalog( $this->container->get( ActionScheduler::class ), $this->container->get( TimezoneService::class ), $this->container->get( SettingsRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryPickupScheduler::class ), $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ) ) );
+		$this->container->register( ScheduledTaskCatalog::class, fn(): ScheduledTaskCatalog => new ScheduledTaskCatalog( $this->container->get( ActionScheduler::class ), $this->container->get( TimezoneService::class ), $this->container->get( SettingsRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryPickupScheduler::class ), $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), $this->container->get( ShipmentStatusAutoSyncService::class ) ) );
 		$this->container->register(
 			CalendarAdminPage::class,
 			fn(): CalendarAdminPage => new CalendarAdminPage(
@@ -1213,7 +1213,7 @@ final class Plugin {
 				$this->container->get( ShipmentModalExtensionRegistry::class )
 			)
 		);
-		$this->container->register( ShipmentStatusesAdminPage::class, fn(): ShipmentStatusesAdminPage => new ShipmentStatusesAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( ShipmentStatusAutoSyncService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
+		$this->container->register( ShipmentStatusesAdminPage::class, fn(): ShipmentStatusesAdminPage => new ShipmentStatusesAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( ShipmentStatusAutoSyncService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ), $this->container->get( ShipmentStatusAutoSyncCron::class ) ) );
 	}
 
 	private function register_hooks(): void {

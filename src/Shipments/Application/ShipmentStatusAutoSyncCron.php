@@ -7,7 +7,8 @@ defined( 'ABSPATH' ) || exit;
 
 final class ShipmentStatusAutoSyncCron {
 	public const HOOK = 'wdc_shipment_status_autosync';
-	public const SCHEDULE = 'wdc_every_6_hours';
+	public const LEGACY_SCHEDULE = 'wdc_every_6_hours';
+	private const SCHEDULE_PREFIX = 'wdc_shipment_status_autosync_';
 
 	public function __construct(
 		private ShipmentStatusAutoSyncService $service
@@ -25,9 +26,9 @@ final class ShipmentStatusAutoSyncCron {
 	 * @return array<string,array<string,mixed>>
 	 */
 	public function add_schedule( array $schedules ): array {
-		$schedules[ self::SCHEDULE ] = array(
-			'interval' => ShipmentStatusAutoSyncService::INTERVAL_SECONDS,
-			'display' => 'WDC every 6 hours',
+		$schedules[ $this->schedule_key() ] = array(
+			'interval' => $this->service->interval_seconds(),
+			'display' => 'WDC shipment status autosync: ' . $this->service->format_interval_minutes( $this->service->interval_minutes() ),
 		);
 
 		return $schedules;
@@ -37,14 +38,40 @@ final class ShipmentStatusAutoSyncCron {
 		if ( ! function_exists( 'wp_next_scheduled' ) || ! function_exists( 'wp_schedule_event' ) ) {
 			return;
 		}
-		if ( false !== wp_next_scheduled( self::HOOK ) ) {
+		$next = wp_next_scheduled( self::HOOK );
+		$current_schedule = false !== $next && function_exists( 'wp_get_schedule' ) ? wp_get_schedule( self::HOOK ) : false;
+		if ( false !== $next && $this->schedule_key() === $current_schedule ) {
 			return;
 		}
+		if ( false !== $next ) {
+			$this->clear_schedule();
+		}
 
-		wp_schedule_event( time() + ShipmentStatusAutoSyncService::INTERVAL_SECONDS, self::SCHEDULE, self::HOOK );
+		$this->schedule_event();
+	}
+
+	public function reschedule(): void {
+		$this->clear_schedule();
+		$this->schedule_event();
+	}
+
+	public function schedule_key(): string {
+		return self::SCHEDULE_PREFIX . $this->service->interval_minutes();
 	}
 
 	public function run_cron(): void {
 		$this->service->run( 'cron' );
+	}
+
+	private function schedule_event(): void {
+		if ( function_exists( 'wp_schedule_event' ) ) {
+			wp_schedule_event( time() + $this->service->interval_seconds(), $this->schedule_key(), self::HOOK );
+		}
+	}
+
+	private function clear_schedule(): void {
+		if ( function_exists( 'wp_clear_scheduled_hook' ) ) {
+			wp_clear_scheduled_hook( self::HOOK );
+		}
 	}
 }

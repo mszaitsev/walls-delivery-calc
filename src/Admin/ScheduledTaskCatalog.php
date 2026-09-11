@@ -22,7 +22,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 defined( 'ABSPATH' ) || exit;
 
 final class ScheduledTaskCatalog {
-	public const TASK_KEYS = array( 'calendar', 'gar', 'fias', 'shipment_statuses', 'dpd_pickup', 'yandex_geo', 'russian_post_pickup', 'ozon_pickup' );
+	public const TASK_KEYS = array( 'shipment_statuses', 'russian_post_pickup', 'ozon_pickup', 'yandex_geo', 'dpd_pickup', 'gar', 'fias', 'calendar' );
 
 	public function __construct(
 		private ActionScheduler $action_scheduler,
@@ -32,7 +32,8 @@ final class ScheduledTaskCatalog {
 		private RussianPostOtpravkaApiSettings $russian_post_settings,
 		private OzonDeliverySettings $ozon_settings,
 		private OzonDeliveryPickupScheduler $ozon_scheduler,
-		private YandexDeliveryGeoPipelineV2Runner $yandex_runner
+		private YandexDeliveryGeoPipelineV2Runner $yandex_runner,
+		private ShipmentStatusAutoSyncService $shipment_status_auto_sync
 	) {
 	}
 
@@ -40,18 +41,18 @@ final class ScheduledTaskCatalog {
 	public function tasks(): array {
 		$dpd_times = $this->dpd_settings->pickup_autosync_times();
 		$yandex = $this->yandex_runner->schedule_settings();
-		$status_enabled = $this->settings->get_bool( ShipmentStatusAutoSyncService::ENABLED_KEY, true )
+		$status_enabled = $this->shipment_status_auto_sync->enabled()
 			&& $this->settings->get_bool( 'woocommerce_runtime_enabled', true );
 
 		return array(
-			$this->task( 'calendar', 'Генерация календаря следующего года', 'Ежедневно в 01:00', true, $this->action_scheduler->next_scheduled( CalendarScheduler::HOOK ) ),
+			$this->task( 'shipment_statuses', 'Автосинхронизация статусов отправлений', 'Каждые ' . $this->shipment_status_auto_sync->format_interval_minutes( $this->shipment_status_auto_sync->interval_minutes() ), $status_enabled, $this->wp_next( ShipmentStatusAutoSyncCron::HOOK ) ),
+			$this->task( 'russian_post_pickup', 'Обновление ПВЗ Почты России', 'Раз в неделю', $this->russian_post_settings->schedule_enabled(), $this->wp_next( RussianPostPickupImporter::SCHEDULE_HOOK ) ),
+			$this->task( 'ozon_pickup', 'Обновление ПВЗ Ozon Delivery', 'Ежедневно в ' . $this->ozon_settings->pickup_sync_time(), $this->ozon_settings->pickup_auto_sync_enabled(), $this->ozon_scheduler->next_run() ),
+			$this->task( 'yandex_geo', 'Полное обновление ПВЗ/географии Яндекс', $this->yandex_schedule( $yandex ), ! empty( $yandex['enabled'] ), $this->yandex_runner->next_run_timestamp() ),
+			$this->task( 'dpd_pickup', 'Обновление ПВЗ DPD', array() === $dpd_times ? '—' : implode( ', ', $dpd_times ), $this->dpd_settings->pickup_autosync_enabled() && array() !== $dpd_times, $this->next_dpd_run( $dpd_times ) ),
 			$this->task( 'gar', 'Проверка обновлений GAR', 'Каждые 24 часа', $this->settings->get_bool( 'gar_sync_enabled', false ), $this->action_scheduler->next_scheduled( GarSyncManager::DAILY_HOOK ) ),
 			$this->task( 'fias', 'Проверка подготовленного FIAS dataset', 'Каждые 7 дней', true, $this->action_scheduler->next_scheduled( FiasImportManager::WEEKLY_HOOK ) ),
-			$this->task( 'shipment_statuses', 'Автосинхронизация статусов отправлений', 'Каждые 6 часов', $status_enabled, $this->wp_next( ShipmentStatusAutoSyncCron::HOOK ) ),
-			$this->task( 'dpd_pickup', 'Обновление ПВЗ DPD', array() === $dpd_times ? '—' : implode( ', ', $dpd_times ), $this->dpd_settings->pickup_autosync_enabled() && array() !== $dpd_times, $this->next_dpd_run( $dpd_times ) ),
-			$this->task( 'yandex_geo', 'Полное обновление ПВЗ/географии Яндекс', $this->yandex_schedule( $yandex ), ! empty( $yandex['enabled'] ), $this->yandex_runner->next_run_timestamp() ),
-			$this->task( 'russian_post_pickup', 'Обновление ПВЗ Почты России', 'Раз в неделю', $this->russian_post_settings->schedule_enabled(), $this->wp_next( RussianPostPickupImporter::SCHEDULE_HOOK ) ),
-			$this->task( 'ozon_pickup', 'Обновление ПВЗ Ozon Delivery', 'Ежедневно в ' . $this->ozon_settings->pickup_sync_time(), $this->ozon_settings->pickup_auto_sync_enabled(), $this->ozon_scheduler->next_run() )
+			$this->task( 'calendar', 'Генерация календаря следующего года', 'Первый понедельник месяца в 09:00', true, $this->action_scheduler->next_scheduled( CalendarScheduler::HOOK ) )
 		);
 	}
 

@@ -103,9 +103,21 @@ if ( ! function_exists( 'add_submenu_page' ) ) {
 if ( ! function_exists( 'wp_next_scheduled' ) ) {
 	function wp_next_scheduled( string $hook ): int|false { return $GLOBALS['wdc_status_autosync_events'][ $hook ]['timestamp'] ?? false; }
 }
+if ( ! function_exists( 'wp_get_schedule' ) ) {
+	function wp_get_schedule( string $hook ): string|false { return $GLOBALS['wdc_status_autosync_events'][ $hook ]['recurrence'] ?? false; }
+}
+if ( ! function_exists( 'wp_clear_scheduled_hook' ) ) {
+	function wp_clear_scheduled_hook( string $hook ): int {
+		$existed = isset( $GLOBALS['wdc_status_autosync_events'][ $hook ] );
+		unset( $GLOBALS['wdc_status_autosync_events'][ $hook ] );
+		$GLOBALS['wdc_status_autosync_clear_calls']++;
+		return $existed ? 1 : 0;
+	}
+}
 if ( ! function_exists( 'wp_schedule_event' ) ) {
 	function wp_schedule_event( int $timestamp, string $recurrence, string $hook ): bool {
 		$GLOBALS['wdc_status_autosync_events'][ $hook ] = compact( 'timestamp', 'recurrence', 'hook' );
+		$GLOBALS['wdc_status_autosync_schedule_calls']++;
 		return true;
 	}
 }
@@ -202,6 +214,8 @@ $GLOBALS['wdc_status_autosync_events'] = array();
 $GLOBALS['wdc_status_autosync_actions'] = array();
 $GLOBALS['wdc_status_autosync_filters'] = array();
 $GLOBALS['wdc_status_autosync_update_calls'] = array();
+$GLOBALS['wdc_status_autosync_clear_calls'] = 0;
+$GLOBALS['wdc_status_autosync_schedule_calls'] = 0;
 
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 $settings_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Infrastructure/Settings/SettingsRepository.php' );
@@ -240,6 +254,20 @@ $service = new ShipmentStatusAutoSyncService(
 );
 
 status_autosync_assert( true === $service->enabled(), 'Autosync must be enabled by default.' );
+status_autosync_assert( 360 === $service->interval_minutes(), 'Missing interval setting must default to 360 minutes.' );
+foreach ( array( 15, 30, 360, 1440 ) as $minutes ) {
+	status_autosync_assert( $minutes === $service->sanitize_interval_minutes( $minutes ), 'Valid interval must be accepted: ' . $minutes );
+}
+foreach ( array( 0, 14, 16, 1455, 'junk' ) as $invalid ) {
+	status_autosync_assert( 360 === $service->sanitize_interval_minutes( $invalid ), 'Invalid interval must use the default.' );
+}
+status_autosync_assert( 96 === count( $service->interval_options() ), 'Interval select must contain 96 values.' );
+status_autosync_assert( '00:15' === $service->format_interval_minutes( 15 ) && '06:00' === $service->format_interval_minutes( 360 ) && '24:00' === $service->format_interval_minutes( 1440 ), 'Interval labels must use HH:MM including 24:00.' );
+foreach ( array( 15 => 900, 360 => 21600, 1440 => 86400 ) as $minutes => $seconds ) {
+	$settings->set( ShipmentStatusAutoSyncService::INTERVAL_KEY, $minutes );
+	status_autosync_assert( $seconds === $service->interval_seconds(), 'Cron seconds mismatch for interval ' . $minutes );
+}
+$settings->set( ShipmentStatusAutoSyncService::INTERVAL_KEY, 360 );
 status_autosync_assert( in_array( 'wc-processing', $service->selected_order_statuses(), true ), 'Default selected statuses must include processing.' );
 status_autosync_assert( array( 'wc-processing', 'wc-on-hold' ) === $service->default_order_statuses(), 'Default selected statuses must be processing and on-hold only.' );
 status_autosync_assert( ! in_array( 'wc-completed', $service->default_order_statuses(), true ), 'Default selected statuses must not include completed.' );
@@ -250,9 +278,20 @@ status_autosync_assert( true === $supports->invoke( $service, RussianPostDomesti
 
 $cron = new ShipmentStatusAutoSyncCron( $service );
 $schedule = $cron->add_schedule( array() );
-status_autosync_assert( ShipmentStatusAutoSyncService::INTERVAL_SECONDS === (int) $schedule[ ShipmentStatusAutoSyncCron::SCHEDULE ]['interval'], 'Custom schedule must use a 6-hour interval.' );
+status_autosync_assert( 21600 === (int) $schedule[ $cron->schedule_key() ]['interval'], 'Default custom schedule must use a 6-hour interval.' );
 $cron->ensure_scheduled();
-status_autosync_assert( ShipmentStatusAutoSyncCron::SCHEDULE === $GLOBALS['wdc_status_autosync_events'][ ShipmentStatusAutoSyncCron::HOOK ]['recurrence'], 'Cron event must be registered with custom schedule.' );
+status_autosync_assert( 'wdc_shipment_status_autosync_360' === $GLOBALS['wdc_status_autosync_events'][ ShipmentStatusAutoSyncCron::HOOK ]['recurrence'], 'Cron event must use the dynamic 360-minute schedule.' );
+$cron->ensure_scheduled();
+status_autosync_assert( 1 === $GLOBALS['wdc_status_autosync_schedule_calls'], 'Repeated ensure must not create a duplicate event.' );
+$GLOBALS['wdc_status_autosync_events'][ ShipmentStatusAutoSyncCron::HOOK ]['recurrence'] = ShipmentStatusAutoSyncCron::LEGACY_SCHEDULE;
+$cron->ensure_scheduled();
+status_autosync_assert( 1 === $GLOBALS['wdc_status_autosync_clear_calls'] && 'wdc_shipment_status_autosync_360' === $GLOBALS['wdc_status_autosync_events'][ ShipmentStatusAutoSyncCron::HOOK ]['recurrence'], 'Legacy 6-hour event must be replaced automatically.' );
+$settings->set( ShipmentStatusAutoSyncService::INTERVAL_KEY, 30 );
+$before_reschedule = time();
+$cron->reschedule();
+$rescheduled = $GLOBALS['wdc_status_autosync_events'][ ShipmentStatusAutoSyncCron::HOOK ];
+status_autosync_assert( 'wdc_shipment_status_autosync_30' === $rescheduled['recurrence'] && $rescheduled['timestamp'] >= $before_reschedule + 1800 && $rescheduled['timestamp'] <= time() + 1800, 'Interval change must replace the event and schedule next run at now + interval.' );
+$settings->set( ShipmentStatusAutoSyncService::INTERVAL_KEY, 360 );
 
 set_transient( ShipmentStatusAutoSyncService::LOCK_KEY, 1, ShipmentStatusAutoSyncService::LOCK_TTL );
 $locked = $service->run( 'manual' );
@@ -391,13 +430,14 @@ status_autosync_assert( array( 10000 ) === $cdek_sleeps, 'CDEK autosync must thr
 $stored = $settings->get_array( ShipmentStatusAutoSyncService::DIAGNOSTICS_KEY );
 status_autosync_assert( 'cron' === (string) $stored['trigger_type'] && 2 === (int) $stored['shipments_updated'], 'Diagnostics stats must be stored after run.' );
 
-$page = new ShipmentStatusesAdminPage( $settings, $service, $order_status_mapping );
+$page = new ShipmentStatusesAdminPage( $settings, $service, $order_status_mapping, $cron );
 ob_start();
 $page->add_menu_page();
 $page->render_page();
 $html = ob_get_clean();
 status_autosync_assert( ! empty( $GLOBALS['wdc_status_autosync_wc_statuses_called'] ), 'Settings page must load statuses through wc_get_order_statuses().' );
 status_autosync_assert( str_contains( $html, 'Статусы отправлений' ) && str_contains( $html, 'wc-custom-shipping' ), 'Settings page must render the Statuses screen and custom WooCommerce statuses.' );
+status_autosync_assert( 96 === substr_count( $html, '<option value=' ) && str_contains( $html, '>00:15</option>' ) && str_contains( $html, '>06:00</option>' ) && str_contains( $html, '>24:00</option>' ), 'Settings page must render all 96 interval options with exact boundary labels.' );
 
 $_GET = array( 'tab' => 'mapping' );
 ob_start();
@@ -425,14 +465,16 @@ $_POST = array(
 	'wdc_statuses_action' => 'save_settings',
 	'wdc_shipment_statuses_nonce' => 'nonce',
 	ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY => array( 'wc-processing', 'wc-custom-shipping' ),
+	ShipmentStatusAutoSyncService::INTERVAL_KEY => '30',
 );
 $_GET = array( 'tab' => 'main' );
 ob_start();
 $page->render_page();
 ob_end_clean();
 $saved_settings = $GLOBALS['wdc_status_autosync_options']['wdc_core_settings'];
-status_autosync_assert( 2 === count( $GLOBALS['wdc_status_autosync_update_calls'] ), 'Status settings save must persist exactly two targeted settings.' );
-status_autosync_assert( false === $saved_settings[ ShipmentStatusAutoSyncService::ENABLED_KEY ] && array( 'wc-processing', 'wc-custom-shipping' ) === $saved_settings[ ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY ], 'Status settings page must save enabled and selected statuses through set().' );
-status_autosync_assert( array( 'unrelated_existing_key', ShipmentStatusAutoSyncService::ENABLED_KEY, ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY ) === array_keys( $saved_settings ), 'Status settings save must not materialize every default setting into the option.' );
+status_autosync_assert( 3 === count( $GLOBALS['wdc_status_autosync_update_calls'] ), 'Status settings save must persist exactly three targeted settings.' );
+status_autosync_assert( false === $saved_settings[ ShipmentStatusAutoSyncService::ENABLED_KEY ] && array( 'wc-processing', 'wc-custom-shipping' ) === $saved_settings[ ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY ] && 30 === $saved_settings[ ShipmentStatusAutoSyncService::INTERVAL_KEY ], 'Status settings page must save enabled, statuses, and sanitized interval through set().' );
+status_autosync_assert( array( 'unrelated_existing_key', ShipmentStatusAutoSyncService::ENABLED_KEY, ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY, ShipmentStatusAutoSyncService::INTERVAL_KEY ) === array_keys( $saved_settings ), 'Status settings save must not materialize every default setting into the option.' );
+status_autosync_assert( 'wdc_shipment_status_autosync_30' === $GLOBALS['wdc_status_autosync_events'][ ShipmentStatusAutoSyncCron::HOOK ]['recurrence'], 'Admin save must immediately reschedule the cron event.' );
 
 echo "Status autosync smoke passed\n";

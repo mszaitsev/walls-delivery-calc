@@ -17,9 +17,13 @@ final class ShipmentStatusAutoSyncService {
 	public const ENABLED_KEY = 'shipment_status_autosync_enabled';
 	public const ORDER_STATUSES_KEY = 'shipment_status_autosync_order_statuses';
 	public const DIAGNOSTICS_KEY = 'shipment_status_autosync_last_run';
+	public const INTERVAL_KEY = 'shipment_status_autosync_interval_minutes';
+	public const DEFAULT_INTERVAL_MINUTES = 360;
+	public const MIN_INTERVAL_MINUTES = 15;
+	public const MAX_INTERVAL_MINUTES = 1440;
+	public const INTERVAL_STEP_MINUTES = 15;
 	public const LOCK_KEY = 'wdc_shipment_status_autosync_lock';
 	public const LOCK_TTL = 30 * 60;
-	public const INTERVAL_SECONDS = 6 * 60 * 60;
 
 	/**
 	 * @var array<int,string>
@@ -106,6 +110,43 @@ final class ShipmentStatusAutoSyncService {
 
 	public function enabled(): bool {
 		return $this->settings->get_bool( self::ENABLED_KEY, true );
+	}
+
+	public function interval_minutes(): int {
+		return $this->sanitize_interval_minutes(
+			$this->settings->get_int( self::INTERVAL_KEY, self::DEFAULT_INTERVAL_MINUTES ),
+			self::DEFAULT_INTERVAL_MINUTES
+		);
+	}
+
+	public function sanitize_interval_minutes( mixed $value, ?int $fallback = null ): int {
+		$fallback = $this->valid_interval( $fallback ) ? (int) $fallback : self::DEFAULT_INTERVAL_MINUTES;
+		if ( ! is_numeric( $value ) || (string) (int) $value !== trim( (string) $value ) ) {
+			return $fallback;
+		}
+		$value = (int) $value;
+
+		return $this->valid_interval( $value ) ? $value : $fallback;
+	}
+
+	public function interval_seconds(): int {
+		return $this->interval_minutes() * 60;
+	}
+
+	/** @return array<int,int> */
+	public function interval_options(): array {
+		return range( self::MIN_INTERVAL_MINUTES, self::MAX_INTERVAL_MINUTES, self::INTERVAL_STEP_MINUTES );
+	}
+
+	public function format_interval_minutes( int $minutes ): string {
+		return sprintf( '%02d:%02d', intdiv( $minutes, 60 ), $minutes % 60 );
+	}
+
+	private function valid_interval( mixed $value ): bool {
+		return is_int( $value )
+			&& $value >= self::MIN_INTERVAL_MINUTES
+			&& $value <= self::MAX_INTERVAL_MINUTES
+			&& 0 === $value % self::INTERVAL_STEP_MINUTES;
 	}
 
 	/**

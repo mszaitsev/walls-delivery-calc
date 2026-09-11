@@ -81,7 +81,6 @@ final class AdminMenu {
 				<input type="hidden" name="<?php echo esc_attr( self::NONCE_NAME ); ?>" value="<?php echo esc_attr( wp_create_nonce( self::NONCE_ACTION ) ); ?>">
 				<button class="button button-secondary" type="submit"><?php echo esc_html__( 'Очистить кеш тарифов доставки', 'walls-delivery-calc' ); ?></button>
 			</form>
-			<?php $this->shipment_cost_analytics->render(); ?>
 			<h2><?php echo esc_html__( 'Запланированные задачи', 'walls-delivery-calc' ); ?></h2>
 			<p><?php echo esc_html__( 'Время указано по Новосибирску (GMT+7).', 'walls-delivery-calc' ); ?></p>
 			<table class="widefat striped" style="max-width: 960px;">
@@ -92,6 +91,7 @@ final class AdminMenu {
 					<?php endforeach; ?>
 				</tbody>
 			</table>
+			<?php $this->shipment_cost_analytics->render(); ?>
 		</div>
 		<?php
 	}
