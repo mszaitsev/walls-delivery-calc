@@ -6,7 +6,9 @@ Branch: `fix/russian-post-background-pipeline`
 
 Baseline HEAD: `be221f5b8872e9ba56bc2e7a56af872140a4b5c3`
 
-Plugin version: `1.0.7`; schema version: `1.0.0`
+Plugin version: `1.0.8`; schema version: `1.0.0`
+
+The Russian Post pilot now includes the 1.0.8 production profiling layer described in `russian-post-import-performance-profile.md`. It is observability-only; Ozon and Yandex remain outside this implementation phase.
 
 This is an architecture report. It does not change production code, schedules, schemas, versions, or server configuration.
 

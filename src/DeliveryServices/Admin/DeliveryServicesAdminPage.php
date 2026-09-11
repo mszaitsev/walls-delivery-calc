@@ -4539,6 +4539,7 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row">Последний статус</th><td><?php echo esc_html( ! empty( $result['success'] ) ? 'успешно' : ( array() === $result ? '-' : 'ошибка' ) ); ?></td></tr>
 				<tr><th scope="row">Статистика</th><td>начат: <?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $result['started_at'] ?? '' ) ) ?: '-' ); ?>; завершен: <?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $result['finished_at'] ?? '' ) ) ?: '-' ); ?>; добавлено: <?php echo esc_html( (string) ( $result['inserted'] ?? 0 ) ); ?>; обновлено: <?php echo esc_html( (string) ( $result['updated'] ?? 0 ) ); ?>; деактивировано: <?php echo esc_html( (string) ( $result['deactivated'] ?? 0 ) ); ?>; пропущено: <?php echo esc_html( (string) ( $result['skipped'] ?? 0 ) ); ?>; ошибки: <?php echo esc_html( $this->translate_import_message( implode( '; ', array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ) ) ) ); ?></td></tr>
 			</table>
+			<?php $this->render_russian_post_batch_profile( $state ); ?>
 			<details style="max-width: 960px; margin: 12px 0;">
 				<summary>Временный журнал блокировки (последние 40 событий)</summary>
 				<pre style="max-height:420px;overflow:auto;white-space:pre-wrap;background:#f6f7f7;padding:12px;border:1px solid #dcdcde;"><?php echo esc_html( (string) wp_json_encode( $lock_audit, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></pre>
@@ -4582,6 +4583,68 @@ Expand-Archive -Path "D:\russian-post-passport-all.zip" -DestinationPath "D:\rus
 Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			</details>
 		</form>
+		<?php
+	}
+
+	/** @param array<string,mixed> $state */
+	private function render_russian_post_batch_profile( array $state ): void {
+		$last = is_array( $state['last_batch_profile'] ?? null ) ? $state['last_batch_profile'] : array();
+		$aggregate = is_array( $state['batch_profile_aggregate'] ?? null ) ? $state['batch_profile_aggregate'] : array();
+		$slow = is_array( $state['slow_batch_profiles'] ?? null ) ? $state['slow_batch_profiles'] : array();
+		$query_counts = is_array( $last['query_counts'] ?? null ) ? $last['query_counts'] : array();
+		$phase_sum = is_array( $aggregate['phase_sum_ms'] ?? null ) ? $aggregate['phase_sum_ms'] : array();
+		?>
+		<details style="max-width: 960px; margin: 12px 0;">
+			<summary>Профилирование batch</summary>
+			<h4>Последний batch</h4>
+			<table class="widefat striped" style="max-width:960px;"><tbody>
+				<?php foreach ( array(
+					'objects' => 'Объекты',
+					'total_batch_ms' => 'Всего, мс',
+					'payload_read_ms' => 'Чтение payload, мс',
+					'parse_ms' => 'Parse, мс',
+					'normalize_ms' => 'Normalize, мс',
+					'location_match_ms' => 'Matching, мс',
+					'staging_prepare_ms' => 'Подготовка staging, мс',
+					'staging_write_ms' => 'Запись staging, мс',
+					'checkpoint_ms' => 'Checkpoint, мс',
+					'lock_renew_ms' => 'Renew lock, мс',
+					'memory_before' => 'Память до, байт',
+					'memory_after' => 'Память после, байт',
+					'memory_peak' => 'Пик памяти, байт',
+				) as $key => $label ) : ?>
+					<tr><th scope="row"><?php echo esc_html( $label ); ?></th><td><?php echo esc_html( (string) ( $last[ $key ] ?? 0 ) ); ?></td></tr>
+				<?php endforeach; ?>
+				<tr><th scope="row">Счётчики запросов</th><td><code><?php echo esc_html( (string) wp_json_encode( $query_counts, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></td></tr>
+				<tr><th scope="row">Сопоставление</th><td><code><?php echo esc_html( (string) wp_json_encode( $last['match_counts'] ?? array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></td></tr>
+				<tr><th scope="row">Lookup/unique</th><td><code><?php echo esc_html( (string) wp_json_encode( $last['lookup_counts'] ?? array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></td></tr>
+			</tbody></table>
+			<h4>Сводка импорта</h4>
+			<p>Профилировано batch: <?php echo esc_html( (string) ( $aggregate['total_profiled_batches'] ?? 0 ) ); ?>; медленных: <?php echo esc_html( (string) ( $aggregate['slow_batch_count'] ?? 0 ) ); ?>; максимум: <?php echo esc_html( (string) ( $aggregate['max_batch_time_ms'] ?? 0 ) ); ?> мс; matching суммарно: <?php echo esc_html( (string) ( $phase_sum['location_match_ms'] ?? 0 ) ); ?> мс; staging write суммарно: <?php echo esc_html( (string) ( $phase_sum['staging_write_ms'] ?? 0 ) ); ?> мс.</p>
+			<p>Суммарные запросы: <code><?php echo esc_html( (string) wp_json_encode( $aggregate['query_totals'] ?? array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></p>
+			<h4>Медленные batch (последние 10)</h4>
+			<table class="widefat striped" style="max-width:960px;">
+				<thead><tr><th>#</th><th>Offset</th><th>Объекты</th><th>Всего</th><th>Parse</th><th>Normalize</th><th>Matching</th><th>Write</th><th>Queries</th><th>Память peak</th><th>Время</th></tr></thead>
+				<tbody>
+				<?php if ( array() === $slow ) : ?><tr><td colspan="11">Медленные batch пока не зафиксированы.</td></tr><?php endif; ?>
+				<?php foreach ( $slow as $profile ) : $profile = is_array( $profile ) ? $profile : array(); $queries = is_array( $profile['query_counts'] ?? null ) ? $profile['query_counts'] : array(); ?>
+					<tr>
+						<td><?php echo esc_html( (string) ( $profile['batch_sequence'] ?? 0 ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $profile['payload_offset_start'] ?? 0 ) . '–' . (string) ( $profile['payload_offset_end'] ?? 0 ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $profile['objects'] ?? 0 ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $profile['total_batch_ms'] ?? 0 ) ); ?> ms</td>
+						<td><?php echo esc_html( (string) ( $profile['parse_ms'] ?? 0 ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $profile['normalize_ms'] ?? 0 ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $profile['location_match_ms'] ?? 0 ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $profile['staging_write_ms'] ?? 0 ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $queries['total_profiled_queries'] ?? 0 ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $profile['memory_peak'] ?? 0 ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $profile['timestamp'] ?? '' ) ); ?></td>
+					</tr>
+				<?php endforeach; ?>
+				</tbody>
+			</table>
+		</details>
 		<?php
 	}
 

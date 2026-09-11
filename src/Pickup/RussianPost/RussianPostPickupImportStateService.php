@@ -9,6 +9,9 @@ final class RussianPostPickupImportStateService {
 	public const OPTION_NAME = 'wdc_russian_post_pickup_import_state';
 	private const MAX_STORED_ERRORS = 10;
 	private const MAX_GUARD_DIAGNOSTICS = 5;
+	private const MAX_SLOW_BATCH_PROFILES = 10;
+	private const MAX_BATCH_DURATION_SAMPLES = 200;
+	private const SLOW_BATCH_THRESHOLD_MS = 10000;
 	private const STALE_AFTER_SECONDS = 7200;
 	private const DOWNLOAD_STALE_AFTER_SECONDS = 300;
 	private const EXTRACT_STALE_AFTER_SECONDS = 300;
@@ -312,7 +315,24 @@ final class RussianPostPickupImportStateService {
 			'location_match_ambiguous' => 0,
 			'errors' => array(),
 			'guard_diagnostics' => array(),
+			'last_batch_profile' => array(),
+			'batch_profile_aggregate' => $this->empty_batch_profile_aggregate(),
+			'slow_batch_profiles' => array(),
 			'memory_peak' => 0,
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function empty_batch_profile_aggregate(): array {
+		return array(
+			'total_profiled_batches' => 0,
+			'total_batch_time_ms' => 0,
+			'max_batch_time_ms' => 0,
+			'slow_batch_count' => 0,
+			'phase_sum_ms' => array(),
+			'phase_max_ms' => array(),
+			'query_totals' => array(),
+			'batch_durations_ms' => array(),
 		);
 	}
 
@@ -381,6 +401,55 @@ final class RussianPostPickupImportStateService {
 		}
 
 		return $state;
+	}
+
+	/**
+	 * @param array<string,mixed> $profile
+	 */
+	public function record_batch_profile_if_owned( string $expected_import_id, array $profile ): bool {
+		$state = $this->current();
+		if ( '' === $expected_import_id || ! hash_equals( (string) ( $state['import_id'] ?? '' ), $expected_import_id ) ) {
+			return false;
+		}
+
+		$replacement = $state;
+		$replacement['last_batch_profile'] = $profile;
+		$aggregate = is_array( $state['batch_profile_aggregate'] ?? null ) ? $state['batch_profile_aggregate'] : $this->empty_batch_profile_aggregate();
+		$total_ms = max( 0, (int) ( $profile['total_batch_ms'] ?? 0 ) );
+		$aggregate['total_profiled_batches'] = (int) ( $aggregate['total_profiled_batches'] ?? 0 ) + 1;
+		$aggregate['total_batch_time_ms'] = (int) ( $aggregate['total_batch_time_ms'] ?? 0 ) + $total_ms;
+		$aggregate['max_batch_time_ms'] = max( (int) ( $aggregate['max_batch_time_ms'] ?? 0 ), $total_ms );
+
+		$phase_sum = is_array( $aggregate['phase_sum_ms'] ?? null ) ? $aggregate['phase_sum_ms'] : array();
+		$phase_max = is_array( $aggregate['phase_max_ms'] ?? null ) ? $aggregate['phase_max_ms'] : array();
+		foreach ( array( 'payload_read_ms', 'parse_ms', 'normalize_ms', 'location_match_ms', 'staging_prepare_ms', 'staging_write_ms', 'checkpoint_ms', 'lock_renew_ms', 'fias_match_ms', 'postal_match_ms', 'region_city_match_ms' ) as $key ) {
+			$value = max( 0, (int) ( $profile[ $key ] ?? 0 ) );
+			$phase_sum[ $key ] = (int) ( $phase_sum[ $key ] ?? 0 ) + $value;
+			$phase_max[ $key ] = max( (int) ( $phase_max[ $key ] ?? 0 ), $value );
+		}
+		$aggregate['phase_sum_ms'] = $phase_sum;
+		$aggregate['phase_max_ms'] = $phase_max;
+
+		$query_totals = is_array( $aggregate['query_totals'] ?? null ) ? $aggregate['query_totals'] : array();
+		foreach ( is_array( $profile['query_counts'] ?? null ) ? $profile['query_counts'] : array() as $key => $value ) {
+			$query_totals[ (string) $key ] = (int) ( $query_totals[ (string) $key ] ?? 0 ) + max( 0, (int) $value );
+		}
+		$aggregate['query_totals'] = $query_totals;
+
+		$durations = is_array( $aggregate['batch_durations_ms'] ?? null ) ? $aggregate['batch_durations_ms'] : array();
+		$durations[] = $total_ms;
+		$aggregate['batch_durations_ms'] = array_slice( array_map( 'intval', $durations ), -self::MAX_BATCH_DURATION_SAMPLES );
+
+		$slow = is_array( $state['slow_batch_profiles'] ?? null ) ? $state['slow_batch_profiles'] : array();
+		if ( $total_ms > self::SLOW_BATCH_THRESHOLD_MS ) {
+			$aggregate['slow_batch_count'] = (int) ( $aggregate['slow_batch_count'] ?? 0 ) + 1;
+			$slow[] = $profile;
+			$slow = array_slice( $slow, -self::MAX_SLOW_BATCH_PROFILES );
+		}
+		$replacement['batch_profile_aggregate'] = $aggregate;
+		$replacement['slow_batch_profiles'] = $slow;
+
+		return $this->compare_and_replace( $state, $replacement );
 	}
 
 	/** @param array<string,mixed> $expected @param array<string,mixed> $replacement */

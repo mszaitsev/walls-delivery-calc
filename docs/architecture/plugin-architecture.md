@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 1.0.7
+Version: 1.0.8
 
 `Plugin.php` is the composition root. It registers infrastructure and activation ownership first, runs the single fresh-install schema migration, and only then registers services whose hooks may access plugin tables. The shared `ActionScheduler` adapter owns readiness coordination; scheduler owners attach callbacks during bootstrap and defer datastore inspection or schedule creation until `action_scheduler_init`.
 

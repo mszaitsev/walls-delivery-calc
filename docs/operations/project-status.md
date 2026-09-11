@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.7
+Version: 1.0.8
 
-The current Walls Delivery Calc release source is version 1.0.7. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.7 preserves the Russian Post worker-slice and cancellation fixes while making background callback ownership immutable across unexpected failures: a late callback cannot inherit, fail, clean up, or unlock a newer queued job. The schema baseline remains 1.0.0.
+The current Walls Delivery Calc release source is version 1.0.8. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.8 adds bounded, PII-free Russian Post atomic-batch profiling only; matching, SQL semantics, worker-slice limits, lock lifecycle, and the schema baseline remain unchanged at their 1.0.7/1.0.0 contracts.
 
 Current production scope includes:
 

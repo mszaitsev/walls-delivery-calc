@@ -695,6 +695,16 @@ rp_pickup_assert( ! empty( $batch['success'] ) && 3 === count( $GLOBALS['wpdb']-
 rp_pickup_assert( 3 === (int) $state['rows_inserted_to_staging'], 'State must track rows inserted to staging.' );
 rp_pickup_assert( 3 === (int) $state['location_matched_fias'] && 0 === (int) $state['location_match_no_match'] && 501 === (int) $GLOBALS['wpdb']->tables[ $state['staging_table'] ][0]['location_id'], 'Import batch must resolve and store Russian Post pickup location_id before staging insert.' );
 rp_pickup_assert( $request_three_importer->is_locked(), 'Owner lock must remain active after a successful batch request.' );
+$first_profile = is_array( $state['last_batch_profile'] ?? null ) ? $state['last_batch_profile'] : array();
+$first_profile_queries = is_array( $first_profile['query_counts'] ?? null ) ? $first_profile['query_counts'] : array();
+$first_profile_matches = is_array( $first_profile['match_counts'] ?? null ) ? $first_profile['match_counts'] : array();
+$first_profile_lookups = is_array( $first_profile['lookup_counts'] ?? null ) ? $first_profile['lookup_counts'] : array();
+rp_pickup_assert( 3 === (int) ( $first_profile['objects'] ?? 0 ) && 3 === (int) ( $first_profile_queries['staging_write_queries'] ?? 0 ) && 3 === (int) ( $first_profile_matches['matched_fias'] ?? 0 ), 'Completed atomic batch must persist object, staging-write, and matching profiler counters.' );
+rp_pickup_assert( 3 === (int) ( $first_profile_lookups['fias_lookups'] ?? 0 ) && 1 === (int) ( $first_profile_lookups['unique_fias_keys'] ?? 0 ) && (int) ( $first_profile_queries['total_profiled_queries'] ?? 0 ) >= 5, 'Integrated profiler must distinguish repeated FIAS lookups and include staging/state activity in total queries.' );
+foreach ( array( 'payload_read_ms', 'parse_ms', 'normalize_ms', 'location_match_ms', 'staging_prepare_ms', 'staging_write_ms', 'checkpoint_ms', 'lock_renew_ms', 'total_batch_ms' ) as $profile_timing ) {
+	rp_pickup_assert( isset( $first_profile[ $profile_timing ] ) && (int) $first_profile[ $profile_timing ] >= 0, 'Batch profiler must persist non-negative timing: ' . $profile_timing );
+}
+rp_pickup_assert( ! str_contains( (string) wp_json_encode( $first_profile ), 'Новосибирск, Ленина, 1' ) && ! array_key_exists( 'fias_keys', $first_profile ) && ! array_key_exists( 'postcodes', $first_profile ), 'Batch profile must not persist raw addresses or lookup-key lists.' );
 
 $final_event = rp_shift_event( RussianPostPickupImporter::FINALIZE_HOOK );
 $request_four_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, new RussianPostPickupImportLock( $GLOBALS['wpdb'] ) );
@@ -717,6 +727,7 @@ $slice_state = $state_service->current();
 $slice_continuations = array_values( array_filter( $GLOBALS['wdc_scheduled_events'], static fn( array $event ): bool => RussianPostPickupImporter::BATCH_HOOK === $event['hook'] ) );
 rp_pickup_assert( ! empty( $slice_result['success'] ) && 1500 === (int) $slice_state['objects_processed'] && 3 === (int) $slice_state['worker_slice_batches'] && 1500 === (int) $slice_state['worker_slice_objects'], 'One worker callback must process three atomic batches and more than 500 objects.' );
 rp_pickup_assert( 'unit_budget' === (string) $slice_state['worker_slice_stop_reason'] && 1 === count( $slice_continuations ) && $slice_importer->is_locked(), 'Unit-budget stop must keep the owner lock and schedule exactly one continuation.' );
+rp_pickup_assert( 3 === (int) ( $slice_state['batch_profile_aggregate']['total_profiled_batches'] ?? 0 ) && 3 === count( $slice_state['batch_profile_aggregate']['batch_durations_ms'] ?? array() ), 'Worker slice must aggregate exactly one transparent profile per completed atomic batch.' );
 echo sprintf( "Russian Post worker slice fixture: batches=%d objects=%d duration_ms=%d stop_reason=%s.\n", (int) $slice_state['worker_slice_batches'], (int) $slice_state['worker_slice_objects'], (int) $slice_state['worker_slice_duration_ms'], (string) $slice_state['worker_slice_stop_reason'] );
 $slice_importer->reset_stale_or_running_import();
 
@@ -1199,6 +1210,7 @@ rp_pickup_assert( str_contains( $admin_source, 'russian_post_otpravka_timeout' )
 rp_pickup_assert( ! str_contains( $admin_source, 'russian_post_otpravka_basic_key' ) && ! str_contains( $admin_source, 'Basic key' ) && ! str_contains( $admin_source, 'BasicKey' ), 'Admin UI must not render a Basic key field.' );
 rp_pickup_assert( str_contains( $admin_source, 'Автоматическая загрузка из API' ) && str_contains( $admin_source, 'Загруженный ZIP' ) && str_contains( $admin_source, 'Загруженный TXT/JSON' ), 'Admin status values must be localized.' );
 rp_pickup_assert( str_contains( $admin_source, 'Временный журнал блокировки (последние 40 событий)' ) && str_contains( $admin_source, 'lock_audit_events()' ), 'Capability-protected Russian Post admin diagnostics must expose the bounded lock audit.' );
+rp_pickup_assert( str_contains( $admin_source, 'Профилирование batch' ) && str_contains( $admin_source, 'last_batch_profile' ) && str_contains( $admin_source, 'slow_batch_profiles' ), 'Russian Post admin must expose compact last/aggregate/slow batch profiling diagnostics.' );
 
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/russian-post-pickup-import.js' );
 rp_pickup_assert( str_contains( $js_source, 'data-wdc-rp-status-summary' ) && str_contains( $js_source, 'Автоматическая загрузка из API' ) && str_contains( $js_source, 'Не удалось поставить импорт в очередь. Возможно, уже выполняется другой импорт.' ), 'Status polling JS must update the collapsed summary and render localized status values/messages.' );
@@ -1241,6 +1253,27 @@ rp_pickup_assert( 40 === count( $audit_events ), 'Lock audit must retain exactly
 rp_pickup_assert( in_array( 'bounded_test_44', $audit_names, true ) && ! in_array( 'acquire_attempt', $audit_names, true ), 'Bounded lock audit must retain newest events and discard oldest events.' );
 rp_pickup_assert( ! str_contains( $audit_json, 'do-not-record-this-token' ) && ! str_contains( $audit_json, 'query-secret' ) && ! str_contains( $audit_json, 'token' ) && ! str_contains( $audit_json, 'password' ) && ! str_contains( $audit_json, 'cookie' ), 'Lock audit must not persist lock tokens, URL queries, credentials, cookies, or secret-bearing fields.' );
 rp_pickup_assert( '/wp-admin/admin-ajax.php' === (string) ( end( $audit_events )['request_path'] ?? '' ) && 'POST' === (string) ( end( $audit_events )['request_method'] ?? '' ), 'Lock audit must retain only the sanitized request path and method.' );
+
+// Performance diagnostics are bounded and owner-scoped independently of the
+// temporary lock forensic journal.
+$state_service->queue( 'ALL', 'profile-history-owner' );
+for ( $profile_index = 1; $profile_index <= 12; ++$profile_index ) {
+	$profile = array(
+		'batch_sequence' => $profile_index,
+		'objects' => 500,
+		'total_batch_ms' => 10000 + $profile_index,
+		'location_match_ms' => 9000,
+		'staging_write_ms' => 500,
+		'query_counts' => array( 'total_profiled_queries' => 1000, 'location_select_queries' => 500 ),
+		'match_counts' => array( 'matched_fias' => 500 ),
+		'lookup_counts' => array( 'fias_lookups' => 500, 'unique_fias_keys' => 50 ),
+	);
+	rp_pickup_assert( $state_service->record_batch_profile_if_owned( 'profile-history-owner', $profile ), 'Owner-scoped profile write must succeed.' );
+}
+$profile_history_state = $state_service->current();
+rp_pickup_assert( 10 === count( $profile_history_state['slow_batch_profiles'] ?? array() ) && 3 === (int) ( $profile_history_state['slow_batch_profiles'][0]['batch_sequence'] ?? 0 ), 'Slow batch history must retain only the latest 10 profiles.' );
+rp_pickup_assert( 12 === (int) ( $profile_history_state['batch_profile_aggregate']['total_profiled_batches'] ?? 0 ) && 12 === (int) ( $profile_history_state['batch_profile_aggregate']['slow_batch_count'] ?? 0 ) && 12 === count( $profile_history_state['batch_profile_aggregate']['batch_durations_ms'] ?? array() ), 'Profile aggregate and compact duration samples must remain consistent.' );
+rp_pickup_assert( ! $state_service->record_batch_profile_if_owned( 'foreign-profile-owner', $profile ), 'A foreign profiler write must not mutate another import state.' );
 
 delete_option( RussianPostPickupImportLock::OPTION_NAME );
 delete_option( RussianPostPickupImportLockAudit::OPTION_NAME );
