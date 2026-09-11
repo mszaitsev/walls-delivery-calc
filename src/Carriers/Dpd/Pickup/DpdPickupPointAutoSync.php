@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Dpd\Pickup;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || exit;
@@ -16,7 +17,8 @@ final class DpdPickupPointAutoSync {
 	public function __construct(
 		private DpdSettings $settings,
 		private DpdPickupPointImportService $importer,
-		private ?Logger $logger = null
+		private ?Logger $logger,
+		private TimezoneService $timezone
 	) {
 	}
 
@@ -82,44 +84,32 @@ final class DpdPickupPointAutoSync {
 		return DpdSettings::pickup_autosync_time_options();
 	}
 
-	public function msk_time_to_utc_timestamp( string $time, ?\DateTimeImmutable $msk_date = null ): int {
+	public function local_time_to_timestamp( string $time, ?\DateTimeImmutable $now = null ): int {
 		$time = $this->settings->sanitize_pickup_autosync_time( $time );
-		if ( '' === $time ) {
-			return 0;
-		}
-		$msk_date = $msk_date ?? $this->now_utc()->modify( '+3 hours' );
-		$date = $msk_date->format( 'Y-m-d' );
-		$utc = new \DateTimeImmutable( $date . ' ' . $time . ':00', new \DateTimeZone( 'UTC' ) );
 
-		return $utc->modify( '-3 hours' )->getTimestamp();
+		return '' === $time ? 0 : $this->timezone->next_local_time_timestamp( $time, $now );
 	}
 
 	private function schedule_missing_events(): void {
 		if ( ! function_exists( 'wp_next_scheduled' ) || ! function_exists( 'wp_schedule_event' ) ) {
 			return;
 		}
-		foreach ( $this->settings->pickup_autosync_times() as $time ) {
+		$times = $this->settings->pickup_autosync_times();
+		foreach ( $times as $time ) {
+			$scheduled = wp_next_scheduled( self::HOOK, array( $time ) );
+			if ( false !== $scheduled && $time !== $this->timezone->format_timestamp( (int) $scheduled, 'H:i' ) ) {
+				$this->clear_schedule();
+				break;
+			}
+		}
+		foreach ( $times as $time ) {
 			$args = array( $time );
-			if ( false !== wp_next_scheduled( self::HOOK, $args ) ) {
+			$scheduled = wp_next_scheduled( self::HOOK, $args );
+			if ( false !== $scheduled ) {
 				continue;
 			}
-			wp_schedule_event( $this->next_utc_timestamp( $time ), self::RECURRENCE, self::HOOK, $args );
+			wp_schedule_event( $this->local_time_to_timestamp( $time ), self::RECURRENCE, self::HOOK, $args );
 		}
-	}
-
-	private function next_utc_timestamp( string $time ): int {
-		$now = $this->now_utc();
-		$msk_today = $now->modify( '+3 hours' );
-		$timestamp = $this->msk_time_to_utc_timestamp( $time, $msk_today );
-		if ( $timestamp <= $now->getTimestamp() ) {
-			$timestamp = $this->msk_time_to_utc_timestamp( $time, $msk_today->modify( '+1 day' ) );
-		}
-
-		return $timestamp;
-	}
-
-	private function now_utc(): \DateTimeImmutable {
-		return new \DateTimeImmutable( 'now', new \DateTimeZone( 'UTC' ) );
 	}
 
 	/** @param array<string,mixed> $context */

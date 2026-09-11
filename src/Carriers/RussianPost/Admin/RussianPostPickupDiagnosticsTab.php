@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Carriers\RussianPost\Admin;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupDiagnosticsService;
 
 defined( 'ABSPATH' ) || exit;
@@ -111,7 +112,7 @@ final class RussianPostPickupDiagnosticsTab {
 							<td><?php echo esc_html( (string) ( $row['longitude'] ?? '' ) ); ?></td>
 							<td><?php echo esc_html( implode( ', ', array_map( 'strval', is_array( $row['problem_flags'] ?? null ) ? $row['problem_flags'] : array() ) ) ); ?></td>
 							<td><?php echo esc_html( (string) ( $row['distance_to_location_km'] ?? '' ) ); ?></td>
-							<td><?php echo esc_html( trim( (string) ( $row['updated_at'] ?? '' ) . ' / ' . (string) ( $row['last_seen_at'] ?? '' ), ' /' ) ); ?></td>
+							<td><?php echo esc_html( trim( TimezoneService::format_site_datetime( (string) ( $row['updated_at'] ?? '' ) ) . ' / ' . TimezoneService::format_site_datetime( (string) ( $row['last_seen_at'] ?? '' ) ), ' /' ) ); ?></td>
 						</tr>
 					<?php endforeach; ?>
 				</tbody>

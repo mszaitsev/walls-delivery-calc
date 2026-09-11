@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Dpd;
 
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+
 use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
@@ -299,5 +301,5 @@ final class DpdEventSyncService {
 	/** @param array<string,mixed> $event */ private function log_unmatched( array $event, string $saved_dpd_order_number = '', string $reason = '' ): void { $context = array( 'eventNumber' => $event['eventNumber'], 'eventCode' => $event['eventCode'], 'eventDate' => $event['eventDate'], 'clientOrderNr' => $event['clientOrderNr'], 'dpdOrderNr' => $event['dpdOrderNr'] ); if ( '' !== trim( $saved_dpd_order_number ) ) { $context['saved_dpd_order_number'] = trim( $saved_dpd_order_number ); } if ( '' !== trim( $reason ) ) { $context['reason'] = trim( $reason ); } $this->log( 'warning', 'DPD event unmatched.', $context ); }
 	/** @param array<string,mixed> $context */ private function log( string $level, string $message, array $context ): void { if ( $this->logger instanceof Logger && method_exists( $this->logger, $level ) ) { $this->logger->{$level}( $message, $context ); } }
 	private function now(): string { return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ); }
-	private function now_datetime(): \DateTimeImmutable { $tz = function_exists( 'wp_timezone' ) ? wp_timezone() : new \DateTimeZone( 'Asia/Novosibirsk' ); return new \DateTimeImmutable( 'now', $tz ); }
+	private function now_datetime(): \DateTimeImmutable { $tz = function_exists( 'wp_timezone' ) ? wp_timezone() : new \DateTimeZone( TimezoneService::TIMEZONE ); return new \DateTimeImmutable( 'now', $tz ); }
 }

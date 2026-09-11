@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Admin;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsFilter;
@@ -220,13 +221,9 @@ final class ShipmentCostAnalyticsAdminSection {
 		if ( '' === $date ) {
 			return '—';
 		}
-		$timestamp = strtotime( $date );
-		if ( false === $timestamp ) {
-			return $date;
-		}
 		$format = function_exists( 'wc_date_format' ) && function_exists( 'wc_time_format' ) ? wc_date_format() . ' ' . wc_time_format() : 'd.m.Y H:i';
 
-		return function_exists( 'wp_date' ) ? wp_date( $format, $timestamp ) : date( 'd.m.Y H:i', $timestamp );
+		return TimezoneService::format_utc_datetime( $date, $format );
 	}
 
 	private function format_date_range( ShipmentCostAnalyticsFilter $filter ): string {

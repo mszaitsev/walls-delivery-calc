@@ -59,6 +59,7 @@ use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Carriers\Runtime\YandexDeliveryCarrier;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\Application\DeliveryServiceKeyRenameService;
@@ -2609,7 +2610,7 @@ final class DeliveryServicesAdminPage {
 				<tr><th colspan="2"><h3><?php echo esc_html__( 'Проверка подключения', 'walls-delivery-calc' ); ?></h3></th></tr>
 				<?php $this->readonly_row( 'cdek_active_environment', __( 'Активная среда', 'walls-delivery-calc' ), $this->cdek_settings->environment_label() ); ?>
 				<?php $this->readonly_row( 'cdek_token_cache_status', __( 'Token cache status', 'walls-delivery-calc' ), $token_status ); ?>
-				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? $last_check : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
+				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? TimezoneService::format_site_datetime( $last_check ) : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_STATUS_KEY, __( 'Статус последней проверки', 'walls-delivery-calc' ), '' !== $last_status ? $last_status : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_MESSAGE_KEY, __( 'Сообщение последней проверки', 'walls-delivery-calc' ), '' !== $last_message ? $last_message : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 			</table>
@@ -2671,7 +2672,7 @@ final class DeliveryServicesAdminPage {
 				<?php $this->checkbox_row( YandexDeliverySettings::DEBUG_KEY, __( 'Отладочное логирование', 'walls-delivery-calc' ), $this->yandex_delivery_settings->debug_enabled() ); ?>
 				<?php $this->readonly_row( 'yandex_delivery_active_environment', __( 'Активная среда', 'walls-delivery-calc' ), $this->yandex_delivery_settings->environment_label() ); ?>
 				<?php $this->readonly_row( 'yandex_delivery_diagnostic_status', __( 'Статус диагностики', 'walls-delivery-calc' ), $diagnostic_status ); ?>
-				<?php $this->readonly_row( YandexDeliverySettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? $last_check : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
+				<?php $this->readonly_row( YandexDeliverySettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? TimezoneService::format_site_datetime( $last_check ) : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( YandexDeliverySettings::LAST_CONNECTION_STATUS_KEY, __( 'Статус последней проверки', 'walls-delivery-calc' ), '' !== $last_status ? $last_status : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( YandexDeliverySettings::LAST_CONNECTION_MESSAGE_KEY, __( 'Сообщение последней проверки', 'walls-delivery-calc' ), '' !== $last_message ? $last_message : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 			</table>
@@ -2830,7 +2831,7 @@ final class DeliveryServicesAdminPage {
 				<?php endforeach; ?>
 			</p>
 			<p><label><?php echo esc_html__( 'Время запуска', 'walls-delivery-calc' ); ?> <input type="time" name="yandex_geo_pipeline_schedule_time" value="<?php echo esc_attr( (string) ( $geo_pipeline_v2_schedule['time'] ?? '03:00' ) ); ?>" /></label></p>
-			<p class="description"><?php echo esc_html__( 'Все время указывается по Москве (GMT+3), независимо от часового пояса сайта и сервера.', 'walls-delivery-calc' ); ?></p>
+			<p class="description"><?php echo esc_html__( 'Время указывается по Новосибирску (GMT+7), независимо от часового пояса сайта и сервера.', 'walls-delivery-calc' ); ?></p>
 			<p class="description"><?php echo esc_html__( 'Текущий статус расписания', 'walls-delivery-calc' ); ?>: <?php echo ! empty( $geo_pipeline_v2_schedule['enabled'] ) ? esc_html__( 'включено', 'walls-delivery-calc' ) : esc_html__( 'выключено', 'walls-delivery-calc' ); ?>; <?php echo esc_html__( 'следующий запуск', 'walls-delivery-calc' ); ?>: <code><?php echo esc_html( (string) ( $geo_pipeline_v2_schedule['next_run'] ?? '' ) ?: '—' ); ?></code></p>
 			<?php submit_button( __( 'Сохранить расписание', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
 		</form>		<div id="wdc-yandex-delivery-geo-pipeline-v2" data-wdc-yandex-geo-pipeline-v2 data-wdc-yandex-geo-pipeline-v2-status="<?php echo esc_attr( (string) ( $geo_pipeline_v2_state['status'] ?? 'idle' ) ); ?>">
@@ -3022,7 +3023,7 @@ final class DeliveryServicesAdminPage {
 						<td><?php echo esc_html( (string) ( $item['locality'] ?? '' ) ); ?></td>
 						<td><code><?php echo esc_html( $this->yandex_location_mapping_v2_coordinates( $item['centroid_lat'] ?? null, $item['centroid_lon'] ?? null ) ); ?></code></td>
 						<td><?php echo esc_html( (string) ( $item['first_full_address'] ?? '' ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $item['updated_at'] ?? '' ) ); ?></td>
+						<td><?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $item['updated_at'] ?? '' ) ) ); ?></td>
 					</tr>
 				<?php endforeach; ?>
 				<?php if ( array() === $no_match_items ) : ?>
@@ -3166,6 +3167,9 @@ final class DeliveryServicesAdminPage {
 	/** @param array<string,mixed> $state */
 	private function yandex_delivery_pickup_v2_state_value( array $state, string $key ): string {
 		$value = $state[ $key ] ?? '';
+		if ( in_array( $key, array( 'started_at', 'updated_at', 'finished_at', 'last_activity_at' ), true ) && is_scalar( $value ) ) {
+			return TimezoneService::format_site_datetime( (string) $value );
+		}
 		if ( is_array( $value ) ) {
 			return wp_json_encode( $value, JSON_UNESCAPED_UNICODE ) ?: '';
 		}
@@ -3242,7 +3246,7 @@ final class DeliveryServicesAdminPage {
 				<?php $this->checkbox_row( DpdSettings::DEBUG_KEY, __( 'Отладочное логирование', 'walls-delivery-calc' ), $this->dpd_settings->debug_enabled() ); ?>
 				<?php $this->readonly_row( 'dpd_active_environment', __( 'Активная среда', 'walls-delivery-calc' ), $this->dpd_settings->environment_label() ); ?>
 				<?php $this->readonly_row( 'dpd_diagnostic_status', __( 'Статус диагностики', 'walls-delivery-calc' ), $diagnostic_status ); ?>
-				<?php $this->readonly_row( DpdSettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? $last_check : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
+				<?php $this->readonly_row( DpdSettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? TimezoneService::format_site_datetime( $last_check ) : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( DpdSettings::LAST_CONNECTION_STATUS_KEY, __( 'Статус последней проверки', 'walls-delivery-calc' ), '' !== $last_status ? $last_status : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( DpdSettings::LAST_CONNECTION_MESSAGE_KEY, __( 'Сообщение последней проверки', 'walls-delivery-calc' ), '' !== $last_message ? $last_message : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 			</table>
@@ -3333,7 +3337,7 @@ final class DeliveryServicesAdminPage {
 				<?php foreach ( array( 'phase', 'status', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'foreign_rows', 'foreign_am_rows', 'foreign_by_rows', 'foreign_kz_rows', 'foreign_kg_rows', 'foreign_locations_inserted', 'foreign_locations_updated', 'foreign_save_failed', 'foreign_mapping_conflicts', 'foreign_duplicate_identity_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_own_fias', 'matched_by_city_fias', 'resolved_after_fias_disambiguation', 'true_fias_ambiguity', 'matched_by_kladr', 'matched_by_name', 'match_batches', 'max_match_batch_rows', 'lookup_query_groups', 'match_context_candidates_peak', 'saved_candidates', 'finalized_mappings', 'finalized_changes', 'stale_cleared', 'stale_cleanup_skipped', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors_total', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
 					<tr>
 						<th><?php echo esc_html( $key ); ?></th>
-						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( is_array( $state[ $key ] ?? null ) ? implode( '; ', array_map( 'strval', $state[ $key ] ) ) : (string) ( $state[ $key ] ?? '' ) ); ?></td>
+						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $this->admin_state_value( $state, $key ) ); ?></td>
 					</tr>
 				<?php endforeach; ?>
 				</tbody>
@@ -3405,7 +3409,7 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row"><?php echo esc_html__( 'Всего активных точек', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) $total ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'parcel shops', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $counts['getParcelShops'] ?? 0 ) ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'self-delivery terminals', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $counts['getTerminalsSelfDelivery2'] ?? 0 ) ); ?></td></tr>
-				<tr><th scope="row"><?php echo esc_html__( 'Последний импорт', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $last_report['finished_at'] ?? 'не выполнялся' ) ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Последний импорт', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( ! empty( $last_report['finished_at'] ) ? TimezoneService::format_site_datetime( (string) $last_report['finished_at'] ) : 'не выполнялся' ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'Источник', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( $this->dpd_pickup_report_source_label( $last_report ) ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'Результат', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( $this->dpd_pickup_report_summary( $last_report ) ); ?></td></tr>
 			</tbody>
@@ -3433,7 +3437,7 @@ final class DeliveryServicesAdminPage {
 				<?php $this->dpd_pickup_autosync_time_row( DpdSettings::PICKUP_AUTOSYNC_TIME_2_KEY, __( 'Время обновления 2', 'walls-delivery-calc' ), $this->dpd_settings->pickup_autosync_time_2() ); ?>
 				<?php $this->dpd_pickup_autosync_time_row( DpdSettings::PICKUP_AUTOSYNC_TIME_3_KEY, __( 'Время обновления 3', 'walls-delivery-calc' ), $this->dpd_settings->pickup_autosync_time_3() ); ?>
 			</table>
-			<p class="description"><?php echo esc_html__( 'Время указывается по Москве (GMT+3). Можно выбрать от 0 до 3 запусков в день. Если время не выбрано, запуск не выполняется.', 'walls-delivery-calc' ); ?></p>
+			<p class="description"><?php echo esc_html__( 'Время указывается по Новосибирску (GMT+7). Можно выбрать от 0 до 3 запусков в день. Если время не выбрано, запуск не выполняется.', 'walls-delivery-calc' ); ?></p>
 			<p class="submit"><button class="button button-primary" type="submit"><?php echo esc_html__( 'Сохранить autosync ПВЗ', 'walls-delivery-calc' ); ?></button></p>
 		</form>
 		<hr>
@@ -3641,7 +3645,7 @@ final class DeliveryServicesAdminPage {
 				<tr>
 					<th scope="row"><?php echo esc_html__( 'Последний autosync DPD', 'walls-delivery-calc' ); ?></th>
 					<td>
-						<p style="margin:0;"><?php echo esc_html( '' !== $this->dpd_settings->autosync_last_run() ? $this->dpd_settings->autosync_last_run() : '-' ); ?></p>
+						<p style="margin:0;"><?php echo esc_html( '' !== $this->dpd_settings->autosync_last_run() ? TimezoneService::format_site_datetime( $this->dpd_settings->autosync_last_run() ) : '-' ); ?></p>
 						<p class="description" style="margin:4px 0 0;"><?php echo esc_html__( 'Последний результат:', 'walls-delivery-calc' ); ?> <?php echo esc_html( $this->dpd_autosync_result_label( $this->dpd_settings->autosync_last_result() ) ); ?></p>
 					</td>
 				</tr>
@@ -3797,7 +3801,7 @@ final class DeliveryServicesAdminPage {
 				</ul>
 			<?php endif; ?>
 			<?php if ( '' !== (string) ( $result['created_at'] ?? '' ) ) : ?>
-				<p class="description"><?php echo esc_html( (string) $result['created_at'] ); ?></p>
+				<p class="description"><?php echo esc_html( TimezoneService::format_site_datetime( (string) $result['created_at'] ) ); ?></p>
 			<?php endif; ?>
 		</div>
 		<?php
@@ -4534,7 +4538,7 @@ final class DeliveryServicesAdminPage {
 				<?php if ( $schedule_enabled ) : ?>
 					<tr><th scope="row">Следующий запуск</th><td>
 						<?php if ( false !== $next_schedule ) : ?>
-							<?php echo esc_html( date_i18n( 'Y-m-d H:i:s', (int) $next_schedule ) ); ?>
+							<?php echo esc_html( TimezoneService::format_unix_timestamp( (int) $next_schedule, 'd.m.Y H:i:s' ) ); ?>
 						<?php else : ?>
 							<span class="notice notice-warning inline" style="display:inline-block;margin:0;padding:4px 8px;"><?php echo esc_html__( 'Расписание включено, но следующий запуск пока не запланирован.', 'walls-delivery-calc' ); ?></span>
 						<?php endif; ?>
@@ -4542,9 +4546,9 @@ final class DeliveryServicesAdminPage {
 				<?php endif; ?>
 				<tr><th scope="row">Блокировка</th><td><?php echo esc_html( $locked ? 'активна' : 'свободна' ); ?></td></tr>
 				<tr><th scope="row">Активные точки</th><td><?php echo esc_html( (string) $total ); ?>; OPS: <?php echo esc_html( (string) ( $counts['OPS'] ?? 0 ) ); ?>, PVZ: <?php echo esc_html( (string) ( $counts['PVZ'] ?? 0 ) ); ?>, APS: <?php echo esc_html( (string) ( $counts['APS'] ?? 0 ) ); ?></td></tr>
-				<tr><th scope="row">Последний успешный импорт</th><td><?php echo esc_html( $this->otpravka_settings->last_success_at() ?: '-' ); ?></td></tr>
+				<tr><th scope="row">Последний успешный импорт</th><td><?php echo esc_html( $this->otpravka_settings->last_success_at() ? TimezoneService::format_site_datetime( $this->otpravka_settings->last_success_at() ) : '-' ); ?></td></tr>
 				<tr><th scope="row">Последний статус</th><td><?php echo esc_html( ! empty( $result['success'] ) ? 'успешно' : ( array() === $result ? '-' : 'ошибка' ) ); ?></td></tr>
-				<tr><th scope="row">Статистика</th><td>начат: <?php echo esc_html( (string) ( $result['started_at'] ?? '-' ) ); ?>; завершен: <?php echo esc_html( (string) ( $result['finished_at'] ?? '-' ) ); ?>; добавлено: <?php echo esc_html( (string) ( $result['inserted'] ?? 0 ) ); ?>; обновлено: <?php echo esc_html( (string) ( $result['updated'] ?? 0 ) ); ?>; деактивировано: <?php echo esc_html( (string) ( $result['deactivated'] ?? 0 ) ); ?>; пропущено: <?php echo esc_html( (string) ( $result['skipped'] ?? 0 ) ); ?>; ошибки: <?php echo esc_html( $this->translate_import_message( implode( '; ', array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ) ) ) ); ?></td></tr>
+				<tr><th scope="row">Статистика</th><td>начат: <?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $result['started_at'] ?? '' ) ) ?: '-' ); ?>; завершен: <?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $result['finished_at'] ?? '' ) ) ?: '-' ); ?>; добавлено: <?php echo esc_html( (string) ( $result['inserted'] ?? 0 ) ); ?>; обновлено: <?php echo esc_html( (string) ( $result['updated'] ?? 0 ) ); ?>; деактивировано: <?php echo esc_html( (string) ( $result['deactivated'] ?? 0 ) ); ?>; пропущено: <?php echo esc_html( (string) ( $result['skipped'] ?? 0 ) ); ?>; ошибки: <?php echo esc_html( $this->translate_import_message( implode( '; ', array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ) ) ) ); ?></td></tr>
 			</table>
 			<?php submit_button( 'Сохранить настройки импорта', 'secondary', 'submit', false ); ?>
 			<button class="button button-primary" type="submit" name="wdc_delivery_services_action" value="run_russian_post_pickup_import" <?php disabled( $is_busy ); ?>>Запустить импорт сейчас</button>
@@ -4673,6 +4677,9 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 * @param array<string,mixed> $state
 	 */
 	private function pickup_import_state_value( array $state, string $key ): string {
+		if ( in_array( $key, array( 'started_at', 'finished_at', 'last_activity_at', 'download_started_at', 'extract_started_at', 'swap_started_at', 'swap_finished_at' ), true ) ) {
+			return TimezoneService::format_site_datetime( (string) ( $state[ $key ] ?? '' ) );
+		}
 		if ( 'errors' === $key ) {
 			return $this->translate_import_message( implode( '; ', array_map( 'strval', is_array( $state['errors'] ?? null ) ? $state['errors'] : array() ) ) );
 		}
@@ -5111,6 +5118,16 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			<td><code><?php echo esc_html( $value ); ?></code><p class="description"><?php echo esc_html__( 'Техническое поле системной службы, не редактируется.', 'walls-delivery-calc' ); ?></p></td>
 		</tr>
 		<?php
+	}
+
+	/** @param array<string,mixed> $state */
+	private function admin_state_value( array $state, string $key ): string {
+		$value = $state[ $key ] ?? '';
+		if ( in_array( $key, array( 'started_at', 'updated_at', 'finished_at', 'last_activity_at', 'checked_at', 'completed_at' ), true ) && is_scalar( $value ) ) {
+			return TimezoneService::format_site_datetime( (string) $value );
+		}
+
+		return is_array( $value ) ? implode( '; ', array_map( 'strval', $value ) ) : ( is_scalar( $value ) ? (string) $value : '' );
 	}
 
 	private function textarea_row( string $name, string $label, string $value ): void {

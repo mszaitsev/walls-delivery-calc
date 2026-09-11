@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\YandexDelivery;
 use DateTimeImmutable;
 use DateTimeInterface;
 use DateTimeZone;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
 use Throwable;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiException;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryEarliestOfferSelector;
@@ -486,7 +487,7 @@ final class YandexShipmentRegistrationService {
 			return new DateTimeImmutable( $text );
 		}
 
-		return new DateTimeImmutable( 'tomorrow 12:00:00', new DateTimeZone( 'Asia/Novosibirsk' ) );
+		return new DateTimeImmutable( 'tomorrow 12:00:00', new DateTimeZone( TimezoneService::TIMEZONE ) );
 	}
 
 	/** @return array<string,mixed> */

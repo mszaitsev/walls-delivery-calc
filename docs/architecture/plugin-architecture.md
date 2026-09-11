@@ -1,12 +1,14 @@
 # Plugin Architecture
 
+0.155.19 extends the existing calendar `TimezoneService` as the single WDC `Asia/Novosibirsk` owner for local-clock scheduling and admin formatting. `ScheduledTaskCatalog` is a read-only descriptor provider: scheduler owners retain their settings and execution logic, while the overview reads real WP-Cron/Action Scheduler next timestamps without repairing or running jobs.
+
 0.155.18 keeps PEK mode separation inside the carrier-owned quote runtime. `PekCheckoutQuoteContextResolver` prepares independent pickup and courier option/error contexts; failure of findzone or terminal discovery cannot suppress a courier calculator attempt when the canonical destination can build a documented address/coordinate payload. Generic checkout, cache, order-admin, and Shipment Framework interfaces are unchanged.
 
 0.155.17 separates read-only WooCommerce package-address normalization from the mutating checkout city-selection flows. `WooCommercePackageMapper` uses the read-only boundary and gives an active database location row coordinate priority for a positive canonical ID; missing row coordinates retain the established map fallback. The generic pickup-map lifecycle owns zoom throttling and sidebar presentation limiting, while Leaflet and Yandex adapters expose only their current zoom. Address fingerprint repair is separated from canonical destination comparison: `CheckoutAddressRuntime` preserves trusted session identity through transient missing hidden fields and clears pickup buckets only after the existing `CheckoutLocationFingerprint` proves a real destination change. Carrier discovery, pricing and quote caching contracts are unchanged.
 
 0.155.16 correction: postal_code is enrichment-owned, never a GAR changed field. The retired location alias index is no longer generated, exported or used by runtime. Search uses searchable_text and canonical hierarchy fields. Backup/restore and incremental apply swap locations only. Migration 0064 drops only the canonical live alias table; pending migrations run even at unchanged plugin version. Legacy alias backup/temporary tables are retained inert. Finish or cancel an older update before deployment and start a fresh GAR analysis; do not resume its pre-correction diff.
 
-Version: 0.155.18
+Version: 0.155.19
 
 ## One-Click GAR Update
 

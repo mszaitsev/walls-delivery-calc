@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Application;
 
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
@@ -165,11 +167,6 @@ final class ShipmentStatusUpdateService {
 	}
 
 	private function novosibirsk_now(): string {
-		try {
-			return ( new \DateTimeImmutable( 'now', new \DateTimeZone( 'Asia/Novosibirsk' ) ) )->format( 'Y-m-d H:i:s' );
-		} catch ( \Throwable ) {
-			$hour = defined( 'HOUR_IN_SECONDS' ) ? HOUR_IN_SECONDS : 3600;
-			return gmdate( 'Y-m-d H:i:s', time() + 7 * $hour );
-		}
+		return ( new \DateTimeImmutable( 'now', new \DateTimeZone( TimezoneService::TIMEZONE ) ) )->format( 'Y-m-d H:i:s' );
 	}
 }

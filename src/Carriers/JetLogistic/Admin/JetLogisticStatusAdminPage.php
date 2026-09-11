@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\JetLogistic\Admin;
 
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiDiagnosticService;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
@@ -167,7 +169,8 @@ final class JetLogisticStatusAdminPage {
 			echo '<ul>';
 			foreach ( $details as $key => $value ) {
 				if ( is_scalar( $value ) ) {
-					echo '<li>' . esc_html( $this->notice_detail_label( (string) $key ) . ': ' . (string) $value ) . '</li>';
+					$display_value = 'checked_at' === $key ? TimezoneService::format_site_datetime( (string) $value ) : (string) $value;
+					echo '<li>' . esc_html( $this->notice_detail_label( (string) $key ) . ': ' . $display_value ) . '</li>';
 				}
 			}
 			echo '</ul>';

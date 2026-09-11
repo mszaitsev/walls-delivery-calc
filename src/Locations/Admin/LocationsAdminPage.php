@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Locations\Admin;
 
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+
 use RuntimeException;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
@@ -1636,11 +1638,27 @@ final class LocationsAdminPage {
 		if ( $this->defer_json ) {
 			throw new LocationAdminJsonResponse( $data, $success );
 		}
+		$data = $this->format_admin_timestamps( $data );
 		if ( function_exists( 'wp_send_json_success' ) ) {
 			$success ? wp_send_json_success( $data ) : wp_send_json_error( $data );
 			return;
 		}
 		echo json_encode( array( 'success' => $success, 'data' => $data ), JSON_UNESCAPED_UNICODE );
+	}
+
+	/** @param array<string|int,mixed> $data @return array<string|int,mixed> */
+	private function format_admin_timestamps( array $data ): array {
+		foreach ( $data as $key => $value ) {
+			if ( is_array( $value ) ) {
+				$data[ $key ] = $this->format_admin_timestamps( $value );
+				continue;
+			}
+			if ( is_string( $key ) && str_ends_with( $key, '_at' ) && is_scalar( $value ) ) {
+				$data[ $key ] = TimezoneService::format_site_datetime( (string) $value );
+			}
+		}
+
+		return $data;
 	}
 
 	private function limiter_label(): string {

@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Application;
 
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
@@ -1504,7 +1506,7 @@ final class OrderShipmentDraftFactory {
 	}
 
 	private function yandex_default_ready_time(): string {
-		return ( new \DateTimeImmutable( 'tomorrow 12:00:00', new \DateTimeZone( 'Asia/Novosibirsk' ) ) )->format( 'Y-m-d H:i:sP' );
+		return ( new \DateTimeImmutable( 'tomorrow 12:00:00', new \DateTimeZone( TimezoneService::TIMEZONE ) ) )->format( 'Y-m-d H:i:sP' );
 	}
 
 	/**
