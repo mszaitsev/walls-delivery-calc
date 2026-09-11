@@ -20,12 +20,36 @@ function maybe_serialize( mixed $value ): string {
 $GLOBALS['rp_lock_database'] = null;
 $GLOBALS['rp_lock_cache'] = null;
 $GLOBALS['rp_legacy_lock'] = false;
+$GLOBALS['rp_lock_audit'] = null;
 
 function get_option( string $name, mixed $default = false ): mixed {
+	if ( WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportLockAudit::OPTION_NAME === $name ) {
+		return $GLOBALS['rp_lock_audit'] ?? $default;
+	}
 	return null !== $GLOBALS['rp_lock_cache'] ? $GLOBALS['rp_lock_cache'] : $default;
 }
 
+function add_option( string $name, mixed $value, string $deprecated = '', string|bool $autoload = 'yes' ): bool {
+	if ( WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportLockAudit::OPTION_NAME !== $name || null !== $GLOBALS['rp_lock_audit'] ) {
+		return false;
+	}
+	$GLOBALS['rp_lock_audit'] = $value;
+	return true;
+}
+
+function update_option( string $name, mixed $value, bool $autoload = true ): bool {
+	if ( WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportLockAudit::OPTION_NAME === $name ) {
+		$GLOBALS['rp_lock_audit'] = $value;
+		return true;
+	}
+	return false;
+}
+
 function delete_option( string $name ): bool {
+	if ( WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportLockAudit::OPTION_NAME === $name ) {
+		$GLOBALS['rp_lock_audit'] = null;
+		return true;
+	}
 	$GLOBALS['rp_lock_database'] = null;
 	$GLOBALS['rp_lock_cache'] = null;
 	return true;

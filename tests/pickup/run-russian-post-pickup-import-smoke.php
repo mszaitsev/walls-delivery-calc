@@ -120,6 +120,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( str_starts_with( trim( $query ), 'DELETE FROM wp_options WHERE option_name =' ) ) {
 				$key = (string) ( $this->prepared_args[0] ?? '' );
 				$expected = (string) ( $this->prepared_args[1] ?? '' );
+				if ( is_callable( $GLOBALS['wdc_before_option_delete_cas'] ?? null ) ) {
+					$before_option_delete_cas = $GLOBALS['wdc_before_option_delete_cas'];
+					unset( $GLOBALS['wdc_before_option_delete_cas'] );
+					$before_option_delete_cas( $key );
+				}
 				if ( ! array_key_exists( $key, $GLOBALS['wdc_options'] ) || (string) maybe_serialize( $GLOBALS['wdc_options'][ $key ] ) !== $expected ) {
 					return 0;
 				}
@@ -275,6 +280,7 @@ use WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportLock;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportLockAudit;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupLocationResolver;
@@ -552,6 +558,9 @@ $settings->save_from_admin( array( 'russian_post_otpravka_access_token' => 'toke
 rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'Import must start after missing credentials are supplied.' );
 $active_lock = get_option( RussianPostPickupImportLock::OPTION_NAME, array() );
 rp_pickup_assert( is_array( $active_lock ) && '' !== (string) ( $active_lock['job_id'] ?? '' ), 'A queued import must persist an owned lock.' );
+$queue_audit = get_option( RussianPostPickupImportLockAudit::OPTION_NAME, array() );
+$queue_return = is_array( $queue_audit ) ? end( $queue_audit ) : array();
+rp_pickup_assert( 'queue_return' === (string) ( $queue_return['event'] ?? '' ) && (string) ( $active_lock['job_id'] ?? '' ) === (string) ( $queue_return['requested_job_id'] ?? '' ) && ! empty( $queue_return['success'] ), 'A successful queue return must forensically confirm that the queued job still owns its structured lock.' );
 $active_state = $state_service->current();
 $active_state['last_activity_at'] = date( 'Y-m-d H:i:s' );
 update_option( RussianPostPickupImportStateService::OPTION_NAME, $active_state, false );
@@ -601,6 +610,9 @@ $queued_b_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
 $replacement_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, new RussianPostPickupImportLock( $GLOBALS['wpdb'] ) );
 $polled_b_state = $replacement_importer->refresh_state_for_status();
 rp_pickup_assert( $after_late_init_state === $polled_b_state && $after_late_init_lock === get_option( RussianPostPickupImportLock::OPTION_NAME, array() ), 'Status polling between queue and init must preserve job B state and lock.' );
+$second_poll_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, new RussianPostPickupImportLock( $GLOBALS['wpdb'] ) );
+$second_polled_b_state = $second_poll_importer->refresh_state_for_status();
+rp_pickup_assert( $polled_b_state === $second_polled_b_state && $after_late_init_lock === get_option( RussianPostPickupImportLock::OPTION_NAME, array() ), 'Two independent immediate status polls must preserve a valid queued job and its lock.' );
 
 $foreign_callbacks_thrown = array();
 foreach ( array( 'init', 'batch', 'finalize' ) as $foreign_callback ) {
@@ -1186,8 +1198,51 @@ rp_pickup_assert( str_contains( $admin_source, 'wp_next_scheduled( RussianPostPi
 rp_pickup_assert( str_contains( $admin_source, 'russian_post_otpravka_timeout' ) && str_contains( $admin_source, 'Таймаут API, сек.' ), 'Admin timeout field must keep Russian label and remain visible.' );
 rp_pickup_assert( ! str_contains( $admin_source, 'russian_post_otpravka_basic_key' ) && ! str_contains( $admin_source, 'Basic key' ) && ! str_contains( $admin_source, 'BasicKey' ), 'Admin UI must not render a Basic key field.' );
 rp_pickup_assert( str_contains( $admin_source, 'Автоматическая загрузка из API' ) && str_contains( $admin_source, 'Загруженный ZIP' ) && str_contains( $admin_source, 'Загруженный TXT/JSON' ), 'Admin status values must be localized.' );
+rp_pickup_assert( str_contains( $admin_source, 'Временный журнал блокировки (последние 40 событий)' ) && str_contains( $admin_source, 'lock_audit_events()' ), 'Capability-protected Russian Post admin diagnostics must expose the bounded lock audit.' );
 
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/russian-post-pickup-import.js' );
 rp_pickup_assert( str_contains( $js_source, 'data-wdc-rp-status-summary' ) && str_contains( $js_source, 'Автоматическая загрузка из API' ) && str_contains( $js_source, 'Не удалось поставить импорт в очередь. Возможно, уже выполняется другой импорт.' ), 'Status polling JS must update the collapsed summary and render localized status values/messages.' );
+
+// Temporary forensic journal: every mutation, ownership rejection, and physical
+// CAS delete must be bounded and must never persist the lock token or secrets.
+delete_option( RussianPostPickupImportLockAudit::OPTION_NAME );
+delete_option( RussianPostPickupImportLock::OPTION_NAME );
+delete_transient( RussianPostPickupImportLock::OPTION_NAME );
+$_SERVER['REQUEST_URI'] = '/wp-admin/admin-ajax.php?action=wdc_test&token=query-secret';
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$audit_lock = new RussianPostPickupImportLock( $GLOBALS['wpdb'], new RussianPostPickupImportLockAudit() );
+rp_pickup_assert( $audit_lock->acquire( 'audit-owner', 'audit_test_acquire' ), 'Audit fixture must acquire its lock.' );
+rp_pickup_assert( $audit_lock->renew( 'audit-owner', 'audit_test_renew' ), 'Audit fixture must renew its lock.' );
+$audit_lock->release( 'foreign-owner', 'audit_test_owner_mismatch' );
+rp_pickup_assert( $audit_lock->owns( 'audit-owner' ), 'An audited owner mismatch must leave the real owner lock intact.' );
+$audit_lock->release( 'audit-owner', 'audit_test_release' );
+
+rp_pickup_assert( $audit_lock->acquire( 'cas-owner', 'audit_test_cas_miss' ), 'CAS-miss fixture must acquire its lock.' );
+$GLOBALS['wdc_before_option_delete_cas'] = static function ( string $key ): void {
+	if ( RussianPostPickupImportLock::OPTION_NAME === $key ) {
+		update_option( $key, array( 'job_id' => 'replacement-owner', 'token' => 'do-not-record-this-token', 'acquired_at' => time(), 'expires_at' => time() + 10800 ), false );
+	}
+};
+$audit_lock->release( 'cas-owner', 'audit_test_cas_miss' );
+rp_pickup_assert( $audit_lock->owns( 'replacement-owner' ), 'CAS miss instrumentation must not remove the replacement owner.' );
+$mutation_audit_events = $audit_lock->audit_events();
+$mutation_audit_names = array_map( static fn( array $event ): string => (string) ( $event['event'] ?? '' ), $mutation_audit_events );
+foreach ( array( 'acquire_attempt', 'acquire_success', 'renew_attempt', 'renew_success', 'release_success', 'owner_mismatch', 'cas_delete_attempt', 'cas_delete_success', 'cas_delete_miss' ) as $required_audit_event ) {
+	rp_pickup_assert( in_array( $required_audit_event, $mutation_audit_names, true ), 'Lock audit must record event: ' . $required_audit_event );
+}
+
+for ( $audit_index = 0; $audit_index < 45; ++$audit_index ) {
+	$audit_lock->audit_checkpoint( 'bounded_test_' . $audit_index, 'replacement-owner', 'bounded_test' );
+}
+$audit_events = $audit_lock->audit_events();
+$audit_json = (string) json_encode( $audit_events );
+$audit_names = array_map( static fn( array $event ): string => (string) ( $event['event'] ?? '' ), $audit_events );
+rp_pickup_assert( 40 === count( $audit_events ), 'Lock audit must retain exactly the latest 40 events.' );
+rp_pickup_assert( in_array( 'bounded_test_44', $audit_names, true ) && ! in_array( 'acquire_attempt', $audit_names, true ), 'Bounded lock audit must retain newest events and discard oldest events.' );
+rp_pickup_assert( ! str_contains( $audit_json, 'do-not-record-this-token' ) && ! str_contains( $audit_json, 'query-secret' ) && ! str_contains( $audit_json, 'token' ) && ! str_contains( $audit_json, 'password' ) && ! str_contains( $audit_json, 'cookie' ), 'Lock audit must not persist lock tokens, URL queries, credentials, cookies, or secret-bearing fields.' );
+rp_pickup_assert( '/wp-admin/admin-ajax.php' === (string) ( end( $audit_events )['request_path'] ?? '' ) && 'POST' === (string) ( end( $audit_events )['request_method'] ?? '' ), 'Lock audit must retain only the sanitized request path and method.' );
+
+delete_option( RussianPostPickupImportLock::OPTION_NAME );
+delete_option( RussianPostPickupImportLockAudit::OPTION_NAME );
 
 echo "Russian Post pickup import smoke test passed.\n";

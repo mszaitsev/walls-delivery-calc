@@ -4492,6 +4492,7 @@ final class DeliveryServicesAdminPage {
 		$total = $this->russian_post_pickup_points instanceof RussianPostPickupPointRepository ? $this->russian_post_pickup_points->count_active() : 0;
 		$point_types = $this->pickup_point_type_settings instanceof RussianPostPickupPointTypeSettings ? $this->pickup_point_type_settings->all() : RussianPostPickupPointTypeSettings::defaults();
 		$locked = $this->pickup_importer instanceof RussianPostPickupImporter && $this->pickup_importer->is_locked();
+		$lock_audit = $this->pickup_importer instanceof RussianPostPickupImporter ? $this->pickup_importer->lock_audit_events() : array();
 		$schedule_enabled = ! empty( $values[ RussianPostOtpravkaApiSettings::PICKUP_SCHEDULE_ENABLED_KEY ] );
 		$next_schedule = $schedule_enabled && function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( RussianPostPickupImporter::SCHEDULE_HOOK ) : false;
 		?>
@@ -4538,6 +4539,10 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row">Последний статус</th><td><?php echo esc_html( ! empty( $result['success'] ) ? 'успешно' : ( array() === $result ? '-' : 'ошибка' ) ); ?></td></tr>
 				<tr><th scope="row">Статистика</th><td>начат: <?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $result['started_at'] ?? '' ) ) ?: '-' ); ?>; завершен: <?php echo esc_html( TimezoneService::format_site_datetime( (string) ( $result['finished_at'] ?? '' ) ) ?: '-' ); ?>; добавлено: <?php echo esc_html( (string) ( $result['inserted'] ?? 0 ) ); ?>; обновлено: <?php echo esc_html( (string) ( $result['updated'] ?? 0 ) ); ?>; деактивировано: <?php echo esc_html( (string) ( $result['deactivated'] ?? 0 ) ); ?>; пропущено: <?php echo esc_html( (string) ( $result['skipped'] ?? 0 ) ); ?>; ошибки: <?php echo esc_html( $this->translate_import_message( implode( '; ', array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ) ) ) ); ?></td></tr>
 			</table>
+			<details style="max-width: 960px; margin: 12px 0;">
+				<summary>Временный журнал блокировки (последние 40 событий)</summary>
+				<pre style="max-height:420px;overflow:auto;white-space:pre-wrap;background:#f6f7f7;padding:12px;border:1px solid #dcdcde;"><?php echo esc_html( (string) wp_json_encode( $lock_audit, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></pre>
+			</details>
 			<?php submit_button( 'Сохранить настройки импорта', 'secondary', 'submit', false ); ?>
 			<button class="button button-primary" type="submit" name="wdc_delivery_services_action" value="run_russian_post_pickup_import" <?php disabled( $is_busy ); ?>>Запустить импорт сейчас</button>
 			<?php if ( $is_busy ) : ?>
