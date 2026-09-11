@@ -1581,7 +1581,7 @@ $ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_ht
 $ajax_repository = new OrderShipmentRepository();
 $ajax_creation = cdek_order_creation_service( $ajax_repository, new CdekShipmentAdapter( $ajax_client, $builder ) );
 $rp_tracking = ( new ReflectionClass( RussianPostTrackingApiClient::class ) )->newInstanceWithoutConstructor();
-$status_updates = new ShipmentStatusUpdateService( $ajax_repository, $rp_tracking, new RussianPostTrackingStatusMapper(), cdek_order_actual_cost_resolver() );
+$status_updates = new ShipmentStatusUpdateService( $ajax_repository, $rp_tracking, new RussianPostTrackingStatusMapper( new SettingsRepository() ), cdek_order_actual_cost_resolver() );
 $ajax_status = cdek_order_status_service( $ajax_repository, $ajax_client );
 $ajax_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	$ajax_repository,

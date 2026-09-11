@@ -39,6 +39,15 @@ if ( ! function_exists( 'wp_json_encode' ) ) {
 if ( ! function_exists( 'current_time' ) ) {
 	function current_time( string $type ): string { return '2026-06-06 12:34:56'; }
 }
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_cancel_smoke_options'][ $option ] ?? $default; }
+}
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $option, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_cancel_smoke_options'][ $option ] = $value; return true; }
+}
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( mixed $value ): string { return strtolower( preg_replace( '/[^a-zA-Z0-9_\-]/', '', (string) $value ) ?? '' ); }
+}
 if ( ! function_exists( 'wp_salt' ) ) {
 	function wp_salt( string $scheme = 'auth' ): string { return 'shipment-cancel-smoke-' . $scheme; }
 }
@@ -176,7 +185,7 @@ $settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), $encry
 $otpravka_client = new RussianPostOtpravkaApiClient( $settings );
 $tracking_client = new RussianPostTrackingApiClient( $settings );
 $repository = new OrderShipmentRepository();
-$status_service = new ShipmentStatusUpdateService( $repository, $tracking_client, new RussianPostTrackingStatusMapper(), shipment_test_actual_cost_resolver() );
+$status_service = new ShipmentStatusUpdateService( $repository, $tracking_client, new RussianPostTrackingStatusMapper( new SettingsRepository() ), shipment_test_actual_cost_resolver() );
 $backlog_service = new ShipmentBacklogService( $repository, $otpravka_client, $status_service, shipment_test_actual_cost_service( $repository ), new RussianPostShipmentActualCostExtractor() );
 
 $GLOBALS['wdc_cancel_smoke_request_body'] = '{"result-ids":[2285075494],"errors":[]}';
