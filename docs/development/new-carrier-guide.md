@@ -1,6 +1,6 @@
 # New Carrier Guide
 
-Version: 1.0.5
+Version: 1.0.6
 
 Add a carrier only for a real integration with its own API, credentials, geography, quoting, pickup data, or shipment lifecycle. Administrator-defined flat-price services belong to the existing `manual` carrier.
 

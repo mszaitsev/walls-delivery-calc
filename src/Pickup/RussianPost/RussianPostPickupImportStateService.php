@@ -87,6 +87,9 @@ final class RussianPostPickupImportStateService {
 	 */
 	public function update( string $stage, array $counters = array() ): array {
 		$state = $this->current();
+		if ( in_array( (string) ( $state['status'] ?? '' ), array( 'success', 'failed' ), true ) ) {
+			return $state;
+		}
 		$state['status'] = in_array( (string) $state['status'], array( 'queued', 'running' ), true ) ? 'running' : (string) $state['status'];
 		$state['stage'] = $this->normalize_stage( $stage );
 		$state['last_activity_at'] = $this->now();
@@ -146,8 +149,11 @@ final class RussianPostPickupImportStateService {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function cancel_by_admin(): array {
+	public function cancel_by_admin( string $expected_import_id = '' ): array {
 		$state = $this->current();
+		if ( '' !== $expected_import_id && ! hash_equals( (string) ( $state['import_id'] ?? '' ), $expected_import_id ) ) {
+			return $state;
+		}
 		$now = $this->now();
 		$state['status'] = 'failed';
 		$state['stage'] = 'failed';

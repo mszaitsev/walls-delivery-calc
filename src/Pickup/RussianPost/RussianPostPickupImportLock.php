@@ -99,9 +99,18 @@ final class RussianPostPickupImportLock {
 	}
 
 	public function release( string $job_id ): void {
-		$current = get_option( self::OPTION_NAME, array() );
-		if ( is_array( $current ) && hash_equals( (string) ( $current['job_id'] ?? '' ), $job_id ) ) {
-			$this->compare_and_delete( $current );
+		for ( $attempt = 0; $attempt < 2; ++$attempt ) {
+			$current = get_option( self::OPTION_NAME, array() );
+			if ( ! is_array( $current ) || ! hash_equals( (string) ( $current['job_id'] ?? '' ), $job_id ) ) {
+				return;
+			}
+			if ( $this->compare_and_delete( $current ) ) {
+				return;
+			}
+
+			// A concurrent owner-safe renew may have changed expires_at after
+			// this request cached the option. Refresh once, then re-check job_id.
+			$this->clear_option_cache();
 		}
 	}
 

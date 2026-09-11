@@ -292,12 +292,6 @@ final class RussianPostPickupImporter {
 			$last_batch_size = (int) $batch['batch_size'];
 			++$slice_batches;
 			$slice_objects += (int) $batch['objects'];
-			if ( ! $this->lock_service()->renew( $import_id ) ) {
-				$this->record_worker_slice_metrics( 'lock_lost', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
-				$result = $this->state_to_result( $this->state?->current() ?? array(), $type, $import_id );
-				$result['errors'][] = 'Import batch lost its owner lock before continuing the worker slice.';
-				return $this->fail_pipeline( $result );
-			}
 			$budget->mark_unit_processed();
 
 			$current = $this->state?->current() ?? array();
@@ -315,6 +309,26 @@ final class RussianPostPickupImporter {
 				$result = $this->state_to_result( $this->state?->current() ?? $current, $type, $import_id );
 				$result['errors'][] = 'Russian Post pickup import worker lost its owner lock between batches.';
 				return $this->fail_pipeline( $result );
+			}
+			if ( ! $this->lock_service()->renew( $import_id ) ) {
+				$current = $this->state?->current() ?? array();
+				if ( $import_id === (string) ( $current['import_id'] ?? '' ) && ! in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+					$this->record_worker_slice_metrics( 'cancelled', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+					return array( 'success' => false, 'cancelled' => true, 'stop_reason' => 'cancelled', 'offset' => $payload_offset );
+				}
+				$this->record_worker_slice_metrics( 'lock_lost', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+				$result = $this->state_to_result( $current, $type, $import_id );
+				$result['errors'][] = 'Import batch lost its owner lock before continuing the worker slice.';
+				return $this->fail_pipeline( $result );
+			}
+
+			$current = $this->state?->current() ?? array();
+			if ( $import_id !== (string) ( $current['import_id'] ?? '' ) ) {
+				throw new \RuntimeException( 'Russian Post pickup import worker lost state ownership after lease renewal.' );
+			}
+			if ( ! in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+				$this->record_worker_slice_metrics( 'cancelled', $slice_started_at, $slice_started, $slice_batches, $slice_objects );
+				return array( 'success' => false, 'cancelled' => true, 'stop_reason' => 'cancelled', 'offset' => $payload_offset );
 			}
 
 			if ( ! empty( $batch['eof'] ) ) {
@@ -534,8 +548,10 @@ final class RussianPostPickupImporter {
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
 		$job_id = (string) ( $state['import_id'] ?? '' );
 		try {
-			$cancelled = $this->state instanceof RussianPostPickupImportStateService ? $this->state->cancel_by_admin() : array();
-			$this->cleanup_state_files( $state, true );
+			$cancelled = $this->state instanceof RussianPostPickupImportStateService ? $this->state->cancel_by_admin( $job_id ) : array();
+			if ( $job_id === (string) ( $cancelled['import_id'] ?? '' ) && 'failed' === (string) ( $cancelled['status'] ?? '' ) ) {
+				$this->cleanup_state_files( $state, true );
+			}
 
 			return $cancelled;
 		} finally {

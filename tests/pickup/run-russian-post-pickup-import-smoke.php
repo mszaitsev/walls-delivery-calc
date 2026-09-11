@@ -1038,9 +1038,52 @@ rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'Cancel test must
 $cancel_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
 $importer->run_import_init( (string) $cancel_event['args'][0], (string) $cancel_event['args'][1] );
 $cancel_state = $state_service->current();
+$cancel_batch_event = rp_shift_event( RussianPostPickupImporter::BATCH_HOOK );
 rp_pickup_assert( array_key_exists( $cancel_state['staging_table'], $GLOBALS['wpdb']->tables ), 'Cancel test must have staging table before reset.' );
+$cancelled_state = $importer->reset_stale_or_running_import();
+rp_pickup_assert( 'failed' === (string) $cancelled_state['status'] && 'failed' === (string) $cancelled_state['stage'] && '' !== (string) $cancelled_state['finished_at'] && ! file_exists( (string) $cancel_state['payload_file'] ) && ! array_key_exists( $cancel_state['staging_table'], $GLOBALS['wpdb']->tables ) && ! $importer->is_locked(), 'Cancel/reset must persist terminal state, cleanup payload/staging, and release its lock.' );
+
+$terminal_before_late_update = $state_service->current();
+$state_service->update( 'upsert', array( 'import_id' => (string) $cancel_state['import_id'], 'payload_file' => (string) $cancel_state['payload_file'], 'parsed' => 999999 ) );
+rp_pickup_assert( $terminal_before_late_update === $state_service->current(), 'A late in-flight checkpoint must not overwrite terminal cancel state or restore payload metadata.' );
+
+$late_batch = $importer->run_import_batch( (string) $cancel_batch_event['args'][0], (string) $cancel_batch_event['args'][1], (int) $cancel_batch_event['args'][2] );
+$late_finalize = $importer->run_import_finalize( (string) $cancel_state['import_id'], 'ALL' );
+$terminal_after_late_callbacks = $state_service->current();
+rp_pickup_assert( empty( $late_batch['success'] ) && empty( $late_finalize['success'] ) && 'failed' === (string) $terminal_after_late_callbacks['status'] && 'failed' === (string) $terminal_after_late_callbacks['stage'] && (string) $terminal_before_late_update['import_id'] === (string) $terminal_after_late_callbacks['import_id'] && (int) $terminal_before_late_update['parsed'] === (int) $terminal_after_late_callbacks['parsed'] && ! $importer->is_locked() && array() === $GLOBALS['wdc_scheduled_events'], 'Queued late batch/finalize callbacks after cancel must remain terminal, harmless, and schedule no continuation.' );
+
+rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'A new import must start immediately after cancel without manual lock cleanup.' );
+$new_after_cancel_state = $state_service->current();
+$new_after_cancel_lock = get_option( RussianPostPickupImportLock::OPTION_NAME, array() );
+$late_batch_thrown = false;
+$late_finalize_thrown = false;
+try {
+	$importer->run_import_batch( (string) $cancel_state['import_id'], 'ALL', (int) ( $cancel_state['payload_offset'] ?? 0 ) );
+} catch ( RuntimeException ) {
+	$late_batch_thrown = true;
+}
+try {
+	$importer->run_import_finalize( (string) $cancel_state['import_id'], 'ALL' );
+} catch ( RuntimeException ) {
+	$late_finalize_thrown = true;
+}
+$new_after_late_callbacks = $state_service->current();
+rp_pickup_assert( $late_batch_thrown && $late_finalize_thrown && 'queued' === (string) $new_after_late_callbacks['status'] && (string) $new_after_cancel_state['import_id'] === (string) $new_after_late_callbacks['import_id'] && $new_after_cancel_lock === get_option( RussianPostPickupImportLock::OPTION_NAME, array() ), 'Late callbacks from the cancelled job must not mutate lifecycle state or unlock a new active owner.' );
 $importer->reset_stale_or_running_import();
-rp_pickup_assert( ! array_key_exists( $cancel_state['staging_table'], $GLOBALS['wpdb']->tables ) && ! $importer->is_locked(), 'Cancel/reset must drop staging and unlock.' );
+$GLOBALS['wdc_scheduled_events'] = array();
+
+$orphan_job_id = 'terminal-orphan-lock';
+$state_service->failed( array( 'import_id' => $orphan_job_id, 'type' => 'ALL', 'finished_at' => current_time( 'mysql' ), 'errors' => array( 'Injected terminal failure.' ) ) );
+$orphan_lock = new RussianPostPickupImportLock( $GLOBALS['wpdb'] );
+rp_pickup_assert( $orphan_lock->acquire( $orphan_job_id ), 'Terminal self-heal fixture must acquire a matching structured lock.' );
+$orphan_refreshed = $importer->refresh_state_for_status();
+rp_pickup_assert( 'failed' === (string) $orphan_refreshed['status'] && ! $importer->is_locked(), 'Status refresh must remove a matching structured orphan lock from terminal failed state.' );
+
+$legacy_terminal_job = 'terminal-legacy-lock';
+$state_service->failed( array( 'import_id' => $legacy_terminal_job, 'type' => 'ALL', 'finished_at' => current_time( 'mysql' ), 'errors' => array( 'Legacy terminal fixture.' ) ) );
+set_transient( 'wdc_russian_post_pickup_import_lock', 1, 3600 );
+$legacy_refreshed = $importer->refresh_state_for_status();
+rp_pickup_assert( 'failed' === (string) $legacy_refreshed['status'] && false === get_transient( 'wdc_russian_post_pickup_import_lock' ), 'Status refresh must retain legacy scalar terminal-lock recovery.' );
 
 $settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_pickup_schedule_enabled' => '1' ) );
 $importer->sync_schedule();
