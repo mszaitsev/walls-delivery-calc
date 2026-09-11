@@ -455,11 +455,14 @@ final class RussianPostOtpravkaApiClient {
 			$this->delete_temp_file( $temp );
 			return $this->failure( 0, '', '', 'Unable to initialize cURL.', '', 0, $url, $type, $started, '', 'curl' );
 		}
-		curl_setopt_array(
+		$configured = curl_setopt_array(
 			$curl,
 			array(
-				CURLOPT_FILE => $handle,
-				CURLOPT_RETURNTRANSFER => false,
+				CURLOPT_WRITEFUNCTION => static function ( mixed $unused, string $chunk ) use ( $handle ): int {
+					$written = fwrite( $handle, $chunk );
+
+					return false === $written ? 0 : $written;
+				},
 				CURLOPT_FOLLOWLOCATION => true,
 				CURLOPT_CONNECTTIMEOUT => min( 15, $timeout ),
 				CURLOPT_TIMEOUT => $timeout,
@@ -470,6 +473,19 @@ final class RussianPostOtpravkaApiClient {
 				),
 			)
 		);
+		if ( ! $configured ) {
+			$errno = (int) curl_errno( $curl );
+			$error = (string) curl_error( $curl );
+			curl_close( $curl );
+			fclose( $handle );
+			$this->delete_temp_file( $temp );
+
+			$result = $this->failure( 0, '', '', '' !== $error ? $error : 'Unable to configure cURL streaming download.', '', 0, $url, $type, $started, '', 'curl' );
+			$result['curl_errno'] = $errno;
+			$result['curl_error'] = $error;
+
+			return $result;
+		}
 		$ok = curl_exec( $curl );
 		$errno = (int) curl_errno( $curl );
 		$error = (string) curl_error( $curl );

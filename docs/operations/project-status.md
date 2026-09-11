@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.3
+Version: 1.0.4
 
-The current Walls Delivery Calc release source is version 1.0.3. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.3 makes the Russian Post background pickup downloader and ZIP extractor load the WordPress File API before calling `wp_tempnam()`; the owner-aware import lock from 1.0.2 and schema baseline 1.0.0 remain unchanged.
+The current Walls Delivery Calc release source is version 1.0.4. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Patch 1.0.4 preserves the WordPress File API bootstrap from 1.0.3 and hardens the Russian Post pickup background pipeline: status polling cannot release a valid owner lease, callbacks renew that lease, invalid callback invariants become explicit failures, and native cURL streams only into its temporary file. The schema baseline remains 1.0.0.
 
 Current production scope includes:
 

@@ -8,6 +8,7 @@ defined( 'ABSPATH' ) || exit;
 final class RussianPostPickupImportStateService {
 	public const OPTION_NAME = 'wdc_russian_post_pickup_import_state';
 	private const MAX_STORED_ERRORS = 10;
+	private const MAX_GUARD_DIAGNOSTICS = 5;
 	private const STALE_AFTER_SECONDS = 7200;
 	private const DOWNLOAD_STALE_AFTER_SECONDS = 300;
 	private const EXTRACT_STALE_AFTER_SECONDS = 300;
@@ -161,6 +162,17 @@ final class RussianPostPickupImportStateService {
 		return $state;
 	}
 
+	/** @param array<string,mixed> $diagnostic */
+	public function record_guard_diagnostic( array $diagnostic ): array {
+		$state = $this->current();
+		$diagnostics = is_array( $state['guard_diagnostics'] ?? null ) ? $state['guard_diagnostics'] : array();
+		$diagnostics[] = $diagnostic;
+		$state['guard_diagnostics'] = array_slice( $diagnostics, -self::MAX_GUARD_DIAGNOSTICS );
+		$this->save( $state );
+
+		return $state;
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -259,6 +271,7 @@ final class RussianPostPickupImportStateService {
 			'location_match_no_match' => 0,
 			'location_match_ambiguous' => 0,
 			'errors' => array(),
+			'guard_diagnostics' => array(),
 			'memory_peak' => 0,
 		);
 	}

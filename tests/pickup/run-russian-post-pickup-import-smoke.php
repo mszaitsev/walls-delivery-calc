@@ -35,6 +35,9 @@ function wp_remote_retrieve_body( array $response ): string { return (string) ( 
 function wp_next_scheduled( string $hook ): int|false { return $GLOBALS['wdc_recurring_events'][ $hook ]['timestamp'] ?? false; }
 function wp_schedule_event( int $timestamp, string $recurrence, string $hook ): bool { $GLOBALS['wdc_recurring_events'][ $hook ] = compact( 'timestamp', 'recurrence', 'hook' ); return true; }
 function wp_clear_scheduled_hook( string $hook ): bool { unset( $GLOBALS['wdc_recurring_events'][ $hook ] ); return true; }
+function current_user_can( string $capability ): bool { return true; }
+function check_ajax_referer( string $action, string|bool $query_arg = false, bool $stop = true ): int|false { return 1; }
+function wp_send_json_success( mixed $data = null, ?int $status_code = null, int $flags = 0 ): never { $GLOBALS['wdc_json_response'] = $data; throw new RuntimeException( 'wdc-json-response' ); }
 function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool {
 	if ( ! empty( $GLOBALS['wdc_force_schedule_failure'] ) ) {
 		return false;
@@ -99,6 +102,16 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return $query;
 		}
 		public function query( string $query ): int|bool {
+			if ( str_starts_with( trim( $query ), 'UPDATE wp_options SET option_value =' ) ) {
+				$replacement = (string) ( $this->prepared_args[0] ?? '' );
+				$key = (string) ( $this->prepared_args[1] ?? '' );
+				$expected = (string) ( $this->prepared_args[2] ?? '' );
+				if ( ! array_key_exists( $key, $GLOBALS['wdc_options'] ) || (string) maybe_serialize( $GLOBALS['wdc_options'][ $key ] ) !== $expected ) {
+					return 0;
+				}
+				$GLOBALS['wdc_options'][ $key ] = unserialize( $replacement, array( 'allowed_classes' => false ) );
+				return 1;
+			}
 			if ( str_starts_with( trim( $query ), 'DELETE FROM wp_options WHERE option_name =' ) ) {
 				$key = (string) ( $this->prepared_args[0] ?? '' );
 				$expected = (string) ( $this->prepared_args[1] ?? '' );
@@ -392,6 +405,21 @@ foreach ( $items as &$item ) {
 unset( $item );
 $GLOBALS['rp_passport_payload'] = '{"passportElements":[' . implode( ',', array_map( static fn( array $item ): string => (string) json_encode( $item, JSON_UNESCAPED_UNICODE ), $items ) ) . ']}';
 
+if ( function_exists( 'curl_init' ) ) {
+	$stream_source = tempnam( sys_get_temp_dir(), 'wdc-rp-curl-source-' );
+	$stream_body = "PK\x03\x04russian-post-stream-test";
+	file_put_contents( $stream_source, $stream_body );
+	$stream_client = new RussianPostOtpravkaApiClient( $settings );
+	$stream_method = ( new ReflectionClass( RussianPostOtpravkaApiClient::class ) )->getMethod( 'download_with_curl' );
+	$stream_method->setAccessible( true );
+	$stream_url = 'file:///' . str_replace( '\\', '/', ltrim( $stream_source, '\\/' ) );
+	ob_start();
+	$stream_result = $stream_method->invoke( $stream_client, $stream_url, 'ALL', 'token', 'basic', 10 );
+	$stream_stdout = (string) ob_get_clean();
+	rp_pickup_assert( '' === $stream_stdout && strlen( $stream_body ) === (int) $stream_result['temp_file_size'], 'Native cURL streaming must write response bytes only to the temp file, never stdout.' );
+	wp_delete_file( $stream_source );
+}
+
 $curl_client = new RussianPostOtpravkaApiClient( $settings, rp_curl_success_downloader() );
 $curl_download = $curl_client->download_passport_zip( 'ALL' );
 rp_pickup_assert( ! empty( $curl_download['success'] ) && 'curl' === $curl_download['download_backend'] && empty( $curl_download['fallback_used'] ) && is_file( (string) $curl_download['temp_file'] ), 'cURL backend success must return download_backend=curl.' );
@@ -460,20 +488,68 @@ rp_pickup_assert( ! empty( $init['success'] ) && '' !== $state['staging_table'] 
 rp_pickup_assert( $main_before === count( $GLOBALS['wpdb']->tables[ $main ] ), 'Main table must not change during init.' );
 rp_pickup_assert( 200 === (int) $state['download_http_code'] && (int) $state['temp_file_size'] > 0 && '' !== (string) $state['download_url'] && isset( $GLOBALS['rp_last_http_args']['connect_timeout'] ) && 'wp_http' === (string) $state['download_backend'] && ! empty( $state['fallback_used'] ) && str_contains( (string) $state['first_backend_error'], 'Injected cURL failure' ), 'Successful fallback download must store backend diagnostics and use connect timeout.' );
 
+// Reproduce the production status-poll race: a valid, unexpired owner lock must
+// remain authoritative even when the stage activity timestamp crosses the
+// short parse timeout between Action Scheduler requests.
+$post_init_payload = (string) $state['payload_file'];
+$state['last_activity_at'] = date( 'Y-m-d H:i:s', time() - 601 );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, $state, false );
+$request_two_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, new RussianPostPickupImportLock( $GLOBALS['wpdb'] ) );
+$status_page_reflection = new ReflectionClass( DeliveryServicesAdminPage::class );
+$status_page = $status_page_reflection->newInstanceWithoutConstructor();
+$status_importer_property = $status_page_reflection->getProperty( 'pickup_importer' );
+$status_importer_property->setAccessible( true );
+$status_importer_property->setValue( $status_page, $request_two_importer );
+try {
+	$status_page->ajax_pickup_import_status();
+} catch ( RuntimeException $exception ) {
+	rp_pickup_assert( 'wdc-json-response' === $exception->getMessage(), 'Status AJAX must terminate through its JSON response.' );
+}
+$polled_state = (array) ( $GLOBALS['wdc_json_response'] ?? array() );
+rp_pickup_assert( 'running' === (string) $polled_state['status'] && 'parse' === (string) $polled_state['stage'] && $request_two_importer->is_locked() && is_file( $post_init_payload ), 'Status polling in a fresh request must not fail an active post-init pipeline or release its unexpired owner lock.' );
+
 $batch_event = rp_shift_event( RussianPostPickupImporter::BATCH_HOOK );
-$batch = $importer->run_import_batch( (string) $batch_event['args'][0], (string) $batch_event['args'][1], (int) $batch_event['args'][2] );
+$request_three_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, new RussianPostPickupImportLock( $GLOBALS['wpdb'] ) );
+$batch = $request_three_importer->run_import_batch( (string) $batch_event['args'][0], (string) $batch_event['args'][1], (int) $batch_event['args'][2] );
 $state = $state_service->current();
 rp_pickup_assert( ! empty( $batch['success'] ) && 3 === count( $GLOBALS['wpdb']->tables[ $state['staging_table'] ] ) && $main_before === count( $GLOBALS['wpdb']->tables[ $main ] ), 'Batch must write only to staging, not main.' );
 rp_pickup_assert( 3 === (int) $state['rows_inserted_to_staging'], 'State must track rows inserted to staging.' );
 rp_pickup_assert( 3 === (int) $state['location_matched_fias'] && 0 === (int) $state['location_match_no_match'] && 501 === (int) $GLOBALS['wpdb']->tables[ $state['staging_table'] ][0]['location_id'], 'Import batch must resolve and store Russian Post pickup location_id before staging insert.' );
+rp_pickup_assert( $request_three_importer->is_locked(), 'Owner lock must remain active after a successful batch request.' );
 
 $final_event = rp_shift_event( RussianPostPickupImporter::FINALIZE_HOOK );
-$final = $importer->run_import_finalize( (string) $final_event['args'][0], (string) $final_event['args'][1] );
+$request_four_importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, new RussianPostPickupImportStateService(), null, $pickup_location_resolver, new RussianPostPickupImportLock( $GLOBALS['wpdb'] ) );
+$final = $request_four_importer->run_import_finalize( (string) $final_event['args'][0], (string) $final_event['args'][1] );
 $state = $state_service->current();
 rp_pickup_assert( ! empty( $final['success'] ) && 3 === count( $GLOBALS['wpdb']->tables[ $main ] ) && ! array_key_exists( (string) $state['staging_table'], $GLOBALS['wpdb']->tables ), 'Finalize must atomically swap staging to main.' );
 rp_pickup_assert( '' !== (string) $state['swap_started_at'] && '' !== (string) $state['swap_finished_at'], 'State must store swap timestamps.' );
 rp_pickup_assert( in_array( $main, $GLOBALS['wpdb']->analyzed_tables, true ), 'Successful finalize must analyze main table.' );
 rp_pickup_assert( 501 === (int) $GLOBALS['wpdb']->tables[ $main ][0]['location_id'], 'Final imported Russian Post pickup rows must keep resolved location_id after staging swap.' );
+rp_pickup_assert( ! $request_four_importer->is_locked(), 'Successful terminal finalize must release the owner lock.' );
+
+$guard_payload = tempnam( sys_get_temp_dir(), 'wdc-rp-guard-' );
+file_put_contents( $guard_payload, '{"passportElements":[]}' );
+$guard_state = array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'parse', 'import_id' => 'missing-lock-job', 'type' => 'ALL', 'payload_file' => $guard_payload, 'payload_offset' => 17 ) );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, $guard_state, false );
+delete_option( RussianPostPickupImportLock::OPTION_NAME );
+$guard_result = $importer->run_import_batch( 'missing-lock-job', 'ALL', 17 );
+$guard_failed_state = $state_service->current();
+$guard_diagnostic = end( $guard_failed_state['guard_diagnostics'] );
+rp_pickup_assert( empty( $guard_result['success'] ) && 'failed' === (string) $guard_failed_state['status'] && str_contains( implode( ' ', $guard_failed_state['errors'] ), 'invariant failed' ) && 'batch' === (string) ( $guard_diagnostic['callback'] ?? '' ) && false === (bool) ( $guard_diagnostic['lock_exists'] ?? true ) && ! empty( $guard_diagnostic['payload_file_exists'] ) && ! empty( $guard_diagnostic['payload_file_readable'] ) && 17 === (int) ( $guard_diagnostic['payload_offset'] ?? -1 ) && ! file_exists( $guard_payload ), 'A same-job callback without its owner lock must become explicit failed state with bounded diagnostics and cleanup.' );
+
+rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'Wrong-owner callback race fixture must queue an active job.' );
+$race_state = $state_service->current();
+$race_lock = get_option( RussianPostPickupImportLock::OPTION_NAME, array() );
+$race_thrown = false;
+try {
+	$importer->run_import_init( 'stale-foreign-job', 'ALL' );
+} catch ( RuntimeException $exception ) {
+	$race_thrown = str_contains( $exception->getMessage(), 'does not own the active job' );
+}
+$race_after = $state_service->current();
+rp_pickup_assert( $race_thrown && 'running' !== (string) $race_after['status'] && 'queued' === (string) $race_after['status'] && (string) $race_state['import_id'] === (string) $race_after['import_id'] && $race_lock === get_option( RussianPostPickupImportLock::OPTION_NAME, array() ), 'A stale foreign callback must fail its Action Scheduler action without changing or unlocking the current job.' );
+$importer->reset_stale_or_running_import();
+$GLOBALS['wdc_scheduled_events'] = array();
 
 $main_after_success = $GLOBALS['wpdb']->tables[ $main ];
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
@@ -699,8 +775,12 @@ $importer->reset_stale_or_running_import();
 $GLOBALS['wdc_scheduled_events'] = array();
 
 $race_lock = new RussianPostPickupImportLock( $GLOBALS['wpdb'] );
-$new_owner = array( 'job_id' => 'new-job', 'token' => 'new-token', 'acquired_at' => time(), 'expires_at' => time() + 3600 );
+$new_owner = array( 'job_id' => 'new-job', 'token' => 'new-token', 'acquired_at' => time(), 'expires_at' => time() + 5 );
 update_option( RussianPostPickupImportLock::OPTION_NAME, $new_owner, false );
+$renewed_before = (int) $new_owner['expires_at'];
+rp_pickup_assert( $race_lock->renew( 'new-job' ), 'The active owner must be able to renew its pipeline lease.' );
+$new_owner = get_option( RussianPostPickupImportLock::OPTION_NAME, array() );
+rp_pickup_assert( 'new-token' === (string) ( $new_owner['token'] ?? '' ) && (int) ( $new_owner['expires_at'] ?? 0 ) > $renewed_before, 'Lease renewal must preserve the owner token and extend expiry.' );
 $race_lock->release( 'old-job' );
 rp_pickup_assert( $new_owner === get_option( RussianPostPickupImportLock::OPTION_NAME, array() ), 'A late release from an old job must not remove the new job lock.' );
 delete_option( RussianPostPickupImportLock::OPTION_NAME );
@@ -720,6 +800,15 @@ update_option( RussianPostPickupImportStateService::OPTION_NAME, $stale_state, f
 set_transient( 'wdc_russian_post_pickup_import_lock', 1, 3600 );
 $stale_result = $importer->refresh_state_for_status();
 rp_pickup_assert( 'failed' === (string) $stale_result['status'] && str_contains( implode( ' ', $stale_result['errors'] ), 'Download stage timed out/stale.' ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && ! file_exists( (string) $stale_zip ) && ! file_exists( (string) $stale_payload ) && ! array_key_exists( $stale_staging, $GLOBALS['wpdb']->tables ), 'Status refresh must fail stale download, unlock, and cleanup files/staging.' );
+
+$expired_payload = tempnam( sys_get_temp_dir(), 'wdc-expired-owner-' );
+$expired_staging = $repo->staging_table( 'expired-owner' );
+$GLOBALS['wpdb']->tables[ $expired_staging ] = array( array( 'id' => 3 ) );
+$expired_state = array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'parse', 'import_id' => 'expired-owner-job', 'last_activity_at' => date( 'Y-m-d H:i:s', time() - 601 ), 'payload_file' => $expired_payload, 'staging_table' => $expired_staging, 'errors' => array() ) );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, $expired_state, false );
+update_option( RussianPostPickupImportLock::OPTION_NAME, array( 'job_id' => 'expired-owner-job', 'token' => 'expired-token', 'acquired_at' => time() - 10801, 'expires_at' => time() - 1 ), false );
+$expired_result = $importer->refresh_state_for_status();
+rp_pickup_assert( 'failed' === (string) $expired_result['status'] && ! get_option( RussianPostPickupImportLock::OPTION_NAME, false ) && ! file_exists( $expired_payload ) && ! array_key_exists( $expired_staging, $GLOBALS['wpdb']->tables ), 'A truly stale running job with an expired owner lease must fail, cleanup, and release only its expired lease.' );
 
 $stale_extract_zip = tempnam( sys_get_temp_dir(), 'wdc-stale-extract-zip-' );
 $stale_extract_payload = tempnam( sys_get_temp_dir(), 'wdc-stale-extract-payload-' );

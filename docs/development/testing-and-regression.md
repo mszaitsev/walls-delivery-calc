@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 1.0.3
+Version: 1.0.4
 
 Tests are executable smoke programs with no production dependency installer. Run commands from the repository root with a supported PHP and Node.js runtime.
 
@@ -36,6 +36,6 @@ Run JavaScript smoke programs in `tests/` with `node`. Browser acceptance tests 
 
 ## ZIP acceptance
 
-Build `dist/walls-delivery-calc-1.0.3.zip`, inspect its one-folder layout, lint/check the extracted runtime files, and install that ZIP through the standard WordPress upload UI. With `WP_DEBUG` and `WP_DEBUG_LOG` enabled, exercise activation, WDC admin pages, checkout location/rates, pickup map/selection, and recalculation. Any WDC notice, warning, deprecation, or fatal is a release blocker.
+Build `dist/walls-delivery-calc-1.0.4.zip`, inspect its one-folder layout, lint/check the extracted runtime files, and install that ZIP through the standard WordPress upload UI. With `WP_DEBUG` and `WP_DEBUG_LOG` enabled, exercise activation, WDC admin pages, checkout location/rates, pickup map/selection, and recalculation. Any WDC notice, warning, deprecation, or fatal is a release blocker.
 
 Old regression tests remain when they protect a current business contract. Tests that only replay removed pre-1.0 schema transitions or retired runtime paths do not belong to the 1.0 suite.

@@ -1,6 +1,6 @@
 # Cron And Background Jobs
 
-Version: 1.0.3
+Version: 1.0.4
 
 WDC business clock times use `Asia/Novosibirsk`; scheduler APIs receive Unix timestamps. Owners register callbacks during plugin bootstrap and defer Action Scheduler inspection/creation until `action_scheduler_init`. Registration after that hook ensures the schedule immediately. Expected pre-initialization and disabled/no-work states are silent.
 
@@ -13,7 +13,7 @@ Current recurring owners:
 - Ozon Delivery two-phase pickup catalog discovery/enrichment with bounded batches, a renewable lease, retry delay, and atomic snapshot publication;
 - calendar generation, self-scheduled for 09:00 Asia/Novosibirsk on the first Monday of each month.
 
-Russian Post pickup API imports validate complete Otpravka credentials before acquiring their import lock. Queued/running jobs use one atomic option lease owned by the import job ID; terminal success, failure, cancellation, and stale-state recovery release only that owner's lease. A terminal pre-1.0.2 job may leave the former scalar transient behind; status refresh or the next manual start removes that legacy lock only while the persisted job state is terminal. A queued/running state remains authoritative and cannot be displaced by another manual or cron start. Background download and ZIP extraction explicitly load `wp-admin/includes/file.php` before using `wp_tempnam()` because Action Scheduler and WP-Cron do not guarantee the admin File API include.
+Russian Post pickup API imports validate complete Otpravka credentials before acquiring their import lock. Queued/running jobs use one atomic option lease owned by the unique import job ID; init, batch, and finalize callbacks renew it, while terminal success, failure, cancellation, and stale-state recovery release only that owner's lease. Status polling treats a valid, unexpired owner lease as authoritative and therefore cannot mistake an Action Scheduler inter-request pause for an orphaned pipeline. If an active callback has lost its lease, the job becomes explicitly failed with bounded state diagnostics; a callback for a different active job throws without touching that job or its lease. A terminal pre-1.0.2 job may leave the former scalar transient behind; status refresh or the next manual start removes that legacy lock only while the persisted job state is terminal. Background download and ZIP extraction explicitly load `wp-admin/includes/file.php` before using `wp_tempnam()` because Action Scheduler and WP-Cron do not guarantee the admin File API include.
 
 Ozon browser polling reads local progress only and never executes background work. Checkout reads published local pickup snapshots and never initiates imports.
 
