@@ -57,10 +57,7 @@ final class RussianPostTrackingStatusMapper {
 		'2:22' => array( 'label' => 'Вручение — Вручение отправителю через ААПС', 'status' => DeliveryStatus::DELIVERED, 'terminal' => true ),
 		'2:23' => array( 'label' => 'Вручение — Вручение адресату через АПШ', 'status' => DeliveryStatus::DELIVERED, 'terminal' => true ),
 		'2:24' => array( 'label' => 'Вручение — Вручение отправителю через АПШ', 'status' => DeliveryStatus::RETURNED_TO_SENDER, 'terminal' => true ),
-		// Compatibility exception: the current Russian Post dictionary marks 2:25
-		// as terminal, while WDC 1.0.10 treated it as non-terminal. Keep false to
-		// avoid changing shipment lifecycle semantics in the mapping UI release.
-		'2:25' => array( 'label' => 'Вручение — Адресату по QR коду', 'status' => DeliveryStatus::DELIVERED, 'terminal' => false ),
+		'2:25' => array( 'label' => 'Вручение — Адресату по QR коду', 'status' => DeliveryStatus::DELIVERED, 'terminal' => true ),
 		'2:26' => array( 'label' => 'Вручение — Адресату почтальоном по QR коду', 'status' => DeliveryStatus::DELIVERED, 'terminal' => false ),
 		'2:27' => array( 'label' => 'Вручение — Адресату курьером по QR коду', 'status' => DeliveryStatus::DELIVERED, 'terminal' => false ),
 		'2:28' => array( 'label' => 'Вручение — Отправителю по QR коду', 'status' => DeliveryStatus::RETURNED_TO_SENDER, 'terminal' => false ),

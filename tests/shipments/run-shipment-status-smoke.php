@@ -489,6 +489,25 @@ $russian_post_autosync_saved = $russian_post_autosync_repository->find_by_carrie
 shipment_status_smoke_assert( 1 === $russian_post_autosync_adapter->update_calls && 1 === (int) ( $enabled_result['updates_by_carrier'][ RussianPostDomesticSettings::CARRIER_KEY ] ?? 0 ), 'Common autosync must select and dispatch an eligible Russian Post shipment through the adapter registry.' );
 shipment_status_smoke_assert( DeliveryStatus::IN_TRANSIT === (string) ( $russian_post_autosync_saved['universal_status_code'] ?? '' ), 'Common autosync must consume the persisted Russian Post status mapping override.' );
 $russian_post_autosync_mapper->save_mapping( RussianPostTrackingStatusMapper::default_mapping() );
+$GLOBALS['wdc_status_smoke_http_body'] = shipment_status_smoke_envelope( shipment_status_smoke_record( '2026-06-07T10:00:00+07:00', '2', 'Вручение', '25', 'Адресату по QR коду' ) );
+$terminal_225_result = ( new ShipmentStatusAutoSyncService(
+	$russian_post_autosync_settings,
+	new PlatformRuntimeSettings( $russian_post_autosync_settings ),
+	$russian_post_autosync_repository,
+	$russian_post_autosync_status_service,
+	registry: new CarrierShipmentAdapterRegistry( array( $russian_post_autosync_adapter ) )
+) )->run( 'cron' );
+$russian_post_terminal_saved = $russian_post_autosync_repository->find_by_carrier( $russian_post_autosync_order, RussianPostDomesticSettings::CARRIER_KEY );
+shipment_status_smoke_assert( 2 === $russian_post_autosync_adapter->update_calls && 1 === (int) ( $terminal_225_result['updates_by_carrier'][ RussianPostDomesticSettings::CARRIER_KEY ] ?? 0 ), 'Common autosync must dispatch the eligible Russian Post shipment for native status 2:25.' );
+shipment_status_smoke_assert( DeliveryStatus::DELIVERED === (string) ( $russian_post_terminal_saved['universal_status_code'] ?? '' ) && true === (bool) ( $russian_post_terminal_saved['carrier_status_is_terminal'] ?? false ), 'Native Russian Post status 2:25 must persist delivered with official terminal metadata.' );
+$after_terminal_225_result = ( new ShipmentStatusAutoSyncService(
+	$russian_post_autosync_settings,
+	new PlatformRuntimeSettings( $russian_post_autosync_settings ),
+	$russian_post_autosync_repository,
+	$russian_post_autosync_status_service,
+	registry: new CarrierShipmentAdapterRegistry( array( $russian_post_autosync_adapter ) )
+) )->run( 'cron' );
+shipment_status_smoke_assert( 2 === $russian_post_autosync_adapter->update_calls && 1 === (int) ( $after_terminal_225_result['skip_reasons']['terminal_status_no_tracking_update'] ?? 0 ), 'A Russian Post shipment mapped to delivered by 2:25 must be excluded from subsequent common autosync runs.' );
 
 $no_barcode_order = new ShipmentStatusSmokeOrder( 10, array( OrderShipmentRepository::META_KEY => array( RussianPostDomesticSettings::CARRIER_KEY => array( 'status' => 'created' ) ) ) );
 $no_barcode = $status_service->update_russian_post( $no_barcode_order );
