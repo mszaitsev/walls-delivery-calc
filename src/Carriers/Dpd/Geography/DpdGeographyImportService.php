@@ -281,10 +281,23 @@ final class DpdGeographyImportService {
 		);
 		foreach ( array_chunk( $step['rows'], self::MATCH_BATCH_SIZE ) as $rows ) {
 			$context = $this->match_context_for_rows( $rows, $patch );
-			$candidates = array();
-			foreach ( $rows as $row ) {
-				$this->process_row( $row, $patch, $context, $candidates );
+			$candidates_by_row = array();
+			$foreign_rows = array();
+			foreach ( $rows as $row_index => $row ) {
+				$country = strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) );
+				if ( in_array( $country, array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) {
+					$foreign_rows[ (int) $row_index ] = $row;
+					continue;
+				}
+				$row_candidates = array();
+				$this->process_row( $row, $patch, $context, $row_candidates );
+				if ( array() !== $row_candidates ) {
+					$candidates_by_row[ (int) $row_index ] = $row_candidates[0];
+				}
 			}
+			$this->process_foreign_rows_batch( $foreign_rows, $patch, $candidates_by_row );
+			ksort( $candidates_by_row, SORT_NUMERIC );
+			$candidates = array_values( $candidates_by_row );
 			$this->stage_candidates( $stage_table, $candidates, $patch );
 			if ( $this->step_state_is_stale( $start_job_id, $start_offset ) ) {
 				return $this->with_step_control( $this->state->public_state(), 'stale' );
@@ -417,7 +430,11 @@ final class DpdGeographyImportService {
 		$country = strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) );
 		if ( 'RU' !== $country ) {
 			if ( in_array( $country, array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) {
-				$this->process_foreign_row( $row, $patch, $country, $candidates );
+				$batched = array();
+				$this->process_foreign_rows_batch( array( 0 => $row ), $patch, $batched );
+				if ( isset( $batched[0] ) ) {
+					$candidates[] = $batched[0];
+				}
 				return;
 			}
 			$this->inc( $patch, 'skipped_non_ru' );
@@ -456,97 +473,188 @@ final class DpdGeographyImportService {
 	}
 
 	/**
-	 * @param array<string,string> $row
+	 * @param array<int,array<string,string>> $rows
 	 * @param array<string,mixed> $patch
+	 * @param array<int,array<string,mixed>> $candidates_by_row
 	 */
-	private function process_foreign_row( array $row, array &$patch, string $country, array &$candidates ): void {
-		$this->inc( $patch, 'foreign_rows' );
-		$this->inc( $patch, 'foreign_' . strtolower( $country ) . '_rows' );
-		$dpd_city_id = preg_replace( '/\D+/', '', (string) ( $row['dpd_city_id'] ?? '' ) ) ?? '';
-		$place = trim( (string) ( $row['settlement'] ?? '' ) );
-		if ( '' === $dpd_city_id || '0' === $dpd_city_id || '' === $place ) {
-			$this->inc( $patch, 'skipped_invalid' );
+	private function process_foreign_rows_batch( array $rows, array &$patch, array &$candidates_by_row ): void {
+		if ( array() === $rows ) {
+			return;
+		}
+		$prepared = array();
+		foreach ( $rows as $row_index => $row ) {
+			$country = strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) );
+			$this->inc( $patch, 'foreign_rows' );
+			$this->inc( $patch, 'foreign_' . strtolower( $country ) . '_rows' );
+			$dpd_city_id = preg_replace( '/\D+/', '', (string) ( $row['dpd_city_id'] ?? '' ) ) ?? '';
+			$place = trim( (string) ( $row['settlement'] ?? '' ) );
+			if ( '' === $dpd_city_id || '0' === $dpd_city_id || '' === $place ) {
+				$this->inc( $patch, 'skipped_invalid' );
+				continue;
+			}
+			$prepared[ (string) $row_index ] = array(
+				'row_index' => (int) $row_index,
+				'dpd_city_id' => $dpd_city_id,
+				'country' => $country,
+				'place' => $place,
+				'region' => trim( (string) ( $row['region'] ?? '' ) ),
+				'district' => trim( (string) ( $row['district'] ?? '' ) ),
+				'place_type' => $this->normalize_foreign_place_type( (string) ( $row['settlement_type'] ?? '' ) ),
+			);
+		}
+		if ( array() === $prepared ) {
 			return;
 		}
 
-		$region = trim( (string) ( $row['region'] ?? '' ) );
-		$district = trim( (string) ( $row['district'] ?? '' ) );
-		$place_type = $this->normalize_foreign_place_type( (string) ( $row['settlement_type'] ?? '' ) );
-		$region_type = $this->foreign_region_type( $region, $place, $place_type );
-		$district_type = '' !== $district ? 'р-н' : '';
-		$is_city = $this->foreign_place_type_is_city( $place_type );
-
 		try {
-			$mapped_location_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
-			$mapped_existing = null !== $mapped_location_id ? $this->locations->find_by_id( $mapped_location_id ) : null;
-			$resolution = $this->resolve_foreign_canonical_location( $country, $place, $region, $district, $place_type, $mapped_location_id );
+			$mapped_ids = $this->delivery_codes->find_location_ids_by_dpd_city_ids( array_column( $prepared, 'dpd_city_id' ) );
+			$mapped_locations = $this->locations->find_map_by_ids( array_values( $mapped_ids ) );
+			$identity_requests = array();
+			foreach ( $prepared as $key => $item ) {
+				$identity_requests[ $key ] = array(
+					'country_code' => $item['country'],
+					'place_name' => $item['place'],
+					'region_name' => $item['region'],
+					'district_name' => $item['district'],
+					'place_type' => $item['place_type'],
+				);
+			}
+			$resolutions = $this->locations->find_foreign_place_identity_resolutions_batch( $identity_requests );
+		} catch ( \RuntimeException $exception ) {
+			foreach ( $prepared as $item ) {
+				$this->record_foreign_save_failure( $patch, $item, $exception->getMessage() );
+			}
+			return;
+		}
+
+		$locations_to_save = array();
+		$existing_to_save = array();
+		$plans = array();
+		$new_identity_seen = array();
+		$mutated_by_id = array();
+		$mutated_by_identity = array();
+		foreach ( $prepared as $key => $item ) {
+			$resolution_data = $resolutions[ $key ] ?? array( 'identity_key' => '', 'legacy_key' => '', 'matches' => array(), 'legacy' => null );
+			$identity_key = (string) ( $resolution_data['identity_key'] ?? $key );
+			$legacy_key = (string) ( $resolution_data['legacy_key'] ?? '' );
+			$mapped_id = $mapped_ids[ $item['dpd_city_id'] ] ?? null;
+			$mapped_existing = null !== $mapped_id ? ( $mutated_by_id[ $mapped_id ]['location'] ?? $mapped_locations[ $mapped_id ] ?? null ) : null;
+			$matches = array();
+			foreach ( (array) $resolution_data['matches'] as $match ) {
+				if ( ! $match instanceof Location || null === $match->id ) {
+					continue;
+				}
+				$mutation = $mutated_by_id[ $match->id ] ?? null;
+				if ( null === $mutation ) {
+					$matches[] = $match;
+				} elseif ( $identity_key === (string) $mutation['identity_key'] ) {
+					$matches[] = $mutation['location'];
+				}
+			}
+			foreach ( $mutated_by_identity[ $identity_key ] ?? array() as $id => $mutated_location ) {
+				$matches[ (int) $id ] = $mutated_location;
+			}
+			$matches = array_values( $matches );
+			$legacy = $resolution_data['legacy'] ?? null;
+			if ( $legacy instanceof Location && null !== $legacy->id && isset( $mutated_by_id[ $legacy->id ] ) ) {
+				$mutation = $mutated_by_id[ $legacy->id ];
+				$legacy = $legacy_key === (string) $mutation['legacy_key'] ? $mutation['location'] : null;
+			}
+			$resolution = $this->resolve_foreign_canonical_location_from_matches( $matches, $mapped_id );
 			$existing = $resolution['location'] instanceof Location ? $resolution['location'] : $mapped_existing;
 			if ( (int) $resolution['match_count'] > 1 ) {
 				$this->inc( $patch, 'foreign_duplicate_identity_rows' );
 			}
-			if ( ! $existing instanceof Location ) {
-				$existing = $this->locations->find_legacy_foreign_by_place_identity( $country, $place, $region );
+			if ( ! $existing instanceof Location && $legacy instanceof Location ) {
+				$existing = $legacy;
 			}
-
-			$location = Location::from_array(
-				array(
-					'id' => $existing?->id,
-					'country_code' => $country,
-					'region_name' => $region,
-					'region_type' => $region_type,
-					'district_name' => $district,
-					'district_type' => $district_type,
-					'city_name' => $is_city ? $place : '',
-					'city_type' => $is_city ? 'г' : '',
-					'settlement_name' => $place,
-					'settlement_type' => $place_type,
-					'place_name' => $place,
-					'place_type' => $place_type,
-					'place_level' => 0,
-					'display_name' => $this->foreign_display_name( $country, $region, $region_type, $district, $district_type, $place, $place_type ),
-					'postal_code' => '',
-					'russianpost_courier_calc_postal_code' => '',
-					'fias_id' => '',
-					'gar_object_id' => 0,
-					'gar_id' => '',
-					'kladr_id' => '',
-					'latitude' => null,
-					'longitude' => null,
-					'active' => true,
-				)
-			);
+			$location = $this->foreign_location( $item, $existing );
 			if ( array() !== $location->validate() ) {
 				$this->inc( $patch, 'skipped_invalid' );
-				return;
+				continue;
 			}
+			$persistence_key = $existing instanceof Location && null !== $existing->id ? 'id:' . $existing->id : 'new:' . $identity_key;
+			$outcome = $existing instanceof Location || isset( $new_identity_seen[ $identity_key ] ) ? 'foreign_locations_updated' : 'foreign_locations_inserted';
+			$new_identity_seen[ $identity_key ] = true;
+			$locations_to_save[ $persistence_key ] = $location;
+			if ( ! array_key_exists( $persistence_key, $existing_to_save ) ) {
+				$existing_to_save[ $persistence_key ] = $existing;
+			}
+			if ( $existing instanceof Location && null !== $existing->id ) {
+				$mutated_by_id[ $existing->id ] = array(
+					'identity_key' => $identity_key,
+					'legacy_key' => '' === trim( $item['district'] ) ? $legacy_key : '',
+					'location' => $location,
+				);
+				$mutated_by_identity[ $identity_key ][ $existing->id ] = $location;
+			}
+			$plans[ $key ] = array( 'persistence_key' => $persistence_key, 'outcome' => $outcome, 'item' => $item );
+		}
 
-			$saved_id = $this->locations->save( $location );
-		} catch ( \RuntimeException $exception ) {
-			$this->inc( $patch, 'foreign_save_failed' );
-			$this->add_error(
-				$patch,
-				sprintf(
-					'Failed to resolve or save foreign DPD location for dpd_city_id=%s country_code=%s place_name=%s: %s',
-					$dpd_city_id,
-					$country,
-					$place,
-					$this->sanitize_error( $exception->getMessage() )
-				)
+		$saved = $this->locations->save_foreign_locations_batch( $locations_to_save, $existing_to_save );
+		foreach ( $plans as $plan ) {
+			$item = $plan['item'];
+			$persistence_key = (string) $plan['persistence_key'];
+			if ( isset( $saved['errors'][ $persistence_key ] ) ) {
+				$this->record_foreign_save_failure( $patch, $item, (string) $saved['errors'][ $persistence_key ] );
+				continue;
+			}
+			$saved_id = (int) ( $saved['ids'][ $persistence_key ] ?? 0 );
+			if ( $saved_id <= 0 ) {
+				$this->record_foreign_save_failure( $patch, $item, 'missing saved id' );
+				continue;
+			}
+			$candidates_by_row[ (int) $item['row_index'] ] = array(
+				'location_id' => $saved_id,
+				'dpd_city_id' => $item['dpd_city_id'],
+				'match_method' => 'foreign',
+				'foreign_location_outcome' => $plan['outcome'],
+				'error_context' => 'dpd_city_id=' . $item['dpd_city_id'] . ' country_code=' . $item['country'] . ' place_name=' . $item['place'],
 			);
-			return;
 		}
-		if ( $saved_id <= 0 ) {
-			$this->inc( $patch, 'foreign_save_failed' );
-			$this->add_error( $patch, 'Failed to save foreign DPD location for dpd_city_id=' . $dpd_city_id . ' country_code=' . $country . ' place_name=' . $place . ': missing saved id' );
-			return;
-		}
-		$candidates[] = array(
-			'location_id' => $saved_id,
-			'dpd_city_id' => $dpd_city_id,
-			'match_method' => 'foreign',
-			'foreign_location_outcome' => null === $existing ? 'foreign_locations_inserted' : 'foreign_locations_updated',
-			'error_context' => 'dpd_city_id=' . $dpd_city_id . ' country_code=' . $country . ' place_name=' . $place,
-		);
+	}
+
+	private function foreign_location( array $item, ?Location $existing ): Location {
+		$region_type = $this->foreign_region_type( $item['region'], $item['place'], $item['place_type'] );
+		$district_type = '' !== $item['district'] ? 'р-н' : '';
+		$is_city = $this->foreign_place_type_is_city( $item['place_type'] );
+
+		return Location::from_array( array(
+			'id' => $existing?->id,
+			'country_code' => $item['country'],
+			'region_name' => $item['region'],
+			'region_type' => $region_type,
+			'district_name' => $item['district'],
+			'district_type' => $district_type,
+			'city_name' => $is_city ? $item['place'] : '',
+			'city_type' => $is_city ? 'г' : '',
+			'settlement_name' => $item['place'],
+			'settlement_type' => $item['place_type'],
+			'place_name' => $item['place'],
+			'place_type' => $item['place_type'],
+			'place_level' => 0,
+			'display_name' => $this->foreign_display_name( $item['country'], $item['region'], $region_type, $item['district'], $district_type, $item['place'], $item['place_type'] ),
+			'postal_code' => '',
+			'russianpost_courier_calc_postal_code' => '',
+			'fias_id' => '',
+			'gar_object_id' => 0,
+			'gar_id' => '',
+			'kladr_id' => '',
+			'latitude' => null,
+			'longitude' => null,
+			'active' => true,
+		) );
+	}
+
+	private function record_foreign_save_failure( array &$patch, array $item, string $message ): void {
+		$this->inc( $patch, 'foreign_save_failed' );
+		$this->add_error( $patch, sprintf(
+			'Failed to resolve or save foreign DPD location for dpd_city_id=%s country_code=%s place_name=%s: %s',
+			$item['dpd_city_id'],
+			$item['country'],
+			$item['place'],
+			$this->sanitize_error( $message )
+		) );
 	}
 
 	/**
@@ -617,10 +725,10 @@ final class DpdGeographyImportService {
 	}
 
 	/**
+	 * @param array<int,Location> $matches
 	 * @return array{location:?Location,duplicate_ids:array<int,int>,match_count:int,method:string}
 	 */
-	private function resolve_foreign_canonical_location( string $country, string $place, string $region, string $district, string $place_type, ?int $mapped_location_id ): array {
-		$matches = $this->locations->find_foreign_by_place_identity_matches( $country, $place, $region, $district, $place_type );
+	private function resolve_foreign_canonical_location_from_matches( array $matches, ?int $mapped_location_id ): array {
 		$count = count( $matches );
 		if ( 0 === $count ) {
 			return array( 'location' => null, 'duplicate_ids' => array(), 'match_count' => 0, 'method' => 'new' );

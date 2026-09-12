@@ -112,6 +112,163 @@ final class LocationRepository {
 	}
 
 	/**
+	 * Persists the unique canonical locations prepared by one DPD foreign batch.
+	 * Existing rows are updated only when their business columns changed; new
+	 * rows are inserted in bounded multi-row statements and resolved back to IDs.
+	 *
+	 * @param array<string,Location> $locations
+	 * @param array<string,Location|null> $existing
+	 * @return array{ids:array<string,int>,errors:array<string,string>,write_queries:int}
+	 */
+	public function save_foreign_locations_batch( array $locations, array $existing = array() ): array {
+		$locations = array_filter( $locations, static fn( mixed $location ): bool => $location instanceof Location );
+		$result = array( 'ids' => array(), 'errors' => array(), 'write_queries' => 0 );
+		if ( array() === $locations ) {
+			return $result;
+		}
+
+		$test_property = $this->has_test_location_rows() ? 'locations' : ( property_exists( $this->wpdb, 'foreign_rows' ) ? 'foreign_rows' : '' );
+		if ( '' !== $test_property ) {
+			$rows = is_array( $this->wpdb->{$test_property} ) ? $this->wpdb->{$test_property} : array();
+			$max_id = 0;
+			foreach ( $rows as $row ) {
+				$max_id = max( $max_id, (int) ( $row['id'] ?? 0 ) );
+			}
+			foreach ( array_chunk( $locations, 100, true ) as $chunk ) {
+				$changed = false;
+				foreach ( $chunk as $key => $location ) {
+					$current = $existing[ $key ] ?? null;
+					if ( $current instanceof Location && null !== $current->id ) {
+						if ( $this->foreign_locations_equal( $current, $location ) ) {
+							$result['ids'][ (string) $key ] = (int) $current->id;
+							continue;
+						}
+						if ( ! empty( $this->wpdb->fail_location_update_ids[ (int) $current->id ] ) ) {
+							$result['errors'][ (string) $key ] = 'Location update failed: forced location update failure for id=' . (int) $current->id;
+							continue;
+						}
+						$result['ids'][ (string) $key ] = (int) $current->id;
+						foreach ( $rows as $index => $row ) {
+							if ( (int) ( $row['id'] ?? 0 ) === (int) $current->id ) {
+								$rows[ $index ] = array_merge( $row, $this->location_to_row( $location, current_time( 'mysql' ) ), array( 'id' => (int) $current->id ) );
+								$changed = true;
+								break;
+							}
+						}
+						continue;
+					}
+					++$max_id;
+					$row = $this->location_to_row( $location, current_time( 'mysql' ) );
+					$row['id'] = $max_id;
+					$rows[] = $row;
+					$result['ids'][ (string) $key ] = $max_id;
+					$changed = true;
+				}
+				if ( $changed ) {
+					++$result['write_queries'];
+				}
+			}
+			$this->wpdb->{$test_property} = $rows;
+			if ( $result['write_queries'] > 0 ) {
+				$this->mark_country_index_stale();
+			}
+			if ( property_exists( $this->wpdb, 'foreign_location_bulk_write_queries' ) ) {
+				$this->wpdb->foreign_location_bulk_write_queries += $result['write_queries'];
+			}
+
+			return $result;
+		}
+
+		$updates = array();
+		$inserts = array();
+		foreach ( $locations as $key => $location ) {
+			$current = $existing[ $key ] ?? null;
+			if ( $current instanceof Location && null !== $current->id ) {
+				$result['ids'][ (string) $key ] = (int) $current->id;
+				if ( ! $this->foreign_locations_equal( $current, $location ) ) {
+					$updates[ (string) $key ] = Location::from_array( array_merge( $location->to_array(), array( 'id' => (int) $current->id ) ) );
+				}
+				continue;
+			}
+			$inserts[ (string) $key ] = $location;
+		}
+
+		foreach ( array_chunk( $updates, 100, true ) as $chunk ) {
+			$now = current_time( 'mysql' );
+			$rows = array();
+			foreach ( $chunk as $location ) {
+				$row = array( 'id' => (int) $location->id ) + $this->location_to_row( $location, $now );
+				$rows[] = $row;
+			}
+			try {
+				$this->bulk_insert_rows(
+					$this->table_name(),
+					$rows,
+					array_map( static fn( string $column ): string => "{$column} = VALUES({$column})", array_diff( array_keys( $rows[0] ), array( 'id', 'created_at' ) ) ),
+					$this->formats_for_row( $rows[0] )
+				);
+				++$result['write_queries'];
+			} catch ( RuntimeException $exception ) {
+				foreach ( $chunk as $key => $location ) {
+					try {
+						$result['ids'][ (string) $key ] = $this->save( $location );
+					} catch ( RuntimeException $row_exception ) {
+						$result['errors'][ (string) $key ] = $row_exception->getMessage();
+					}
+				}
+			}
+		}
+
+		foreach ( array_chunk( $inserts, 100, true ) as $chunk ) {
+			$now = current_time( 'mysql' );
+			$rows = array_map( fn( Location $location ): array => $this->location_to_row( $location, $now ), array_values( $chunk ) );
+			try {
+				$this->bulk_insert_rows( $this->table_name(), $rows, array(), $this->formats_for_row( $rows[0] ) );
+				++$result['write_queries'];
+			} catch ( RuntimeException $exception ) {
+				foreach ( $chunk as $key => $location ) {
+					try {
+						$result['ids'][ (string) $key ] = $this->save( $location );
+					} catch ( RuntimeException $row_exception ) {
+						$result['errors'][ (string) $key ] = $row_exception->getMessage();
+					}
+				}
+				continue;
+			}
+
+			$lookup = array();
+			foreach ( $chunk as $key => $location ) {
+				$lookup[ (string) $key ] = array(
+					'country_code' => $location->country_code,
+					'place_name' => $location->resolved_place_name(),
+					'region_name' => $location->region_name,
+					'district_name' => $location->district_name,
+					'place_type' => $location->resolved_place_type(),
+				);
+			}
+			$resolved = $this->find_foreign_place_identity_resolutions_batch( $lookup );
+			foreach ( $chunk as $key => $location ) {
+				$matches = $resolved[ (string) $key ]['matches'] ?? array();
+				$ids = array_values( array_filter( array_map( static fn( Location $match ): int => (int) ( $match->id ?? 0 ), $matches ) ) );
+				if ( array() === $ids ) {
+					$result['errors'][ (string) $key ] = 'Foreign location batch insert succeeded, but its canonical id could not be resolved.';
+					continue;
+				}
+				$result['ids'][ (string) $key ] = min( $ids );
+			}
+		}
+
+		if ( $result['write_queries'] > 0 ) {
+			$this->mark_country_index_stale();
+		}
+		if ( property_exists( $this->wpdb, 'foreign_location_bulk_write_queries' ) ) {
+			$this->wpdb->foreign_location_bulk_write_queries += $result['write_queries'];
+		}
+
+		return $result;
+	}
+
+	/**
 	 * @param array<int, Location> $locations
 	 */
 	public function bulk_insert( array $locations ): void {
@@ -300,6 +457,9 @@ final class LocationRepository {
 	 * @return array<int,Location>
 	 */
 	public function find_foreign_by_place_identity_matches( string $country_code, string $place_name, string $region_name = '', string $district_name = '', string $place_type = '' ): array {
+		if ( property_exists( $this->wpdb, 'foreign_identity_lookup_queries' ) ) {
+			++$this->wpdb->foreign_identity_lookup_queries;
+		}
 		$country_code = $this->normalize_country_code( $country_code );
 		$place_name = trim( $place_name );
 		$region_name = trim( $region_name );
@@ -369,6 +529,166 @@ final class LocationRepository {
 		}
 
 		return $this->deduplicate_locations_by_id( $matches );
+	}
+
+	/**
+	 * Resolves many foreign identities with bounded country-scoped prefetches.
+	 * The returned exact/legacy decisions use the same PHP normalization contract as
+	 * the legacy per-row methods.
+	 *
+	 * @param array<string,array{country_code:string,place_name:string,region_name?:string,district_name?:string,place_type?:string}> $requests
+	 * @return array<string,array{identity_key:string,legacy_key:string,matches:array<int,Location>,legacy:?Location}>
+	 */
+	public function find_foreign_place_identity_resolutions_batch( array $requests ): array {
+		$normalized = array();
+		$request_keys_by_identity = array();
+		foreach ( $requests as $request_key => $request ) {
+			$country = $this->normalize_country_code( (string) ( $request['country_code'] ?? '' ) );
+			$place = trim( (string) ( $request['place_name'] ?? '' ) );
+			if ( '' === $country || 'RU' === $country || '' === $place ) {
+				continue;
+			}
+			$identity = array(
+				'country_code' => $country,
+				'place_name' => $place,
+				'region_name' => trim( (string) ( $request['region_name'] ?? '' ) ),
+				'district_name' => trim( (string) ( $request['district_name'] ?? '' ) ),
+				'place_type' => trim( (string) ( $request['place_type'] ?? '' ) ),
+			);
+			$identity_key = implode( '|', array(
+				$country,
+				$this->normalize_foreign_identity_value( $identity['place_name'] ),
+				$this->normalize_foreign_identity_value( $identity['region_name'] ),
+				$this->normalize_foreign_identity_value( $identity['district_name'] ),
+				$this->normalize_foreign_identity_type( $identity['place_type'] ),
+			) );
+			$normalized[ $identity_key ] = $identity;
+			$request_keys_by_identity[ $identity_key ][] = (string) $request_key;
+		}
+		if ( array() === $normalized ) {
+			return array();
+		}
+
+		// Error-path test doubles deliberately exercise the legacy SQL validation.
+		if ( property_exists( $this->wpdb, 'identity_mode' ) && 'ok' !== (string) $this->wpdb->identity_mode ) {
+			foreach ( $normalized as $identity ) {
+				$matches = $this->find_foreign_by_place_identity_matches( $identity['country_code'], $identity['place_name'], $identity['region_name'], $identity['district_name'], $identity['place_type'] );
+				if ( array() === $matches && property_exists( $this->wpdb, 'legacy_mode' ) && 'ok' !== (string) $this->wpdb->legacy_mode ) {
+					$this->find_legacy_foreign_by_place_identity( $identity['country_code'], $identity['place_name'], $identity['region_name'] );
+				}
+			}
+		}
+
+		$rows_by_country = array();
+		if ( $this->has_test_location_rows() || property_exists( $this->wpdb, 'foreign_rows' ) ) {
+			if ( property_exists( $this->wpdb, 'foreign_identity_batch_queries' ) ) {
+				$counts = array_count_values( array_column( $normalized, 'country_code' ) );
+				foreach ( $counts as $count ) {
+					$this->wpdb->foreign_identity_batch_queries += (int) ceil( $count / 100 );
+				}
+			}
+			$test_rows = $this->has_test_location_rows() ? $this->test_location_rows() : ( is_array( $this->wpdb->foreign_rows ) ? $this->wpdb->foreign_rows : array() );
+			foreach ( $test_rows as $row ) {
+				if ( ! is_array( $row ) || 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				$country = $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) );
+				$rows_by_country[ $country ][] = $this->join_region_for_test_double( $row );
+			}
+		} else {
+			$by_country = array();
+			foreach ( $normalized as $identity_key => $identity ) {
+				$by_country[ $identity['country_code'] ][ $identity_key ] = $identity;
+			}
+			foreach ( $by_country as $country => $country_requests ) {
+				foreach ( array_chunk( $country_requests, 100, true ) as $chunk ) {
+					$or = array();
+					$args = array( $country );
+					foreach ( $chunk as $identity ) {
+						$and = array();
+						foreach ( $this->foreign_identity_prefilter_tokens( $identity['place_name'] ) as $token ) {
+							$and[] = "REPLACE(LOWER(l.searchable_text), 'ё', 'е') LIKE %s";
+							$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
+						}
+						if ( array() !== $and ) {
+							$or[] = '(' . implode( ' AND ', $and ) . ')';
+						}
+					}
+					if ( array() === $or ) {
+						continue;
+					}
+					$sql = $this->wpdb->prepare(
+						"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+						FROM {$this->table_name()} l
+						LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+						WHERE l.active = 1 AND l.country_code = %s AND (" . implode( ' OR ', $or ) . ')',
+						...$args
+					);
+					if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+						throw new RuntimeException( 'Foreign location identity batch lookup failed: SQL preparation returned an invalid result' );
+					}
+					if ( property_exists( $this->wpdb, 'foreign_identity_batch_queries' ) ) {
+						++$this->wpdb->foreign_identity_batch_queries;
+					}
+					$this->wpdb->last_error = '';
+					$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+					if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+						$this->throw_sql_error( 'Foreign location identity batch lookup failed' );
+					}
+					if ( ! is_array( $rows ) ) {
+						throw new RuntimeException( 'Foreign location identity batch lookup failed: invalid SQL result' );
+					}
+					foreach ( $rows as $row ) {
+						if ( ! is_array( $row ) ) {
+							throw new RuntimeException( 'Foreign location identity batch lookup failed: invalid row structure' );
+						}
+						$id = (int) ( $row['id'] ?? 0 );
+						$rows_by_country[ $country ][ $id > 0 ? $id : count( $rows_by_country[ $country ] ?? array() ) ] = $row;
+					}
+				}
+			}
+		}
+
+		$by_identity = array();
+		foreach ( $normalized as $identity_key => $identity ) {
+			$place_key = $this->normalize_foreign_identity_value( $identity['place_name'] );
+			$region_key = $this->normalize_foreign_identity_value( $identity['region_name'] );
+			$district_key = $this->normalize_foreign_identity_value( $identity['district_name'] );
+			$type_key = $this->normalize_foreign_identity_type( $identity['place_type'] );
+			$matches = array();
+			$legacy_matches = array();
+			foreach ( $rows_by_country[ $identity['country_code'] ] ?? array() as $row ) {
+				if ( $this->foreign_identity_row_matches( $row, $place_key, $region_key, $district_key, $type_key ) ) {
+					$matches[] = $this->row_to_location( $row );
+				}
+				if (
+					0 === (int) ( $row['gar_object_id'] ?? 0 )
+					&& '' === trim( (string) ( $row['fias_id'] ?? '' ) )
+					&& '' === trim( (string) ( $row['district_name'] ?? '' ) )
+					&& $this->normalize_foreign_identity_value( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) ) === $place_key
+					&& $this->normalize_foreign_identity_value( (string) ( $row['region_name'] ?? '' ) ) === $region_key
+				) {
+					$legacy_matches[] = $this->row_to_location( $row );
+				}
+			}
+			$matches = $this->deduplicate_locations_by_id( $matches );
+			$legacy_matches = $this->deduplicate_locations_by_id( $legacy_matches );
+			$by_identity[ $identity_key ] = array(
+				'identity_key' => $identity_key,
+				'legacy_key' => implode( '|', array( $identity['country_code'], $place_key, $region_key ) ),
+				'matches' => $matches,
+				'legacy' => 1 === count( $legacy_matches ) ? $legacy_matches[0] : null,
+			);
+		}
+
+		$result = array();
+		foreach ( $request_keys_by_identity as $identity_key => $request_keys ) {
+			foreach ( $request_keys as $request_key ) {
+				$result[ $request_key ] = $by_identity[ $identity_key ];
+			}
+		}
+
+		return $result;
 	}
 
 	/**
@@ -737,6 +1057,9 @@ final class LocationRepository {
 	}
 
 	public function find_legacy_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '' ): ?Location {
+		if ( property_exists( $this->wpdb, 'foreign_legacy_lookup_queries' ) ) {
+			++$this->wpdb->foreign_legacy_lookup_queries;
+		}
 		$country_code = $this->normalize_country_code( $country_code );
 		$place_name = trim( $place_name );
 		$region_name = trim( $region_name );
@@ -3009,7 +3332,7 @@ final class LocationRepository {
 		$formats = array();
 		foreach ( array_keys( $row ) as $column ) {
 			$formats[] = match ( $column ) {
-				'gar_object_id', 'district_gar_object_id', 'district_level', 'place_level', 'active' => '%d',
+				'id', 'gar_object_id', 'district_gar_object_id', 'district_level', 'place_level', 'active' => '%d',
 				'latitude', 'longitude' => '%f',
 				default => '%s',
 			};
@@ -3065,6 +3388,15 @@ final class LocationRepository {
 		}
 
 		return "REPLACE({$expression}, CHAR(92), '')";
+	}
+
+	private function foreign_locations_equal( Location $existing, Location $desired ): bool {
+		$existing_row = $existing->to_array();
+		$desired_row = $desired->to_array();
+		unset( $existing_row['id'], $desired_row['id'] );
+
+		return $existing_row === $desired_row
+			&& $existing->get_searchable_text() === $desired->get_searchable_text();
 	}
 
 	private function normalize_foreign_identity_value( string $value ): string {

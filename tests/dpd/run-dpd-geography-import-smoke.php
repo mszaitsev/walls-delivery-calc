@@ -13,6 +13,15 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $last_query = '';
 		public int|false $next_option_delete_result = 0;
 		public int $dpd_mapping_lookup_calls = 0;
+		public int $foreign_identity_lookup_queries = 0;
+		public int $foreign_legacy_lookup_queries = 0;
+		public int $foreign_identity_batch_queries = 0;
+		public int $dpd_mapping_batch_lookup_queries = 0;
+		public int $foreign_location_bulk_write_queries = 0;
+		public int $location_find_by_id_calls = 0;
+		public int $location_find_map_by_ids_calls = 0;
+		public int $location_insert_queries = 0;
+		public int $location_update_queries = 0;
 		public bool $fail_dpd_mapping_lookup = false;
 		public bool $fail_dpd_stage_finalize_clear = false;
 		public bool $fail_dpd_stage_finalize_upsert = false;
@@ -31,6 +40,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 		public function insert( string $table, array $data, array $format = array() ): bool {
 			unset( $table, $format );
+			++$this->location_insert_queries;
 			$this->last_error = '';
 			foreach ( $this->locations as $row ) {
 				if (
@@ -66,6 +76,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
 			unset( $table, $format, $where_format );
+			++$this->location_update_queries;
 			$this->last_error = '';
 			$id = (int) ( $where['id'] ?? 0 );
 			if ( ! empty( $this->fail_location_update_ids[ $id ] ) ) {
@@ -199,6 +210,9 @@ final class DpdProductionPathWpdb extends wpdb {
 		}
 		$args = $this->last_prepare_args;
 		$country = strtoupper( (string) array_shift( $args ) );
+		if ( str_contains( $query, 'AND (' ) && str_contains( $query, ' OR ' ) ) {
+			return array_values( array_filter( $this->candidate_rows, static fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 1 ) && $country === strtoupper( (string) ( $row['country_code'] ?? '' ) ) ) );
+		}
 		$tokens = array_map(
 			static fn( mixed $arg ): string => trim( str_replace( array( '%', '\\' ), '', (string) $arg ) ),
 			$args
@@ -409,6 +423,29 @@ final class DpdDeliveryCodeProductionWpdb extends wpdb {
 		}
 
 		return array() !== $ids ? min( $ids ) : null;
+	}
+
+	public function get_results( string $query, string $output = ARRAY_A ): array {
+		unset( $output );
+		$this->last_sql = $query;
+		$this->last_error = '';
+		$wanted = array();
+		if ( preg_match( '/dpd_city_id IN \(([^)]+)\)/', $query, $matches ) ) {
+			foreach ( preg_split( '/\s*,\s*/', $matches[1] ) ?: array() as $value ) {
+				$wanted[ trim( $value, " '\"" ) ] = true;
+			}
+		}
+		$minimum = array();
+		foreach ( $this->mapping_rows as $row ) {
+			$dpd_city_id = (string) ( $row['dpd_city_id'] ?? '' );
+			$location_id = (int) ( $row['location_id'] ?? 0 );
+			if ( ! isset( $wanted[ $dpd_city_id ] ) || $location_id <= 0 ) {
+				continue;
+			}
+			$minimum[ $dpd_city_id ] = isset( $minimum[ $dpd_city_id ] ) ? min( $minimum[ $dpd_city_id ], $location_id ) : $location_id;
+		}
+
+		return array_map( static fn( string $dpd_city_id, int $location_id ): array => array( 'dpd_city_id' => $dpd_city_id, 'location_id' => $location_id ), array_keys( $minimum ), array_values( $minimum ) );
 	}
 }
 
@@ -823,7 +860,7 @@ function dpd_import_assert_public_state_redacted( array $state, string $message 
 /**
  * @return array{0:array<string,mixed>,1:DpdGeographyImportStateService}
  */
-function dpd_run_lookup_import( DpdForeignIdentityLookupWpdb $db, string $csv, DpdSettings $settings, string $source_file ): array {
+function dpd_run_lookup_import( wpdb $db, string $csv, DpdSettings $settings, string $source_file ): array {
 	$locations = new LocationRepository( $db );
 	$state = new DpdGeographyImportStateService();
 	$importer = new DpdGeographyImportService(
@@ -833,15 +870,122 @@ function dpd_run_lookup_import( DpdForeignIdentityLookupWpdb $db, string $csv, D
 		new DpdGeographyStageRepository( $db ),
 		$locations,
 		new LocationDeliveryCodeRepository( $db ),
-		$settings
+		$settings,
+		new DpdGeographyImportLockService( new wpdb() )
 	);
 	$path = tempnam( sys_get_temp_dir(), 'wdc-dpd-lookup-' );
 	file_put_contents( $path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
-	$report = $importer->import_file( $path, 'cli', $source_file );
+	$job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $path, 'name' => $source_file ) );
+	$iterations = 0;
+	while ( in_array( (string) ( $job['phase'] ?? '' ), array( 'ready', 'importing' ), true ) && ++$iterations <= 10 ) {
+		$job = $importer->step( (string) ( $job['job_id'] ?? '' ), 10000 );
+	}
+	dpd_import_assert( $iterations <= 10, 'lookup fixture reaches terminal state without a stalled byte offset: ' . wp_json_encode( array( 'public' => $job, 'internal' => $state->current() ) ) );
+	$report = $settings->last_geography_import_report();
 	@unlink( $path );
 
 	return array( $report, $state );
 }
+
+// Baseline profiler for the pre-batching foreign hot path. This intentionally
+// mirrors the four repository operations performed for every existing row.
+$foreign_baseline_db = new wpdb();
+$foreign_baseline_repository = new LocationRepository( $foreign_baseline_db );
+$foreign_baseline_codes = new LocationDeliveryCodeRepository( $foreign_baseline_db );
+for ( $foreign_index = 1; $foreign_index <= 500; ++$foreign_index ) {
+	$foreign_baseline_db->locations[] = array(
+		'id' => 300000 + $foreign_index,
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'region_type' => 'обл.',
+		'region_code' => '',
+		'district_name' => 'Район ' . $foreign_index,
+		'district_type' => 'р-н',
+		'city_name' => '',
+		'city_type' => '',
+		'settlement_name' => 'Посёлок ' . $foreign_index,
+		'settlement_type' => 'п',
+		'place_name' => 'Посёлок ' . $foreign_index,
+		'place_type' => 'п',
+		'place_level' => 0,
+		'display_name' => 'Минская обл., Район ' . $foreign_index . ' р-н, п Посёлок ' . $foreign_index,
+		'sentiment' => '',
+		'searchable_text' => 'минская район ' . $foreign_index . ' поселок ' . $foreign_index,
+		'gar_object_id' => null,
+		'fias_id' => null,
+		'gar_id' => '',
+		'kladr_id' => '',
+		'active' => 1,
+	);
+}
+$foreign_baseline_started = hrtime( true );
+foreach ( $foreign_baseline_db->locations as $foreign_row ) {
+	$foreign_place = (string) $foreign_row['place_name'];
+	$foreign_region = (string) $foreign_row['region_name'];
+	$foreign_district = (string) $foreign_row['district_name'];
+	$foreign_type = (string) $foreign_row['place_type'];
+	$foreign_baseline_codes->find_location_id_by_dpd_city_id( 900000 + (int) $foreign_row['id'] );
+	$foreign_matches = $foreign_baseline_repository->find_foreign_by_place_identity_matches( 'BY', $foreign_place, $foreign_region, $foreign_district, $foreign_type );
+	dpd_import_assert( 1 === count( $foreign_matches ), 'baseline foreign identity lookup resolves exactly one row.' );
+	$foreign_baseline_repository->save( Location::from_array( array_merge( $foreign_row, array( 'id' => $foreign_matches[0]->id ) ) ) );
+}
+$foreign_baseline_ms = ( hrtime( true ) - $foreign_baseline_started ) / 1_000_000;
+dpd_import_assert( 500 === $foreign_baseline_db->dpd_mapping_lookup_calls, 'pre-batching baseline performs one DPD mapping query per foreign row.' );
+dpd_import_assert( 500 === $foreign_baseline_db->foreign_identity_lookup_queries, 'pre-batching baseline performs one identity lookup per foreign row.' );
+dpd_import_assert( 500 === $foreign_baseline_db->location_find_by_id_calls, 'pre-batching baseline re-reads every existing location before save.' );
+dpd_import_assert( 500 === $foreign_baseline_db->location_update_queries, 'pre-batching baseline writes every existing location row.' );
+fwrite( STDOUT, sprintf( "DPD foreign baseline: rows=500 mapping=%d identity=%d find_by_id=%d updates=%d elapsed_ms=%.1f\n", $foreign_baseline_db->dpd_mapping_lookup_calls, $foreign_baseline_db->foreign_identity_lookup_queries, $foreign_baseline_db->location_find_by_id_calls, $foreign_baseline_db->location_update_queries, $foreign_baseline_ms ) );
+
+$foreign_optimized_db = new wpdb();
+$foreign_optimized_csv_rows = array( 'ID НП;Код страны;Регион;Район;Основной город;Населённый пункт;Тип НП;Индекс НП;ФИАС;Код КЛАДР' );
+for ( $foreign_index = 1; $foreign_index <= 500; ++$foreign_index ) {
+	$foreign_optimized_db->locations[] = array(
+		'id' => 400000 + $foreign_index,
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'region_type' => 'обл.',
+		'region_code' => '',
+		'district_name' => 'Район ' . $foreign_index,
+		'district_type' => 'р-н',
+		'city_name' => '',
+		'city_type' => '',
+		'settlement_name' => 'Посёлок ' . $foreign_index,
+		'settlement_type' => 'п',
+		'place_name' => 'Посёлок ' . $foreign_index,
+		'place_type' => 'п',
+		'place_level' => 0,
+		'display_name' => 'Минская обл., Район ' . $foreign_index . ' р-н, п Посёлок ' . $foreign_index,
+		'searchable_text' => 'минская обл район ' . $foreign_index . ' р-н поселок ' . $foreign_index,
+		'gar_object_id' => null,
+		'fias_id' => null,
+		'gar_id' => '',
+		'kladr_id' => '',
+		'postal_code' => '',
+		'russianpost_courier_calc_postal_code' => '',
+		'active' => 1,
+	);
+	$foreign_optimized_csv_rows[] = ( 500000 + $foreign_index ) . ';BY;Минская;Район ' . $foreign_index . ';Минск;Посёлок ' . $foreign_index . ';п;;;';
+}
+$foreign_optimized_memory_before = memory_get_usage( true );
+list( $foreign_optimized_report ) = dpd_run_lookup_import( $foreign_optimized_db, implode( "\n", $foreign_optimized_csv_rows ), new DpdSettings( new SettingsRepository(), new EncryptionService() ), 'ForeignOptimized500.csv' );
+$foreign_optimized_memory_delta = max( 0, memory_get_usage( true ) - $foreign_optimized_memory_before );
+dpd_import_assert( 500 === (int) ( $foreign_optimized_report['foreign_locations_updated'] ?? -1 ) && 0 === (int) ( $foreign_optimized_report['foreign_locations_inserted'] ?? -1 ), 'optimized existing-row fixture preserves semantic updated counters.' );
+dpd_import_assert( 2 === $foreign_optimized_db->dpd_mapping_batch_lookup_queries && 0 === $foreign_optimized_db->dpd_mapping_lookup_calls, '500 foreign rows use two bounded DPD mapping queries instead of 500 row lookups.' );
+dpd_import_assert( 5 === $foreign_optimized_db->foreign_identity_batch_queries && 0 === $foreign_optimized_db->foreign_identity_lookup_queries, '500 foreign rows use five bounded country-scoped identity prefetches instead of 500 row lookups.' );
+dpd_import_assert( 0 === $foreign_optimized_db->location_find_by_id_calls && $foreign_optimized_db->foreign_location_bulk_write_queries <= 1, 'optimized existing-row path removes per-row find_by_id and bounded-writes only changed data.' );
+
+$foreign_unique_db = new wpdb();
+$foreign_unique_csv_rows = array( $foreign_optimized_csv_rows[0] );
+for ( $foreign_index = 1; $foreign_index <= 500; ++$foreign_index ) {
+	$country = $foreign_index <= 400 ? 'BY' : ( $foreign_index <= 450 ? 'KZ' : ( $foreign_index <= 475 ? 'AM' : 'KG' ) );
+	$foreign_unique_csv_rows[] = ( 600000 + $foreign_index ) . ';' . $country . ';Region ' . $country . ';District ' . $foreign_index . ';Main;Unique ' . $foreign_index . ';п;;;';
+}
+$foreign_unique_memory_before = memory_get_usage( true );
+list( $foreign_unique_report ) = dpd_run_lookup_import( $foreign_unique_db, implode( "\n", $foreign_unique_csv_rows ), new DpdSettings( new SettingsRepository(), new EncryptionService() ), 'ForeignUnique500.csv' );
+$foreign_unique_memory_delta = max( 0, memory_get_usage( true ) - $foreign_unique_memory_before );
+dpd_import_assert( 500 === (int) ( $foreign_unique_report['foreign_locations_inserted'] ?? -1 ) && 500 === count( $foreign_unique_db->locations ), '500 almost-unique foreign rows preserve insertion results.' );
+dpd_import_assert( 2 === $foreign_unique_db->dpd_mapping_batch_lookup_queries && 7 === $foreign_unique_db->foreign_identity_batch_queries && $foreign_unique_db->foreign_location_bulk_write_queries <= 5, 'unique foreign fixture stays O(countries/chunks) and uses at most five bounded location writes.' );
+fwrite( STDOUT, sprintf( "DPD foreign optimized: existing_rows=500 mapping=%d identity=%d find_by_id=%d writes=%d memory_delta=%d; unique_rows=500 mapping=%d identity=%d writes=%d memory_delta=%d\n", $foreign_optimized_db->dpd_mapping_batch_lookup_queries, $foreign_optimized_db->foreign_identity_batch_queries, $foreign_optimized_db->location_find_by_id_calls, $foreign_optimized_db->foreign_location_bulk_write_queries, $foreign_optimized_memory_delta, $foreign_unique_db->dpd_mapping_batch_lookup_queries, $foreign_unique_db->foreign_identity_batch_queries, $foreign_unique_db->foreign_location_bulk_write_queries, $foreign_unique_memory_delta ) );
 
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wdc_dpd_import_options'] = array();
@@ -1356,7 +1500,7 @@ dpd_import_assert( 4 === (int) $report['matched_by_fias'], 'FIAS exact matches a
 dpd_import_assert( 4 === (int) ( $report['matched_by_own_fias'] ?? 0 ) && 0 === (int) ( $report['matched_by_city_fias'] ?? -1 ), 'own FIAS matches are counted separately and city FIAS fallback is not used for shadowed own FIAS rows.' );
 dpd_import_assert( 0 === (int) ( $report['true_fias_ambiguity'] ?? -1 ), 'shadowed city_fias rows do not create true own-FIAS ambiguity.' );
 dpd_import_assert( 1 === (int) $report['matched_by_kladr'], 'KLADR normalized match is saved' );
-dpd_import_assert( 9 === (int) $report['saved_candidates'], 'non-conflicting RU and foreign rows are staged as candidates before finalization' );
+dpd_import_assert( 9 === (int) $report['saved_candidates'], 'non-conflicting RU and foreign rows are staged as candidates before finalization; actual=' . (string) ( $report['saved_candidates'] ?? '' ) . ' unchanged=' . (string) ( $report['unchanged_mappings'] ?? '' ) . ' conflicts=' . (string) ( $report['conflicts'] ?? '' ) );
 dpd_import_assert( 8 === (int) $report['finalized_mappings'] && 8 === (int) ( $report['finalized_changes'] ?? 0 ), 'RU candidates and foreign imports are finalized into working delivery codes table with candidate and change counters' );
 dpd_import_assert( 4 === (int) $report['unchanged_mappings'], 'duplicate same DPD city ID is idempotent for RU and foreign rows' );
 dpd_import_assert( 1 === (int) $report['conflicts'], 'different DPD city IDs for one location are treated as conflict' );
@@ -1368,7 +1512,7 @@ dpd_import_assert( null === $repository->get_dpd_city_id( 4 ) && null === $repos
 $foreign_locations = array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => in_array( (string) ( $row['country_code'] ?? '' ), array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) );
 dpd_import_assert( 6 === count( $foreign_locations ), 'AM/BY/KZ/KG foreign locations are created in canonical locations table and same names in different districts stay separate.' );
 foreach ( $foreign_locations as $foreign_row ) {
-	dpd_import_assert( null === ( $foreign_row['gar_object_id'] ?? null ) && null === ( $foreign_row['fias_id'] ?? null ), 'foreign locations persist missing GAR/FIAS as SQL NULL-compatible values.' );
+	dpd_import_assert( null === ( $foreign_row['gar_object_id'] ?? null ) && null === ( $foreign_row['fias_id'] ?? null ), 'foreign locations persist missing GAR/FIAS as SQL NULL-compatible values; id=' . (string) ( $foreign_row['id'] ?? '' ) . ' gar=' . var_export( $foreign_row['gar_object_id'] ?? null, true ) . ' fias=' . var_export( $foreign_row['fias_id'] ?? null, true ) );
 	dpd_import_assert( '' === (string) ( $foreign_row['gar_id'] ?? '' ) && '' === (string) ( $foreign_row['kladr_id'] ?? '' ), 'foreign locations do not persist fake GAR/KLADR values.' );
 	dpd_import_assert( '' === (string) ( $foreign_row['postal_code'] ?? '' ), 'foreign locations do not persist DPD postal_code as canonical postcode.' );
 }
@@ -1436,6 +1580,12 @@ $GLOBALS['wpdb']->delivery_codes = array(
 	array( 'location_id' => 161634, 'dpd_city_id' => '196058326', 'updated_at' => '2026-06-16 00:00:00' ),
 	array( 'location_id' => 777, 'dpd_city_id' => '77777777', 'updated_at' => '2026-06-16 00:00:00' ),
 );
+foreach ( $GLOBALS['wpdb']->locations as $warning_location_index => $warning_location_row ) {
+	if ( 161634 === (int) ( $warning_location_row['id'] ?? 0 ) ) {
+		$GLOBALS['wpdb']->locations[ $warning_location_index ]['display_name'] = 'Outdated foreign display name';
+		break;
+	}
+}
 $GLOBALS['wpdb']->fail_location_update_ids[161634] = true;
 $warning_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $warning_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
 while ( in_array( (string) ( $warning_job['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
@@ -1701,16 +1851,16 @@ $lookup_failure_csv = $foreign_header . "\n" . '30000001;BY;Минская;Ми�
 $mapped_once_db = new DpdForeignIdentityLookupWpdb();
 $mapped_once_db->foreign_rows = array( $canonical_alexandrovo_row );
 $mapped_once_db->delivery_codes = array( array( 'location_id' => 228315, 'dpd_city_id' => '30000001', 'updated_at' => 'old' ) );
-$mapped_once_db->dpd_mapping_lookup_calls = 0;
+$mapped_once_db->dpd_mapping_batch_lookup_queries = 0;
 list( $mapped_once_report ) = dpd_run_lookup_import( $mapped_once_db, $lookup_failure_csv, $lookup_settings, 'LookupMappedOnce.csv' );
-dpd_import_assert( 1 === $mapped_once_db->dpd_mapping_lookup_calls && 0 === (int) ( $mapped_once_report['errors_total'] ?? -1 ), 'foreign row with existing mapping performs one DPD mapping lookup and imports without row errors.' );
+dpd_import_assert( 1 === $mapped_once_db->dpd_mapping_batch_lookup_queries && 0 === $mapped_once_db->dpd_mapping_lookup_calls && 0 === (int) ( $mapped_once_report['errors_total'] ?? -1 ), 'foreign row with existing mapping uses the batch DPD mapping lookup and imports without row errors.' );
 
 $missing_mapping_once_db = new DpdForeignIdentityLookupWpdb();
 $missing_mapping_once_db->identity_mode = 'empty';
 $missing_mapping_once_db->legacy_mode = 'empty';
-$missing_mapping_once_db->dpd_mapping_lookup_calls = 0;
+$missing_mapping_once_db->dpd_mapping_batch_lookup_queries = 0;
 list( $missing_mapping_once_report ) = dpd_run_lookup_import( $missing_mapping_once_db, $lookup_failure_csv, $lookup_settings, 'LookupMissingOnce.csv' );
-dpd_import_assert( 1 === $missing_mapping_once_db->dpd_mapping_lookup_calls && 1 === (int) ( $missing_mapping_once_report['foreign_locations_inserted'] ?? 0 ), 'foreign row without existing mapping performs one DPD mapping lookup and creates the new canonical location.' );
+dpd_import_assert( 1 === $missing_mapping_once_db->dpd_mapping_batch_lookup_queries && 0 === $missing_mapping_once_db->dpd_mapping_lookup_calls && 1 === (int) ( $missing_mapping_once_report['foreign_locations_inserted'] ?? 0 ), 'foreign row without existing mapping uses one batch DPD mapping lookup and creates the new canonical location.' );
 
 $duplicate_rows_for_priority = array();
 foreach ( array( 228315, 228316, 231660 ) as $duplicate_id ) {
@@ -1721,33 +1871,33 @@ foreach ( array( 228315, 228316, 231660 ) as $duplicate_id ) {
 $mapped_priority_db = new DpdForeignIdentityLookupWpdb();
 $mapped_priority_db->foreign_rows = $duplicate_rows_for_priority;
 $mapped_priority_db->delivery_codes = array( array( 'location_id' => 231660, 'dpd_city_id' => '30000001', 'updated_at' => 'old' ) );
-$mapped_priority_db->dpd_mapping_lookup_calls = 0;
+$mapped_priority_db->dpd_mapping_batch_lookup_queries = 0;
 list( $mapped_priority_report ) = dpd_run_lookup_import( $mapped_priority_db, $lookup_failure_csv, $lookup_settings, 'LookupMappedPriority.csv' );
 $mapped_priority_rows = array_column( $mapped_priority_db->foreign_rows, null, 'id' );
-dpd_import_assert( 1 === $mapped_priority_db->dpd_mapping_lookup_calls && 1 === (int) ( $mapped_priority_report['foreign_duplicate_identity_rows'] ?? 0 ) && ! str_starts_with( (string) ( $mapped_priority_rows[231660]['display_name'] ?? '' ), 'BY,' ), 'mapped duplicate priority selects the mapped exact identity row with one DPD mapping lookup.' );
+dpd_import_assert( 1 === $mapped_priority_db->dpd_mapping_batch_lookup_queries && 1 === (int) ( $mapped_priority_report['foreign_duplicate_identity_rows'] ?? 0 ) && ! str_starts_with( (string) ( $mapped_priority_rows[231660]['display_name'] ?? '' ), 'BY,' ), 'mapped duplicate priority selects the mapped exact identity row with one batch DPD mapping lookup.' );
 
 $lowest_once_db = new DpdForeignIdentityLookupWpdb();
 $lowest_once_db->foreign_rows = $duplicate_rows_for_priority;
-$lowest_once_db->dpd_mapping_lookup_calls = 0;
+$lowest_once_db->dpd_mapping_batch_lookup_queries = 0;
 list( $lowest_once_report ) = dpd_run_lookup_import( $lowest_once_db, $lookup_failure_csv, $lookup_settings, 'LookupLowestOnce.csv' );
 $lowest_once_rows = array_column( $lowest_once_db->foreign_rows, null, 'id' );
-dpd_import_assert( 1 === $lowest_once_db->dpd_mapping_lookup_calls && 1 === (int) ( $lowest_once_report['foreign_duplicate_identity_rows'] ?? 0 ) && '30000001' === (string) ( $lowest_once_db->delivery_codes[0]['dpd_city_id'] ?? '' ) && ! str_starts_with( (string) ( $lowest_once_rows[228315]['display_name'] ?? '' ), 'BY,' ), 'duplicate identity without a mapped id falls back to the lowest positive location id with one lookup.' );
+dpd_import_assert( 1 === $lowest_once_db->dpd_mapping_batch_lookup_queries && 1 === (int) ( $lowest_once_report['foreign_duplicate_identity_rows'] ?? 0 ) && '30000001' === (string) ( $lowest_once_db->delivery_codes[0]['dpd_city_id'] ?? '' ) && ! str_starts_with( (string) ( $lowest_once_rows[228315]['display_name'] ?? '' ), 'BY,' ), 'duplicate identity without a mapped id falls back to the lowest positive location id with one batch lookup.' );
 
 $outside_identity_db = new DpdForeignIdentityLookupWpdb();
 $outside_identity_db->foreign_rows = array_slice( $duplicate_rows_for_priority, 0, 2 );
 $outside_identity_db->foreign_rows[] = array_merge( $canonical_alexandrovo_row, array( 'id' => 999999, 'district_name' => 'Другой', 'searchable_text' => 'минская другой д александрово' ) );
 $outside_identity_db->delivery_codes = array( array( 'location_id' => 999999, 'dpd_city_id' => '30000001', 'updated_at' => 'old' ) );
-$outside_identity_db->dpd_mapping_lookup_calls = 0;
+$outside_identity_db->dpd_mapping_batch_lookup_queries = 0;
 list( $outside_identity_report ) = dpd_run_lookup_import( $outside_identity_db, $lookup_failure_csv, $lookup_settings, 'LookupOutsideIdentity.csv' );
 $outside_identity_rows = array_column( $outside_identity_db->foreign_rows, null, 'id' );
-dpd_import_assert( 1 === $outside_identity_db->dpd_mapping_lookup_calls && 1 === (int) ( $outside_identity_report['foreign_duplicate_identity_rows'] ?? 0 ) && 'Другой' === (string) ( $outside_identity_rows[999999]['district_name'] ?? '' ) && ! str_starts_with( (string) ( $outside_identity_rows[228315]['display_name'] ?? '' ), 'BY,' ), 'mapped location outside exact identity matches is ignored by resolver, which falls back to the lowest exact id.' );
+dpd_import_assert( 1 === $outside_identity_db->dpd_mapping_batch_lookup_queries && 1 === (int) ( $outside_identity_report['foreign_duplicate_identity_rows'] ?? 0 ) && 'Другой' === (string) ( $outside_identity_rows[999999]['district_name'] ?? '' ) && ! str_starts_with( (string) ( $outside_identity_rows[228315]['display_name'] ?? '' ), 'BY,' ), 'mapped location outside exact identity matches is ignored by resolver, which falls back to the lowest exact id.' );
 
 $mapping_failure_db = new DpdForeignIdentityLookupWpdb();
 $mapping_failure_db->foreign_rows = array( $canonical_alexandrovo_row );
 $mapping_failure_db->fail_dpd_mapping_lookup = true;
-$mapping_failure_db->dpd_mapping_lookup_calls = 0;
+$mapping_failure_db->dpd_mapping_batch_lookup_queries = 0;
 list( $mapping_failure_report ) = dpd_run_lookup_import( $mapping_failure_db, $lookup_failure_csv, $lookup_settings, 'LookupMappingFailure.csv' );
-dpd_import_assert( 1 === $mapping_failure_db->dpd_mapping_lookup_calls && 1 === count( $mapping_failure_db->foreign_rows ) && 1 === (int) ( $mapping_failure_report['foreign_save_failed'] ?? 0 ) && 1 === (int) ( $mapping_failure_report['errors_total'] ?? 0 ) && true === (bool) ( $mapping_failure_report['stale_cleanup_skipped'] ?? false ), 'mapping lookup failure is a single row-level warning without a second lookup or new location.' );
+dpd_import_assert( 1 === $mapping_failure_db->dpd_mapping_batch_lookup_queries && 1 === count( $mapping_failure_db->foreign_rows ) && 1 === (int) ( $mapping_failure_report['foreign_save_failed'] ?? 0 ) && 1 === (int) ( $mapping_failure_report['errors_total'] ?? 0 ) && true === (bool) ( $mapping_failure_report['stale_cleanup_skipped'] ?? false ), 'mapping batch lookup failure is a single row-level warning without a fallback lookup or new location.' );
 
 $canonical_error_db = new DpdForeignIdentityLookupWpdb();
 $canonical_error_db->foreign_rows = array( $canonical_alexandrovo_row );
@@ -1800,6 +1950,27 @@ try {
 	$mapping_failed = str_contains( $exception->getMessage(), 'DPD delivery code lookup failed' );
 }
 dpd_import_assert( $mapping_failed, 'production DPD mapping lookup SQL error fails closed instead of returning not_found.' );
+$production_mapping_db->fail_mapping_lookup = false;
+$production_mapping_batch = ( new LocationDeliveryCodeRepository( $production_mapping_db ) )->find_location_ids_by_dpd_city_ids( array( '30000021', '99999999' ) );
+dpd_import_assert( array( '30000021' => 228315 ) === $production_mapping_batch && str_contains( $production_mapping_db->last_sql, 'GROUP BY dpd_city_id' ), 'production batch DPD mapping lookup preserves lowest-location semantics with one grouped query.' );
+
+$production_foreign_batch_db = new DpdProductionPathWpdb();
+$production_foreign_batch_db->candidate_rows = $duplicate_rows_for_priority;
+$production_foreign_batch_repository = new LocationRepository( $production_foreign_batch_db );
+$production_foreign_resolutions = $production_foreign_batch_repository->find_foreign_place_identity_resolutions_batch(
+	array(
+		'fixture' => array( 'country_code' => 'BY', 'place_name' => 'Александрово', 'region_name' => 'Минская', 'district_name' => 'Минский', 'place_type' => 'д' ),
+		'other' => array( 'country_code' => 'BY', 'place_name' => 'Не существует', 'region_name' => 'Минская', 'district_name' => '', 'place_type' => 'п' ),
+	)
+);
+dpd_import_assert( 3 === count( $production_foreign_resolutions['fixture']['matches'] ?? array() ) && array() === ( $production_foreign_resolutions['other']['matches'] ?? array() ), 'production batch identity prefetch applies exact normalization after its bounded broad query.' );
+dpd_import_assert( str_contains( $production_foreign_batch_db->last_sql, 'l.active = 1 AND l.country_code = %s' ) && str_contains( $production_foreign_batch_db->last_sql, ' OR ' ), 'production foreign prefetch remains country/active constrained and combines bounded identities.' );
+
+$production_foreign_existing = Location::from_array( $canonical_alexandrovo_row );
+$production_foreign_changed = Location::from_array( array_merge( $canonical_alexandrovo_row, array( 'display_name' => 'Updated Александрово' ) ) );
+$production_foreign_saved = $production_foreign_batch_repository->save_foreign_locations_batch( array( 'id:228315' => $production_foreign_changed ), array( 'id:228315' => $production_foreign_existing ) );
+dpd_import_assert( 228315 === (int) ( $production_foreign_saved['ids']['id:228315'] ?? 0 ) && 1 === (int) $production_foreign_saved['write_queries'], 'production foreign batch save returns the canonical existing id and one bounded write.' );
+dpd_import_assert( str_contains( $production_foreign_batch_db->last_insert_query, 'ON DUPLICATE KEY UPDATE' ) && str_contains( $production_foreign_batch_db->last_insert_query, 'INSERT INTO wp_wdc_locations' ), 'production foreign updates use a prepared multi-row INSERT/ON DUPLICATE KEY statement.' );
 
 $GLOBALS['wpdb']->locations = array();
 $GLOBALS['wpdb']->delivery_codes = array();

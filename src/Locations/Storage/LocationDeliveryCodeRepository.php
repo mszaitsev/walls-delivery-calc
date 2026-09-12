@@ -98,6 +98,76 @@ final class LocationDeliveryCodeRepository {
 		return is_numeric( $value ) && (int) $value > 0 ? (int) $value : null;
 	}
 
+	/**
+	 * @param array<int,string|int> $dpd_city_ids
+	 * @return array<string,int>
+	 */
+	public function find_location_ids_by_dpd_city_ids( array $dpd_city_ids ): array {
+		$ids = array_values(
+			array_unique(
+				array_filter(
+					array_map( static fn( string|int $id ): string => preg_replace( '/\D+/', '', (string) $id ) ?? '', $dpd_city_ids ),
+					static fn( string $id ): bool => '' !== $id && '0' !== $id
+				)
+			)
+		);
+		if ( array() === $ids ) {
+			return array();
+		}
+		if ( property_exists( $this->wpdb, 'dpd_mapping_batch_lookup_queries' ) ) {
+			$this->wpdb->dpd_mapping_batch_lookup_queries += (int) ceil( count( $ids ) / 250 );
+		}
+		if ( property_exists( $this->wpdb, 'fail_dpd_mapping_lookup' ) && true === (bool) $this->wpdb->fail_dpd_mapping_lookup ) {
+			throw new \RuntimeException( 'DPD delivery code batch lookup failed: forced mapping lookup failure' );
+		}
+
+		$result = array();
+		if ( $this->has_test_rows() ) {
+			$wanted = array_fill_keys( $ids, true );
+			foreach ( $this->wpdb->delivery_codes as $row ) {
+				$dpd_city_id = (string) ( $row['dpd_city_id'] ?? '' );
+				$location_id = (int) ( $row['location_id'] ?? 0 );
+				if ( ! isset( $wanted[ $dpd_city_id ] ) || $location_id <= 0 ) {
+					continue;
+				}
+				if ( ! isset( $result[ $dpd_city_id ] ) || $location_id < $result[ $dpd_city_id ] ) {
+					$result[ $dpd_city_id ] = $location_id;
+				}
+			}
+
+			return $result;
+		}
+
+		foreach ( array_chunk( $ids, 250 ) as $chunk ) {
+			$placeholders = implode( ', ', array_fill( 0, count( $chunk ), '%d' ) );
+			$sql = $this->wpdb->prepare(
+				'SELECT dpd_city_id, MIN(location_id) AS location_id FROM ' . $this->table_name() . " WHERE dpd_city_id IN ({$placeholders}) GROUP BY dpd_city_id",
+				...array_map( 'intval', $chunk )
+			);
+			if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+				throw new \RuntimeException( 'DPD delivery code batch lookup failed: SQL preparation returned an invalid result' );
+			}
+			$this->wpdb->last_error = '';
+			$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+			if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+				$error = preg_replace( '/[\r\n\t]+/', ' ', trim( (string) $this->wpdb->last_error ) ) ?? '';
+				throw new \RuntimeException( 'DPD delivery code batch lookup failed: ' . $error );
+			}
+			if ( ! is_array( $rows ) ) {
+				throw new \RuntimeException( 'DPD delivery code batch lookup failed: invalid SQL result' );
+			}
+			foreach ( $rows as $row ) {
+				$dpd_city_id = preg_replace( '/\D+/', '', (string) ( $row['dpd_city_id'] ?? '' ) ) ?? '';
+				$location_id = (int) ( $row['location_id'] ?? 0 );
+				if ( '' !== $dpd_city_id && $location_id > 0 ) {
+					$result[ $dpd_city_id ] = $location_id;
+				}
+			}
+		}
+
+		return $result;
+	}
+
 	public function save_dpd_city_id( int $location_id, string|int $dpd_city_id ): bool {
 		$location_id = max( 0, $location_id );
 		$dpd_city_id = preg_replace( '/\D+/', '', (string) $dpd_city_id ) ?? '';
