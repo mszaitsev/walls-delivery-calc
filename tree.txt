@@ -329,6 +329,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2BuilderRunnerService.php
 |-- src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2BuilderService.php
 |-- src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2Repository.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2ExecutionLock.php
 |-- src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2Runner.php
 |-- src/Carriers/YandexDelivery/LocationMappingV2/YandexGeoV2RegionEnrichmentRunner.php
 |-- src/Carriers/YandexDelivery/LocationMappingV2/YandexGeoV2RegionEnrichmentService.php
@@ -842,6 +843,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- tests/pickup/run-russian-post-cross-job-callback-race-smoke.php
 |-- tests/pickup/run-russian-post-import-optimization-smoke.php
 |-- tests/pickup/run-russian-post-pickup-import-smoke.php
+|-- tests/pickup/run-russian-post-pickup-import-runner-smoke.js
 |-- tests/pickup/run-russian-post-weekly-schedule-smoke.php
 |-- tests/pickup/run-russian-post-wp-file-api-smoke.php
 |-- tests/rules/run-rules-admin-smoke.php
@@ -887,6 +889,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- tests/yandex-delivery/run-yandex-delivery-geo-v2-region-enrichment-smoke.php
 |-- tests/yandex-delivery/run-yandex-delivery-location-mapping-v2-smoke.php
 |-- tests/yandex-delivery/run-yandex-delivery-pickup-selection-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-pickup-v2-browser-smoke.js
 |-- tests/yandex-delivery/run-yandex-delivery-pickup-v2-foundation-smoke.php
 |-- tests/yandex-delivery/run-yandex-delivery-pickup-v2-runner-smoke.php
 |-- tests/yandex-delivery/run-yandex-delivery-pricing-calculator-smoke.php

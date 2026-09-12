@@ -1,12 +1,12 @@
 # Troubleshooting
 
-Version: 1.0.14
+Version: 1.0.15
 
 Start with the safe status/diagnostic panel owned by the affected subsystem. Never enable raw payload logging or expose carrier credentials, tokens, cookies, full addresses, phone numbers, email, or payment data to diagnose a failure.
 
 ## Installation and migrations
 
-On activation, verify the plugin reports version 1.0.14 and that the unchanged schema baseline `wdc_db_version` remains `1.0.0`. A fresh install runs only `database/migrations/0001_initial_schema.php`. If activation reports a migration failure, inspect the WordPress database error and table privileges; do not edit migration options manually or replay deleted 0.x migration files.
+On activation, verify the plugin reports version 1.0.15 and that the unchanged schema baseline `wdc_db_version` remains `1.0.0`. A fresh install runs only `database/migrations/0001_initial_schema.php`. If activation reports a migration failure, inspect the WordPress database error and table privileges; do not edit migration options manually or replay deleted 0.x migration files.
 
 The initial migration is idempotent for an already-correct development database and never drops/truncates business tables. Retired pre-1.0 tables that already exist are inert and may be removed separately only after an operator backup and explicit decision.
 
@@ -31,6 +31,12 @@ Ozon pickup import uses an active published generation plus a separate building 
 Russian Post API pickup import requires the PHP Zip extension (`ZipArchive`). The background worker loads the WordPress File API itself; if `ZipArchive` is unavailable, the import must finish with `PHP ZipArchive extension is not available.` and release its lock rather than attempting a shell unzip fallback.
 
 For a Russian Post pickup import, a queued/running state must have the same `import_id` as its unexpired option lease. The lease stays active across init, parse batches, and finalize and is removed only on terminal success/failure/cancellation. Guard diagnostics are retained in the import state when a callback receives the wrong job ID, loses its lease, or cannot access the payload; do not manually invoke importer hooks to recover a job.
+
+Russian Post and DPD geography progress panels poll status only. Their requests are single-flight and lower positive `state_revision` responses are ignored after a newer revision has rendered, so a slow response must not make counters move backward. Russian Post revision remains monotonic when a new `import_id` starts; zero means a legacy state not yet rewritten. A temporary status transport error leaves worker state untouched and polling retries on the next cadence.
+
+For the Yandex full geography pipeline, a running outer state should have exactly one `wdc_yandex_delivery_geo_pipeline_v2_run_step` event whose sole argument is the current `session_id`. A transient no-argument event left by an upgrade is safe: it performs no work and repairs the owner-scoped continuation if needed. The short-lived outer execution lease is released between slices; while a callback is active it must contain the same session plus its private token. Do not delete the lease to accelerate an active worker.
+
+While the Yandex full pipeline is `running` or `paused`, do not drive pickup import, geo builder, region enrichment, region mapping/manual overrides, or location mapping through standalone controls or direct AJAX. The server returns HTTP 409 for these mutations and the browser disables their loops because the outer pipeline is their sole executor. Before this ownership guard, a browser loop could race the background worker, make counters appear to roll backward, and attempt another pickup batch after successful promotion had correctly deleted the downloaded JSON. A not-readable JSON error with a lower offset behind already-published live counts is characteristic of that old race, not evidence that successful cleanup itself should be disabled.
 
 ## Shipments
 

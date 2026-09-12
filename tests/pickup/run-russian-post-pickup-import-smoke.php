@@ -457,6 +457,31 @@ rp_pickup_assert( 30 === $settings->timeout(), 'Otpravka timeout min must be 30 
 $settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_timeout' => '120' ) );
 $state_service = new RussianPostPickupImportStateService();
 
+update_option( RussianPostPickupImportStateService::OPTION_NAME, array( 'status' => 'idle', 'parsed' => 17 ), false );
+$legacy_revision_state = $state_service->current();
+rp_pickup_assert( 0 === (int) $legacy_revision_state['state_revision'] && 17 === (int) $legacy_revision_state['parsed'], 'Legacy Russian Post state without state_revision must read as revision zero without losing counters.' );
+$revision_queue_a = $state_service->queue( 'ALL', 'revision-a' );
+$revision_start_a = $state_service->start( 'ALL', 'revision-a' );
+$revision_update_a = $state_service->update( 'parse', array( 'parsed' => 500 ) );
+$revision_metrics_a = $state_service->record_worker_slice_metrics( array( 'worker_slice_batches' => 1, 'worker_slice_objects' => 500 ) );
+$revision_guard_a = $state_service->record_guard_diagnostic( array( 'callback' => 'revision-test' ) );
+$revision_success_a = $state_service->success_if_owned( 'revision-a', array( 'import_id' => 'revision-a', 'parsed' => 500 ) );
+$revision_queue_b = $state_service->queue( 'PVZ', 'revision-b' );
+$revision_start_b = $state_service->start( 'PVZ', 'revision-b' );
+$revision_failed_b = $state_service->failed_if_owned( 'revision-b', array( 'import_id' => 'revision-b', 'errors' => array( 'revision failure' ) ) );
+$revision_queue_c = $state_service->queue( 'OPS', 'revision-c' );
+$revision_cancel_c = $state_service->cancel_by_admin( 'revision-c' );
+$revision_values = array_map(
+	static fn( array $state ): int => (int) ( $state['state_revision'] ?? 0 ),
+	array( $revision_queue_a, $revision_start_a, $revision_update_a, $revision_metrics_a, $revision_guard_a, $revision_success_a, $revision_queue_b, $revision_start_b, $revision_failed_b, $revision_queue_c, $revision_cancel_c )
+);
+rp_pickup_assert( $revision_values === range( 1, count( $revision_values ) ), 'Every successful queue/start/update/metrics/diagnostic/terminal/cancel transition must increment persisted state_revision exactly once across import_id changes.' );
+$stale_revision_fixture = array_merge( $state_service->current(), array( 'status' => 'running', 'stage' => 'parse', 'last_activity_at' => date( 'Y-m-d H:i:s', time() - 601 ) ) );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, $stale_revision_fixture, false );
+$revision_stale_reset = $state_service->reset_stale_if_needed();
+rp_pickup_assert( (int) $revision_stale_reset['state_revision'] === (int) $stale_revision_fixture['state_revision'] + 1 && 'failed' === (string) $revision_stale_reset['status'], 'Successful stale-state reset must increment revision from its exact persisted expected state.' );
+delete_option( RussianPostPickupImportStateService::OPTION_NAME );
+
 function wp_remote_get( string $url, array $args = array() ): mixed {
 	$GLOBALS['rp_last_http_args'] = $args;
 	if ( 'wp_error' === ( $GLOBALS['rp_http_mode'] ?? '' ) ) {
@@ -669,8 +694,8 @@ $GLOBALS['wdc_scheduled_events'] = array();
 
 $cas_a_id = 'terminal-cas-a';
 $cas_b_id = 'terminal-cas-b';
-$state_service->queue( 'ALL', $cas_a_id );
-$cas_b_state = array_merge( $state_service->defaults(), array( 'status' => 'queued', 'stage' => 'queued', 'import_id' => $cas_b_id, 'type' => 'ALL', 'last_activity_at' => current_time( 'mysql' ) ) );
+$cas_a_state = $state_service->queue( 'ALL', $cas_a_id );
+$cas_b_state = array_merge( $state_service->defaults(), array( 'status' => 'queued', 'stage' => 'queued', 'import_id' => $cas_b_id, 'state_revision' => (int) $cas_a_state['state_revision'] + 1, 'type' => 'ALL', 'last_activity_at' => current_time( 'mysql' ) ) );
 $GLOBALS['wdc_before_option_cas'] = static function ( string $key ) use ( $cas_b_state ): void {
 	if ( RussianPostPickupImportStateService::OPTION_NAME === $key ) {
 		update_option( RussianPostPickupImportStateService::OPTION_NAME, $cas_b_state, false );
@@ -682,7 +707,7 @@ try {
 } catch ( RuntimeException $exception ) {
 	$terminal_cas_thrown = str_contains( $exception->getMessage(), 'ownership changed during terminal transition' );
 }
-rp_pickup_assert( $terminal_cas_thrown && $cas_b_state === $state_service->current(), 'Owner-scoped terminal state CAS must not overwrite job B when state changes during the write.' );
+rp_pickup_assert( $terminal_cas_thrown && $cas_b_state === $state_service->current() && (int) $state_service->current()['state_revision'] === (int) $cas_b_state['state_revision'], 'Owner-scoped terminal state CAS must not overwrite job B or increment its persisted revision when state changes during the write.' );
 
 $GLOBALS['wdc_force_schedule_failure'] = true;
 rp_pickup_assert( ! $importer->queue_background_import( 'ALL' ), 'Scheduler failure must reject import start.' );
@@ -1162,6 +1187,13 @@ $stale_extract_result = $importer->refresh_state_for_status();
 rp_pickup_assert( 'failed' === (string) $stale_extract_result['status'] && str_contains( implode( ' ', $stale_extract_result['errors'] ), 'Extract stage timed out/stale.' ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && ! file_exists( (string) $stale_extract_zip ) && ! file_exists( (string) $stale_extract_payload ) && ! array_key_exists( $stale_extract_staging, $GLOBALS['wpdb']->tables ), 'Status refresh must fail stale extract, unlock, and cleanup files/staging.' );
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 rp_pickup_assert( str_contains( $admin_source, 'refresh_state_for_status()' ), 'Status AJAX handler must refresh stale state before responding.' );
+$status_handler_start = strpos( $admin_source, 'public function ajax_pickup_import_status()' );
+$status_handler_end   = strpos( $admin_source, 'public function ajax_dpd_geography_import_status()', $status_handler_start );
+$status_handler       = false !== $status_handler_start && false !== $status_handler_end
+	? substr( $admin_source, $status_handler_start, $status_handler_end - $status_handler_start )
+	: '';
+rp_pickup_assert( '' !== $status_handler && str_contains( $status_handler, 'refresh_state_for_status()' ), 'Russian Post status AJAX must only obtain the current lifecycle state.' );
+rp_pickup_assert( ! str_contains( $status_handler, 'run_import_' ) && ! str_contains( $status_handler, 'queue_background_import' ), 'Russian Post status AJAX must not execute or queue worker processing.' );
 
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'Cancel test must queue.' );

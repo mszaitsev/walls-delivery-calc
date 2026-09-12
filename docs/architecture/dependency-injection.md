@@ -1,10 +1,12 @@
 # Dependency Injection
 
-Version: 1.0.14
+Version: 1.0.15
 
 `Plugin.php` is the only composition root. Runtime services receive required collaborators through constructors; carrier-specific settings, clients, mappers, adapters, document providers, and schedulers remain owned by their carrier modules. Checkout and Rule Engine domain services do not locate WooCommerce globals outside the documented boundary adapters.
 
 The shared `ActionScheduler` adapter owns request-scoped readiness coordination. Scheduler owners identify deferred callbacks by class, preventing duplicate registration within one bootstrap request. `TimezoneService` is injected into clock-based scheduler owners, while `ScheduledTaskCatalog` is read-only and never executes or repairs jobs.
+
+The Yandex full geography runner receives its carrier-owned `YandexDeliveryGeoPipelineV2ExecutionLock` through `Plugin.php`. The runner creates the shared `BackgroundExecutionBudget` through a production default or an injected test factory; the lock and budget do not enter lower pickup, geography, enrichment, or mapping services.
 
 The 1.0 composition root contains no prepared-dataset, automatic GAR/SPAS, or location-alias services. `postal_code` is enrichment-owned; canonical location search uses `searchable_text` and hierarchy fields.
 

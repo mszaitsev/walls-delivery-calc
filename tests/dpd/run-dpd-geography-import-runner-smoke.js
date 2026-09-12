@@ -83,17 +83,21 @@ function state(overrides = {}) {
 
 	let h = createHarness();
 	assert.strictEqual(h.requests[0].action, 'wdc_dpd_geography_import_status', 'first request is read-only status');
-	h.resolveRequest(0, state({ phase: 'ready', state_revision: 1 }));
+	h.resolveRequest(0, state({ phase: 'ready', state_revision: 10, rows_read: 1000 }));
 	await flush();
 	h.runNextTimer();
 	assert.strictEqual(h.requests[1].action, 'wdc_dpd_geography_import_status', 'active jobs schedule another read-only status poll');
 	assert.strictEqual(h.requests[1].jobId, null, 'status poll sends no worker owner id');
 	assert.strictEqual(h.requests[1].expectedOffset, null, 'status poll sends no byte-offset checkpoint');
 	assert.throws(() => h.runNextTimer(), /expected scheduled timer/, 'in-flight status request prevents overlap');
-	h.resolveRequest(1, state({ state_revision: 2, rows_read: 1500, byte_offset: 500 }));
+	h.resolveRequest(1, state({ state_revision: 12, rows_read: 3500, byte_offset: 500 }));
 	await flush();
+	assert.strictEqual(h.fields.get('rows_read').textContent, '3500', 'newer revision 12 renders current counters');
 	h.runNextTimer();
 	assert.strictEqual(h.requests[2].action, 'wdc_dpd_geography_import_status', 'subsequent progress remains polling-only');
+	h.resolveRequest(2, state({ state_revision: 11, rows_read: 2000, byte_offset: 400 }));
+	await flush();
+	assert.strictEqual(h.fields.get('rows_read').textContent, '3500', 'late revision 11 cannot roll counters back after revision 12');
 
 	h = createHarness();
 	h.rejectRequest(0);

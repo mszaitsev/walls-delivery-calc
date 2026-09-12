@@ -12,6 +12,8 @@
 	var summary = root.querySelector('[data-wdc-rp-status-summary]');
 	var runButton = document.querySelector('button[name="wdc_delivery_services_action"][value="run_russian_post_pickup_import"]');
 	var timer = null;
+	var inFlight = false;
+	var lastRenderedRevision = 0;
 
 	var statusLabels = {
 		idle: 'Ожидание',
@@ -126,6 +128,13 @@
 	}
 
 	function render(state) {
+		var revision = Number((state && state.state_revision) || 0);
+		if (revision > 0 && lastRenderedRevision > 0 && revision < lastRenderedRevision) {
+			return false;
+		}
+		if (revision > lastRenderedRevision) {
+			lastRenderedRevision = revision;
+		}
 		var status = state && state.status ? String(state.status) : 'idle';
 		var busy = isBusy(status);
 		root.setAttribute('data-wdc-rp-status', status);
@@ -201,9 +210,15 @@
 		} else {
 			stopPolling();
 		}
+
+		return true;
 	}
 
 	function requestStatus() {
+		if (inFlight) {
+			return Promise.resolve();
+		}
+		inFlight = true;
 		var body = new URLSearchParams();
 		body.set('action', 'wdc_russian_post_pickup_import_status');
 		body.set('nonce', config.nonce);
@@ -224,7 +239,10 @@
 				}
 			})
 			.catch(function () {
-				stopPolling();
+				// Keep the timer active so a temporary transport failure can recover.
+			})
+			.finally(function () {
+				inFlight = false;
 			});
 	}
 

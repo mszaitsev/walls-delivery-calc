@@ -1,14 +1,14 @@
 # WDC background execution optimization audit
 
-Audit date: 2026-09-11
+Audit date: 2026-09-12
 
-Branch: `fix/russian-post-background-pipeline`
+Branch: `perf/yandex-geo-pipeline-bounded-worker`
 
-Baseline HEAD: `be221f5b8872e9ba56bc2e7a56af872140a4b5c3`
+Baseline HEAD: `2f9b478b337c4f9f3331ce92b7c051dbe10e6ddb`
 
-Plugin version: `1.0.14`; schema version: `1.0.0`
+Plugin version: `1.0.15`; schema version: `1.0.0`
 
-The Russian Post pilot batches exact FIAS lookups and staging inserts. Production acceptance of 1.0.9 completed successfully; the temporary 1.0.8 profiler was removed in 1.0.10. Ozon and Yandex remain outside this implementation phase.
+The Russian Post pilot batches exact FIAS lookups and staging inserts. Production acceptance of 1.0.9 completed successfully; the temporary 1.0.8 profiler was removed in 1.0.10. DPD Geography and the Yandex full geography pipeline now use bounded worker slices. Ozon remains outside this implementation phase.
 
 This is an architecture report. It does not change production code, schedules, schemas, versions, or server configuration.
 
@@ -74,10 +74,10 @@ Abbreviations: AS = Action Scheduler; WP-Cron = WordPress cron; AJAX = authentic
 | 13 | E+C | DaData coordinate fill; `LocationCoordinatesDadataBatchUpdater` | Admin AJAX loop | E+C | Requested 20–30, clamped to at most 20; external API | Random 2–4s browser delay | Job option, ID/priority checkpoint; values persisted per location | Daily limit is a terminal waiting condition resumable later | No | Browser performs work; delay protects external service | No |
 | 14 | E+C | Russian Post courier-calc postcode fill; `RussianPostCourierCalcPostcodeFillStateService` | Admin AJAX loop | E+C | One location, at most 18 probes and 3 seconds; target 6 probes/s | 75ms between browser steps; potentially one step/location | Job option with current location/candidate offset; writes each resolved value | Up to 5 technical attempts per candidate; in-step pacing is intentional | No | Browser performs work | No |
 | 15 | B | DPD geography import; `DpdGeographyImportService` | Action Scheduler one-shot worker | B | 500 rows/atomic step; up to 10 steps/18-second slice | 5s scheduled continuation, subject to queue wake-up | Token lock per step, 1,800s start lock, WDC location write lock per step, job/revision/byte-offset stale detection | Busy exits the slice; duplicate continuation is suppressed | Yes, between slices only | Browser only polls state | Yes |
-| 16 | E | Standalone Yandex pickup V2 runner; `YandexDeliveryPickupPointV2RunnerService` | Admin AJAX loop | E | Download is one heavy request; streamed import 500 objects | 50ms between local steps | Persistent session/offset; staging repository promoted only on completion | No scheduled API retry | No | Browser performs work | No; also composed by #3 |
-| 17 | E | Standalone Yandex geo V2 builder; `YandexDeliveryGeoV2BuilderRunnerService` | Admin AJAX loop | E | 500 unique geo IDs | 50ms browser loop | Persistent offset; deterministic aggregate upsert | None | No | Browser performs work | No; also composed by #3 |
-| 18 | E | Standalone Yandex region enrichment; `YandexGeoV2RegionEnrichmentRunner` | Admin AJAX loop | E | 10 rows; local WDC DB matching only | 50ms browser loop | Attempt status persisted per geo row; remaining set is re-queried | None | No | Browser performs work | No; also composed by #3 |
-| 19 | E | Standalone Yandex location mapping; `YandexLocationMappingV2Runner` | Admin AJAX loop | E | 100 geo IDs | 50ms browser loop | Persistent offset; staging table promoted on completion | None | No | Browser performs work | No; also composed by #3 |
+| 16 | E | Standalone Yandex pickup V2 runner; `YandexDeliveryPickupPointV2RunnerService` | Admin AJAX loop when full pipeline is inactive | E | Download is one heavy request; streamed import 500 objects | 50ms between local steps | Persistent session/offset; staging repository promoted only on completion | No scheduled API retry | No | Browser performs work only without an active full-pipeline owner | No; also composed by #3 |
+| 17 | E | Standalone Yandex geo V2 builder; `YandexDeliveryGeoV2BuilderRunnerService` | Admin AJAX loop when full pipeline is inactive | E | 500 unique geo IDs | 50ms browser loop | Persistent offset; deterministic aggregate upsert | None | No | Browser performs work only without an active full-pipeline owner | No; also composed by #3 |
+| 18 | E | Standalone Yandex region enrichment; `YandexGeoV2RegionEnrichmentRunner` | Admin AJAX loop when full pipeline is inactive | E | 10 rows; local WDC DB matching only | 50ms browser loop | Attempt status persisted per geo row; remaining set is re-queried | None | No | Browser performs work only without an active full-pipeline owner | No; also composed by #3 |
+| 19 | E | Standalone Yandex location mapping; `YandexLocationMappingV2Runner` | Admin AJAX loop when full pipeline is inactive | E | 100 geo IDs | 50ms browser loop | Persistent offset; staging table promoted on completion | None | No | Browser performs work only without an active full-pipeline owner | No; also composed by #3 |
 | 20 | C+E | Shipment lifecycle continuation/status/document polling; `ShipmentLifecycleAjaxController` and carrier adapters | Admin browser AJAX | C+E | One remote submit/status/document operation | Usually 5s and max 14 attempts (Ozon/Yandex); DPD registration 10s with carrier-owned terminal rules | Order shipment state and continuation token prevent unrelated continuation | Delay waits for remote asynchronous carrier state and must remain | No | Browser performs remote continuation/polling work | No |
 
 The inline locations AJAX loop treats `finished`, `failed`, and `canceled` as terminal. It is therefore browser-dependent: closing the tab stops progress, while the persisted checkpoint remains. The Yandex full-pipeline browser is different: it calls the status endpoint only; scheduled WP-Cron callbacks do the work.
@@ -141,6 +141,8 @@ Proposed change:
 - crash safety remains the existing byte-offset + staging upsert contract;
 - no transaction spans multiple batches.
 
+The 1.0.15 admin status contract is presentation-safe across slow/out-of-order AJAX responses. The persisted Russian Post option carries a globally monotonic `state_revision`: every successful state transition stores the expected persisted revision plus one, including queue/start of a new `import_id`, worker metrics, terminal CAS, cancellation, and stale reset. Browser polling is single-flight, ignores lower positive revisions after a newer render, retries after transport errors, and remains status-only. This changes neither worker execution nor its batches, schedule, lease, or staging lifecycle.
+
 ## 7. Ozon deep dive
 
 Current phases are discovery, enrichment, then ready/activation:
@@ -177,15 +179,25 @@ The outer runner performs exactly one stage operation and schedules `time()+1` t
 
 The full JSON download remains one heavy/API unit. After it succeeds, the streamed import and all local stages are good bounded-loop candidates. No provider-required delay was found in the outer pipeline. Nevertheless, a slice should treat the download as one unit, re-check state after every lower-level call, and stop if a stage reports `error`, `paused`, or a future explicit retry state.
 
-The outer runner currently has a session ID but no dedicated owner lease. Before increasing work per callback, implementation should either prove that WP-Cron's event uniqueness plus persisted status prevents overlap across manual start/resume and scheduled execution, or add a minimal owner lease for the outer pipeline. This is the largest concurrency gap among the three candidates.
+Before 1.0.15 the outer runner had a session ID but no dedicated owner lease. The implementation added a minimal carrier-owned lease before increasing work per callback; WP-Cron event uniqueness and server `flock` are not treated as the application ownership contract.
 
 Acceleration depends on table sizes. For local stages, replacing one 500/10/100-row unit per minute with a 20-second slice should reduce wait boundaries by approximately the number of units completed per slice (often 10–100x for fast SQL batches). The download itself will not become faster.
+
+### Yandex implementation result (1.0.15)
+
+The outer WP-Cron callback now processes a bounded slice instead of one local unit per minute-level wake-up. One slice allows at most 18 seconds, 25 atomic units, and 80% of a finite PHP `memory_limit`; time and unit caps remain mandatory when the memory limit is unlimited or unknown. The existing 500-object pickup import, 500-geo-ID build, 10-row enrichment, one region sync, and 100-geo-ID location mapping units and their lower-runner checkpoints are unchanged.
+
+The full JSON download remains one remote atomic unit, counts toward the slice, and always stops that slice before staging initialization or SQL import. Continuations remain direct WP-Cron but now carry the immutable outer `session_id`. A carrier-owned 300-second option lease stores session, random token, and expiry; acquire uses atomic `add_option`, renew/release compare the complete stored value, and expired takeover first compare-deletes the old value. Stale callbacks and owners cannot work on, renew, release, or overwrite a new session.
+
+Pause persists the outer terminal-for-worker state before pausing the lower runner, so a callback finishing its current atomic unit cannot overwrite the pause. Reset invalidates the old session before clearing continuations; initialization of the lower pickup runner occurs only inside the new owner's first locked unit. Bootstrap schedule ensure performs only an idempotent continuation repair. A legacy no-argument callback performs no work and can only establish the current owner-scoped continuation.
+
+Production acceptance exposed a second ownership boundary: the legacy standalone browser loops could mutate the same persisted lower-runner state while the new outer worker was active. This caused visible counter rollback when stale and current checkpoints alternated. On the final pickup batch, the outer-owned successful promotion correctly deleted the downloaded JSON; a stale browser step then tried to reopen that already-cleaned file and overwrote the newer lower state with a not-readable error. The correction keeps JSON cleanup unchanged and makes the full pipeline the sole lower-stage executor while its outer status is `running` or `paused`. Every standalone pickup, geo builder, region enrichment, region mapping/manual override, and location mapping mutation is re-checked server-side; browser loops and controls are also suppressed. Terminal `done`, `error`, and `idle` states release this boundary and preserve standalone operation.
 
 ## 9. DPD
 
 DPD pickup autosync performs OPS and PVZ import in one locked callback. It has no continuation gap and needs no cron-throughput optimization.
 
-DPD geography import was moved from its browser-driven loop to the shared bounded-worker policy in 1.0.13. Manual/SFTP source acquisition creates a durable job and one Action Scheduler worker. Each callback performs multiple 500-row checkpointed steps while its 18-second, 10-unit, and 80%-memory limits permit. The browser performs read-only polling. Stage N+1 was removed with bounded existing-row prefetch and prepared multi-row writes; the already batched RU matcher and set-based transactional finalization were retained.
+DPD geography import was moved from its browser-driven loop to the shared bounded-worker policy in 1.0.13. Manual/SFTP source acquisition creates a durable job and one Action Scheduler worker. Each callback performs multiple 500-row checkpointed steps while its 18-second, 10-unit, and 80%-memory limits permit. The browser performs read-only, single-flight polling and already rejects responses whose persisted `state_revision` is lower than the last rendered revision; no DPD production change was needed for the 1.0.15 status-freshness audit. Stage N+1 was removed with bounded existing-row prefetch and prepared multi-row writes; the already batched RU matcher and set-based transactional finalization were retained.
 
 ### DPD foreign-location performance follow-up (1.0.14)
 
@@ -399,7 +411,7 @@ Integration/production-like:
 2. **Shared primitive:** introduce and unit-test the small execution-budget helper; no scheduler abstraction.
 3. **Russian Post pilot — implemented in 1.0.5:** the existing 500-object atomic batch is wrapped by a 15-unit/18-second worker slice with an 80% finite-memory-limit guard. Checkpoints, activity timestamps, and owner renewals remain per batch; the callback schedules exactly one continuation on budget exhaustion or one finalize action on EOF. Production tuning should record slice duration, batches, objects, and stop reason on the 184k snapshot.
 4. **Ozon:** add remote-aware slicing; preserve explicit retry delay and salvage cap; measure quota/load.
-5. **Yandex:** first strengthen/prove outer ownership, then slice local stages; leave download isolated.
+5. **Yandex — implemented in 1.0.15:** the outer pipeline has a session-and-token option lease and runs local work in 18-second/25-unit/80%-memory slices; the download remains an isolated terminal slice unit and continuations are owner-scoped.
 6. **Operational option:** only after application changes, evaluate one Action Scheduler WP-CLI runner as an optional accelerator for the whole WooCommerce queue. It must not be a WDC installation requirement.
 7. **Deferred review:** use shipment status duration/order-count diagnostics to decide whether it needs its own paginated worker project. Keep browser maintenance flows unchanged unless a separate UX requirement asks for tab-independent execution.
 
