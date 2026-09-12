@@ -6,7 +6,7 @@ Branch: `fix/russian-post-background-pipeline`
 
 Baseline HEAD: `be221f5b8872e9ba56bc2e7a56af872140a4b5c3`
 
-Plugin version: `1.0.12`; schema version: `1.0.0`
+Plugin version: `1.0.13`; schema version: `1.0.0`
 
 The Russian Post pilot batches exact FIAS lookups and staging inserts. Production acceptance of 1.0.9 completed successfully; the temporary 1.0.8 profiler was removed in 1.0.10. Ozon and Yandex remain outside this implementation phase.
 
@@ -73,7 +73,7 @@ Abbreviations: AS = Action Scheduler; WP-Cron = WordPress cron; AJAX = authentic
 | 12 | E+C | DaData postcode fill; `LocationsAdminPage::step_dadata_postcode_job()` | Admin AJAX loop | E+C | Random 10–20 locations, external API | Random 2–4s browser delay | Job option, ID/priority checkpoint; values persisted per location | Daily token exhaustion stops; 30 consecutive failures fail | No | Browser performs work; delay protects external service | No |
 | 13 | E+C | DaData coordinate fill; `LocationCoordinatesDadataBatchUpdater` | Admin AJAX loop | E+C | Requested 20–30, clamped to at most 20; external API | Random 2–4s browser delay | Job option, ID/priority checkpoint; values persisted per location | Daily limit is a terminal waiting condition resumable later | No | Browser performs work; delay protects external service | No |
 | 14 | E+C | Russian Post courier-calc postcode fill; `RussianPostCourierCalcPostcodeFillStateService` | Admin AJAX loop | E+C | One location, at most 18 probes and 3 seconds; target 6 probes/s | 75ms between browser steps; potentially one step/location | Job option with current location/candidate offset; writes each resolved value | Up to 5 technical attempts per candidate; in-step pacing is intentional | No | Browser performs work | No |
-| 15 | E | DPD geography import; `DpdGeographyImportService` | Admin AJAX loop | E | UI limit 500 rows/step (service default 3,000); matching chunks of 500 | 250ms normal; 1.5s lock-busy; 4s transport/status retry | Token lock 600s per step, 1,800s start lock, WDC location write lock, job/revision/byte-offset stale detection | Busy/status retry delays preserve request concurrency | No | Browser performs work; status-only during preparing/downloading/finalizing | No |
+| 15 | B | DPD geography import; `DpdGeographyImportService` | Action Scheduler one-shot worker | B | 500 rows/atomic step; up to 10 steps/18-second slice | 5s scheduled continuation, subject to queue wake-up | Token lock per step, 1,800s start lock, WDC location write lock per step, job/revision/byte-offset stale detection | Busy exits the slice; duplicate continuation is suppressed | Yes, between slices only | Browser only polls state | Yes |
 | 16 | E | Standalone Yandex pickup V2 runner; `YandexDeliveryPickupPointV2RunnerService` | Admin AJAX loop | E | Download is one heavy request; streamed import 500 objects | 50ms between local steps | Persistent session/offset; staging repository promoted only on completion | No scheduled API retry | No | Browser performs work | No; also composed by #3 |
 | 17 | E | Standalone Yandex geo V2 builder; `YandexDeliveryGeoV2BuilderRunnerService` | Admin AJAX loop | E | 500 unique geo IDs | 50ms browser loop | Persistent offset; deterministic aggregate upsert | None | No | Browser performs work | No; also composed by #3 |
 | 18 | E | Standalone Yandex region enrichment; `YandexGeoV2RegionEnrichmentRunner` | Admin AJAX loop | E | 10 rows; local WDC DB matching only | 50ms browser loop | Attempt status persisted per geo row; remaining set is re-queried | None | No | Browser performs work | No; also composed by #3 |
@@ -185,7 +185,7 @@ Acceleration depends on table sizes. For local stages, replacing one 500/10/100-
 
 DPD pickup autosync performs OPS and PVZ import in one locked callback. It has no continuation gap and needs no cron-throughput optimization.
 
-DPD geography import is a separate browser-driven workflow. It uses persisted byte offset/revision, a token step lock, a WDC location write lock, and explicit busy/stale outcomes. Its 250ms normal client continuation is already much faster than system cron and its 1.5s/4s waits are concurrency/transport recovery. Do not migrate it as part of the scheduled-worker work.
+DPD geography import was moved from its browser-driven loop to the shared bounded-worker policy in 1.0.13. Manual/SFTP source acquisition creates a durable job and one Action Scheduler worker. Each callback performs multiple 500-row checkpointed steps while its 18-second, 10-unit, and 80%-memory limits permit. The browser performs read-only polling. Stage N+1 was removed with bounded existing-row prefetch and prepared multi-row writes; the already batched RU matcher and set-based transactional finalization were retained.
 
 ## 10. Shipment status autosync
 

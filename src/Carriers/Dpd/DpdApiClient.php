@@ -272,7 +272,7 @@ final class DpdApiClient {
 
 		$parts = array();
 		$parts[] = $credentials->is_complete() ? 'credentials configured' : 'credentials missing';
-		$parts[] = $transport_available ? 'SOAP transport available' : 'SOAP transport unavailable';
+		$parts[] = $transport_available ? 'PHP SOAP extension / SoapClient available' : 'PHP SOAP extension / SoapClient is unavailable. DPD SOAP API calls cannot be executed.';
 		$parts[] = isset( $endpoints[ DpdEndpoints::SERVICE_GEOGRAPHY ] ) ? 'geography endpoint selected' : 'geography endpoint missing';
 		$parts[] = isset( $endpoints[ DpdEndpoints::SERVICE_CALCULATOR ] ) ? 'calculator endpoint selected' : 'calculator endpoint missing';
 

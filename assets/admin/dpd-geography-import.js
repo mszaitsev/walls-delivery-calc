@@ -10,11 +10,9 @@
 	var timer = null;
 	var inFlight = false;
 	var stopped = false;
-	var currentState = null;
 	var lastRenderedRevision = 0;
 	var bar = root.querySelector('[data-wdc-dpd-progress-bar]');
 	var summary = root.querySelector('[data-wdc-dpd-summary]');
-	var stepDelayMs = Number(config.stepDelayMs || 250);
 	var busyRetryMs = Number(config.busyRetryMs || 1500);
 	var statusRetryMs = 4000;
 
@@ -81,7 +79,6 @@
 		if (revision > lastRenderedRevision) {
 			lastRenderedRevision = revision;
 		}
-		currentState = state;
 		var phase = String(state.phase || 'idle');
 		var percent = Number(state.percent_complete || 0);
 		var read = Number(state.rows_read || 0);
@@ -124,6 +121,11 @@
 			'max_match_batch_rows',
 			'lookup_query_groups',
 			'match_context_candidates_peak',
+			'last_step_duration_ms',
+			'max_step_duration_ms',
+			'worker_slice_units',
+			'worker_slice_duration_ms',
+			'worker_slice_stop_reason',
 			'saved_candidates',
 			'finalized_mappings',
 			'finalized_changes',
@@ -151,10 +153,6 @@
 		var body = new URLSearchParams();
 		body.set('action', action);
 		body.set('nonce', config.nonce);
-		if (action === 'wdc_dpd_geography_import_step' && currentState) {
-			body.set('job_id', String(currentState.job_id || ''));
-			body.set('expected_byte_offset', String(Number(currentState.byte_offset || 0)));
-		}
 		return body;
 	}
 
@@ -210,7 +208,7 @@
 		}
 		var phase = String((state && state.phase) || 'idle');
 		if (activePhase(phase)) {
-			schedule(requestStep, stepDelayMs);
+			schedule(requestStatus, busyRetryMs);
 			return;
 		}
 		if (statusOnlyPhase(phase)) {
@@ -231,38 +229,6 @@
 		return post('wdc_dpd_geography_import_status')
 			.then(function (state) {
 				if (!render(state)) {
-					return;
-				}
-				continueFromState(state);
-			})
-			.catch(function () {
-				showTransportMessage('Связь с сервером прервана. Проверяем состояние импорта...');
-				schedule(requestStatus, statusRetryMs);
-			})
-			.finally(function () {
-				inFlight = false;
-			});
-	}
-
-	function requestStep() {
-		if (inFlight || stopped) {
-			return Promise.resolve();
-		}
-		inFlight = true;
-		clearTimer();
-		return post('wdc_dpd_geography_import_step')
-			.then(function (state) {
-				var control = state && state.step_control ? state.step_control : null;
-				if (!render(state)) {
-					return;
-				}
-				if (control && control.outcome === 'busy') {
-					showTransportMessage('Предыдущий шаг ещё выполняется. Ожидание...');
-					schedule(requestStatus, Number(control.retry_after_ms || busyRetryMs));
-					return;
-				}
-				if (control && control.outcome === 'stale') {
-					schedule(requestStep, Number(control.retry_after_ms || stepDelayMs));
 					return;
 				}
 				continueFromState(state);

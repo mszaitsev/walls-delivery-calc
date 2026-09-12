@@ -19,7 +19,7 @@ final class DpdGeographyFtpClient {
 	 */
 	public function download_latest(): array {
 		if ( ! $this->is_sftp_available() ) {
-			return $this->warning( 'SFTP extension is not available. Use manual CSV upload.' );
+			return $this->warning( 'PHP ssh2 extension is not available. Automatic DPD SFTP geography download is unavailable; manual CSV upload remains available.' );
 		}
 		if ( ! $this->settings->has_geography_ftp_password() ) {
 			return $this->failure( 'DPD SFTP password is not configured. Upload GeographyNewDPD CSV manually or save the encrypted password.' );

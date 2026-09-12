@@ -229,6 +229,41 @@ final class DpdProductionPathWpdb extends wpdb {
 	}
 }
 
+final class DpdStageBulkWpdb extends wpdb {
+	public int $stage_select_queries = 0;
+	public int $stage_write_queries = 0;
+	public bool $fail_stage_write = false;
+
+	public function __construct() {
+		unset( $this->dpd_geography_stage_tables );
+	}
+
+	public function prepare( string $query, mixed ...$args ): string {
+		unset( $args );
+		return $query;
+	}
+
+	public function get_results( string $query, string $output = ARRAY_A ): array {
+		unset( $query, $output );
+		++$this->stage_select_queries;
+		$this->last_error = '';
+		return array();
+	}
+
+	public function query( string $query ): int|false {
+		$this->last_query = $query;
+		if ( str_starts_with( ltrim( $query ), 'INSERT INTO wp_wdc_dpd_geography_stage_' ) ) {
+			++$this->stage_write_queries;
+			if ( $this->fail_stage_write ) {
+				$this->last_error = 'forced stage batch write failure';
+				return false;
+			}
+		}
+		$this->last_error = '';
+		return 1;
+	}
+}
+
 final class DpdForeignIdentityLookupWpdb extends wpdb {
 	/** @var array<int,array<string,mixed>> */
 	public array $foreign_rows = array();
@@ -663,6 +698,50 @@ function wp_tempnam( string $filename = '' ): string|false {
 
 	return tempnam( sys_get_temp_dir(), 'wdc-dpd-geography-' );
 }
+function add_action( string $hook, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {
+	$GLOBALS['wdc_dpd_actions'][ $hook ][] = compact( 'callback', 'priority', 'accepted_args' );
+	return true;
+}
+function did_action( string $hook ): int { return 'init' === $hook ? 1 : 0; }
+function doing_action( string $hook ): bool { unset( $hook ); return false; }
+function as_schedule_single_action( int $timestamp, string $hook, array $args = array(), string $group = '' ): int {
+	$id = count( $GLOBALS['wdc_dpd_scheduled_actions'] ?? array() ) + 1;
+	$GLOBALS['wdc_dpd_scheduled_actions'][] = compact( 'id', 'timestamp', 'hook', 'args', 'group' );
+	return $id;
+}
+function as_schedule_recurring_action( int $timestamp, int $interval, string $hook, array $args = array(), string $group = '' ): int {
+	unset( $interval );
+	return as_schedule_single_action( $timestamp, $hook, $args, $group );
+}
+function as_has_scheduled_action( string $hook, array $args = array(), string $group = '' ): bool {
+	foreach ( $GLOBALS['wdc_dpd_scheduled_actions'] ?? array() as $action ) {
+		if ( $hook === $action['hook'] && $args === $action['args'] && $group === $action['group'] ) {
+			return true;
+		}
+	}
+	return false;
+}
+function as_next_scheduled_action( string $hook, array $args = array(), string $group = '' ): int|false {
+	foreach ( $GLOBALS['wdc_dpd_scheduled_actions'] ?? array() as $action ) {
+		if ( $hook === $action['hook'] && $args === $action['args'] && $group === $action['group'] ) {
+			return (int) $action['timestamp'];
+		}
+	}
+	return false;
+}
+function as_unschedule_all_actions( string $hook, array $args = array(), string $group = '' ): void {
+	$GLOBALS['wdc_dpd_scheduled_actions'] = array_values(
+		array_filter(
+			$GLOBALS['wdc_dpd_scheduled_actions'] ?? array(),
+			static fn( array $action ): bool => $hook !== $action['hook'] || $args !== $action['args'] || $group !== $action['group']
+		)
+	);
+}
+if ( ! class_exists( 'ActionScheduler' ) ) {
+	final class ActionScheduler {
+		public static function is_initialized(): bool { return false !== ( $GLOBALS['wdc_dpd_as_initialized'] ?? true ); }
+	}
+}
 
 require_once __DIR__ . '/../../src/Core/Autoloader.php';
 ( new \WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC', __DIR__ . '/../../src' ) )->register();
@@ -701,9 +780,29 @@ use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyStageRepository;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Infrastructure\Queue\ActionScheduler as WdcActionScheduler;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
+
+final class DpdControlledExecutionBudget extends BackgroundExecutionBudget {
+	/** @var callable|null */
+	private $after_unit;
+
+	public function __construct( int $max_units, ?callable $after_unit = null ) {
+		parent::__construct( 100.0, $max_units );
+		$this->after_unit = $after_unit;
+	}
+
+	public function mark_unit_processed(): void {
+		parent::mark_unit_processed();
+		if ( is_callable( $this->after_unit ) ) {
+			( $this->after_unit )( $this->units_processed() );
+		}
+	}
+}
 
 function dpd_import_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -1548,6 +1647,7 @@ $phase_before_ftp_warning = (string) $state->current()['phase'];
 $ftp_warning = $importer->start_from_ftp( new DpdGeographyFtpClient( $settings ) );
 if ( ! extension_loaded( 'ssh2' ) || ! function_exists( 'ssh2_connect' ) ) {
 	dpd_import_assert( 'warning' === (string) ( $ftp_warning['status'] ?? '' ), 'missing ssh2 returns FTP warning instead of failed import' );
+	dpd_import_assert( str_contains( (string) ( $ftp_warning['last_message'] ?? '' ), 'PHP ssh2 extension is not available.' ), 'missing ssh2 warning names the exact PHP ssh2 prerequisite' );
 	dpd_import_assert( str_contains( strtolower( (string) ( $ftp_warning['last_message'] ?? '' ) ), 'manual csv upload' ), 'missing ssh2 warning points to manual CSV upload' );
 	dpd_import_assert( $phase_before_ftp_warning === (string) $state->current()['phase'], 'missing ssh2 does not change current import state phase' );
 	dpd_import_assert( array() === (array) ( $state->current()['errors'] ?? array() ), 'missing ssh2 warning does not pollute import errors' );
@@ -1824,6 +1924,143 @@ dpd_import_assert( ! file_exists( $existing_reset_index_path ), 'reset deletes s
 dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $existing_reset_stage ] ), 'reset deletes staging table when delete_file_on_finish=false' );
 @unlink( $existing_reset_path );
 
+$bulk_stage_db = new DpdStageBulkWpdb();
+$bulk_stage = new DpdGeographyStageRepository( $bulk_stage_db );
+$bulk_candidates = array();
+for ( $i = 1; $i <= 500; ++$i ) {
+	$bulk_candidates[] = array( 'location_id' => $i, 'dpd_city_id' => 70000000 + $i, 'match_method' => 'fias' );
+}
+$bulk_results = $bulk_stage->upsert_candidates_batch( 'wp_wdc_dpd_geography_stage_bulk', $bulk_candidates );
+dpd_import_assert( 500 === count( array_filter( $bulk_results, static fn( string $result ): bool => 'inserted' === $result ) ), 'DPD stage batch API preserves per-row inserted outcomes.' );
+dpd_import_assert( 2 === $bulk_stage_db->stage_select_queries && 3 === $bulk_stage_db->stage_write_queries, '500 DPD candidates use two bounded prefetch SELECTs and three bulk writes instead of 1000 row queries.' );
+$bulk_stage_db->fail_stage_write = true;
+$bulk_failure_closed = false;
+try {
+	$bulk_stage->upsert_candidates_batch( 'wp_wdc_dpd_geography_stage_bulk', array( array( 'location_id' => 900, 'dpd_city_id' => 80000900, 'match_method' => 'name' ) ) );
+} catch ( RuntimeException $exception ) {
+	$bulk_failure_closed = str_contains( $exception->getMessage(), 'batch write failed' );
+}
+dpd_import_assert( $bulk_failure_closed, 'DPD stage bulk write failure is explicit and fail-closed.' );
+
+$worker_db = new wpdb();
+$worker_db->locations = array( $GLOBALS['wpdb']->locations[0] );
+$GLOBALS['wpdb'] = $worker_db;
+$GLOBALS['wdc_dpd_import_options'] = array();
+$GLOBALS['wdc_dpd_scheduled_actions'] = array();
+$worker_state = new DpdGeographyImportStateService();
+$worker_scheduler = new WdcActionScheduler( new Logger() );
+$worker_importer = new DpdGeographyImportService(
+	new DpdGeographyCsvParser(),
+	new DpdGeographyMatcher(),
+	$worker_state,
+	new DpdGeographyStageRepository( $worker_db ),
+	new LocationRepository( $worker_db ),
+	new LocationDeliveryCodeRepository( $worker_db ),
+	$settings,
+	new DpdGeographyImportLockService( $worker_db ),
+	null,
+	$worker_scheduler,
+	static fn(): BackgroundExecutionBudget => new DpdControlledExecutionBudget( 3 )
+);
+$worker_rows = array( 'ID НП;Код страны;Регион;Район;Основной город;Населённый пункт;Тип НП;Индекс НП;ФИАС;Код КЛАДР' );
+for ( $i = 0; $i < 2001; ++$i ) {
+	$worker_rows[] = ( 60000000 + $i ) . ';RU;Новосибирская;;Новосибирск;Новосибирск;г;630023;8DEA00E3-9AAB-4D8E-887C-EF2AAA546456;RU54000001000';
+}
+$worker_upload = tempnam( sys_get_temp_dir(), 'wdc-dpd-worker-' );
+file_put_contents( $worker_upload, mb_convert_encoding( implode( "\n", $worker_rows ), 'Windows-1251', 'UTF-8' ) );
+$worker_queued = $worker_importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $worker_upload, 'name' => 'GeographyNewDPD_worker.csv' ) );
+dpd_import_assert( 'ready' === (string) ( $worker_queued['phase'] ?? '' ) && 1 === count( $GLOBALS['wdc_dpd_scheduled_actions'] ), 'Manual upload queues exactly one server-side DPD worker action and returns before processing rows.' );
+$first_worker_action = array_shift( $GLOBALS['wdc_dpd_scheduled_actions'] );
+$worker_importer->run_background_worker( (string) $first_worker_action['args'][0], (int) $first_worker_action['args'][1] );
+$after_first_slice = $worker_state->current();
+dpd_import_assert( 1500 === (int) $after_first_slice['rows_read'] && 3 === (int) $after_first_slice['worker_slice_units'], 'One DPD Action Scheduler callback processes multiple 500-row atomic steps.' );
+dpd_import_assert( 'unit_budget' === (string) $after_first_slice['worker_slice_stop_reason'] && 1 === count( $GLOBALS['wdc_dpd_scheduled_actions'] ), 'Budget exhaustion persists metrics and queues exactly one continuation.' );
+$duplicate_result = $worker_importer->run_background_worker( (string) $first_worker_action['args'][0], (int) $first_worker_action['args'][1] );
+dpd_import_assert( 1500 === (int) ( $duplicate_result['rows_read'] ?? 0 ) && 1 === count( $GLOBALS['wdc_dpd_scheduled_actions'] ), 'Duplicate stale worker delivery cannot reprocess rows or duplicate continuation.' );
+$continuation = array_shift( $GLOBALS['wdc_dpd_scheduled_actions'] );
+$worker_importer->run_background_worker( (string) $continuation['args'][0], (int) $continuation['args'][1] );
+$worker_finished = $worker_state->current();
+dpd_import_assert( 'finished' === (string) $worker_finished['phase'] && 2001 === (int) $worker_finished['rows_read'] && array() === $GLOBALS['wdc_dpd_scheduled_actions'], 'Server-side continuations finish the manual DPD import without browser step requests.' );
+
+$missing_worker_upload = tempnam( sys_get_temp_dir(), 'wdc-dpd-worker-missing-' );
+file_put_contents( $missing_worker_upload, mb_convert_encoding( implode( "\n", array_slice( $worker_rows, 0, 3 ) ), 'Windows-1251', 'UTF-8' ) );
+$missing_worker_queued = $worker_importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $missing_worker_upload, 'name' => 'GeographyNewDPD_missing.csv' ) );
+$missing_worker_internal = $worker_state->current();
+@unlink( (string) ( $missing_worker_internal['file_path'] ?? '' ) );
+$missing_worker_action = array_shift( $GLOBALS['wdc_dpd_scheduled_actions'] );
+$worker_importer->run_background_worker( (string) $missing_worker_action['args'][0], (int) $missing_worker_action['args'][1] );
+$missing_worker_failed = $worker_state->current();
+dpd_import_assert( 'failed' === (string) $missing_worker_failed['phase'] && 'error' === (string) $missing_worker_failed['worker_slice_stop_reason'] && array() === $GLOBALS['wdc_dpd_scheduled_actions'], 'Missing CSV after queue fails the server worker explicitly and schedules no continuation.' );
+$worker_importer->reset();
+
+$cancel_upload = tempnam( sys_get_temp_dir(), 'wdc-dpd-worker-cancel-' );
+file_put_contents( $cancel_upload, mb_convert_encoding( implode( "\n", $worker_rows ), 'Windows-1251', 'UTF-8' ) );
+$GLOBALS['wdc_dpd_import_options'] = array();
+$GLOBALS['wdc_dpd_scheduled_actions'] = array();
+$cancel_state = new DpdGeographyImportStateService();
+$cancel_importer = null;
+$cancel_importer = new DpdGeographyImportService(
+	new DpdGeographyCsvParser(), new DpdGeographyMatcher(), $cancel_state, new DpdGeographyStageRepository( $worker_db ), new LocationRepository( $worker_db ), new LocationDeliveryCodeRepository( $worker_db ), $settings, new DpdGeographyImportLockService( $worker_db ), null, $worker_scheduler,
+	static function () use ( &$cancel_importer ): BackgroundExecutionBudget {
+		return new DpdControlledExecutionBudget( 10, static function ( int $units ) use ( &$cancel_importer ): void {
+			if ( 1 === $units ) {
+				$cancel_importer->force_cancel();
+			}
+		} );
+	}
+);
+$cancel_queued = $cancel_importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $cancel_upload, 'name' => 'GeographyNewDPD_cancel.csv' ) );
+$cancel_internal = $cancel_state->current();
+$cancel_action = array_shift( $GLOBALS['wdc_dpd_scheduled_actions'] );
+$cancel_importer->run_background_worker( (string) $cancel_action['args'][0], (int) $cancel_action['args'][1] );
+$cancelled = $cancel_state->current();
+dpd_import_assert( 'cancelled' === (string) $cancelled['phase'] && 500 === (int) $cancelled['rows_read'] && 'cancelled' === (string) $cancelled['worker_slice_stop_reason'] && array() === $GLOBALS['wdc_dpd_scheduled_actions'], 'Cancellation between DPD worker units stops before batch two and schedules no continuation.' );
+
+$new_upload = tempnam( sys_get_temp_dir(), 'wdc-dpd-worker-new-owner-' );
+file_put_contents( $new_upload, mb_convert_encoding( implode( "\n", array_slice( $worker_rows, 0, 3 ) ), 'Windows-1251', 'UTF-8' ) );
+$new_owner = $cancel_importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $new_upload, 'name' => 'GeographyNewDPD_new_owner.csv' ) );
+$new_owner_internal = $cancel_state->current();
+$new_owner_actions = $GLOBALS['wdc_dpd_scheduled_actions'];
+$cancel_importer->current_state();
+$cancel_importer->run_background_worker( (string) $cancel_action['args'][0], (int) $cancel_action['args'][1] );
+dpd_import_assert( (string) $new_owner_internal['job_id'] === (string) $cancel_state->current()['job_id'] && (int) $new_owner_internal['byte_offset'] === (int) $cancel_state->current()['byte_offset'] && $new_owner_actions === $GLOBALS['wdc_dpd_scheduled_actions'], 'Status polling and a late old DPD worker cannot mutate or reschedule the new owner job.' );
+$cancel_importer->reset();
+@unlink( (string) ( $cancel_internal['file_path'] ?? '' ) );
+unset( $worker_db->dpd_geography_stage_tables[ (string) ( $cancel_internal['stage_table'] ?? '' ) ] );
+
+$GLOBALS['wdc_dpd_import_options'] = array();
+$GLOBALS['wdc_dpd_scheduled_actions'] = array();
+$ftp_worker_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-worker-ftp-' );
+file_put_contents( $ftp_worker_path, mb_convert_encoding( implode( "\n", array_slice( $worker_rows, 0, 1002 ) ), 'Windows-1251', 'UTF-8' ) );
+$ftp_worker_state = new DpdGeographyImportStateService();
+$ftp_worker_importer = new DpdGeographyImportService(
+	new DpdGeographyCsvParser(), new DpdGeographyMatcher(), $ftp_worker_state, new DpdGeographyStageRepository( $worker_db ), new LocationRepository( $worker_db ), new LocationDeliveryCodeRepository( $worker_db ), $settings, new DpdGeographyImportLockService( $worker_db ), null, $worker_scheduler,
+	static fn(): BackgroundExecutionBudget => new DpdControlledExecutionBudget( 2 ),
+	static fn( DpdGeographyFtpClient $ftp ): array => array( 'success' => true, 'status' => 'ok', 'path' => $ftp_worker_path, 'source_file' => 'GeographyNewDPD_sftp.csv', 'message' => 'Downloaded.' )
+);
+$ftp_worker_queued = $ftp_worker_importer->start_from_ftp( new DpdGeographyFtpClient( $settings ) );
+dpd_import_assert( 'ready' === (string) $ftp_worker_queued['phase'] && 'ftp' === (string) $ftp_worker_queued['source'] && 1 === count( $GLOBALS['wdc_dpd_scheduled_actions'] ), 'Successful SFTP acquisition queues the same server-side DPD worker without processing in the start request.' );
+$ftp_worker_action = array_shift( $GLOBALS['wdc_dpd_scheduled_actions'] );
+$ftp_worker_importer->run_background_worker( (string) $ftp_worker_action['args'][0], (int) $ftp_worker_action['args'][1] );
+dpd_import_assert( 1000 === (int) $ftp_worker_state->current()['rows_read'] && 1 === count( $GLOBALS['wdc_dpd_scheduled_actions'] ), 'SFTP geography source uses the same multi-step continuation pipeline as manual upload.' );
+$ftp_worker_continuation = array_shift( $GLOBALS['wdc_dpd_scheduled_actions'] );
+$ftp_worker_importer->run_background_worker( (string) $ftp_worker_continuation['args'][0], (int) $ftp_worker_continuation['args'][1] );
+dpd_import_assert( 'finished' === (string) $ftp_worker_state->current()['phase'] && 1001 === (int) $ftp_worker_state->current()['rows_read'] && ! file_exists( $ftp_worker_path ), 'SFTP background worker completes and cleans its downloaded source without browser step calls.' );
+
+$GLOBALS['wdc_dpd_import_options'] = array();
+$GLOBALS['wdc_dpd_scheduled_actions'] = array();
+$GLOBALS['wdc_dpd_as_initialized'] = false;
+$unavailable_state = new DpdGeographyImportStateService();
+$unavailable_scheduler = new WdcActionScheduler( new Logger() );
+$unavailable_importer = new DpdGeographyImportService( new DpdGeographyCsvParser(), new DpdGeographyMatcher(), $unavailable_state, new DpdGeographyStageRepository( $worker_db ), new LocationRepository( $worker_db ), new LocationDeliveryCodeRepository( $worker_db ), $settings, new DpdGeographyImportLockService( $worker_db ), null, $unavailable_scheduler );
+$unavailable_upload = tempnam( sys_get_temp_dir(), 'wdc-dpd-worker-unavailable-' );
+file_put_contents( $unavailable_upload, mb_convert_encoding( implode( "\n", array_slice( $worker_rows, 0, 3 ) ), 'Windows-1251', 'UTF-8' ) );
+$unavailable = $unavailable_importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $unavailable_upload, 'name' => 'GeographyNewDPD_unavailable.csv' ) );
+dpd_import_assert( 'failed' === (string) ( $unavailable['phase'] ?? '' ) && str_contains( (string) ( $unavailable['last_message'] ?? '' ), 'could not be scheduled' ), 'Action Scheduler unavailability produces an explicit terminal DPD geography start failure.' );
+$GLOBALS['wdc_dpd_as_initialized'] = true;
+$unavailable_importer->reset();
+
+$GLOBALS['wpdb'] = new wpdb();
 $production_db = new DpdProductionPathWpdb();
 $production_db->candidate_rows = array(
 	array(
@@ -1914,7 +2151,8 @@ dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_
 dpd_import_assert( is_string( $location_repository_source ) && str_contains( $location_repository_source, 'dpd_find_own_fias_candidates' ) && str_contains( $location_repository_source, 'dpd_find_city_fias_candidates' ) && str_contains( $location_repository_source, 'dpd_find_kladr_candidates' ) && str_contains( $location_repository_source, 'dpd_find_name_candidates' ) && str_contains( $location_repository_source, 'invalid SQL result' ), 'DPD geography repository exposes fail-closed batch candidate lookup APIs.' );
 $stage_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyStageRepository.php' );
 dpd_import_assert( is_string( $stage_source ) && str_contains( $stage_source, 'get_count_or_throw' ) && ! str_contains( $stage_source, '(int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$safe_stage}' ), 'DPD geography finalization count queries fail closed instead of coercing SQL errors to zero.' );
-dpd_import_assert( is_string( $stage_source ) && ! str_contains( $stage_source, 'ON DUPLICATE KEY UPDATE' ) && ! str_contains( $stage_source, 'VALUES(dpd_city_id)' ) && ! str_contains( $stage_source, 'VALUES(updated_at)' ), 'DPD geography production finalization does not use ambiguous ON DUPLICATE/VALUES SQL.' );
+$finalization_source = is_string( $stage_source ) ? substr( $stage_source, (int) strpos( $stage_source, 'public function finalize_into_delivery_codes' ) ) : '';
+dpd_import_assert( '' !== $finalization_source && ! str_contains( $finalization_source, 'ON DUPLICATE KEY UPDATE' ) && ! str_contains( $finalization_source, 'VALUES(dpd_city_id)' ) && ! str_contains( $finalization_source, 'VALUES(updated_at)' ), 'DPD geography production finalization does not use ambiguous ON DUPLICATE/VALUES SQL.' );
 dpd_import_assert( is_string( $stage_source ) && str_contains( $stage_source, 'UPDATE {$delivery_table} AS dc' ) && str_contains( $stage_source, 'INNER JOIN {$safe_stage} AS stage ON stage.location_id = dc.location_id' ) && str_contains( $stage_source, 'INSERT INTO {$delivery_table} (location_id, dpd_city_id, updated_at)' ) && str_contains( $stage_source, 'SELECT stage.location_id, stage.dpd_city_id' ), 'DPD geography production finalization applies candidates through qualified UPDATE and INSERT SELECT statements.' );
 $location_repository_source = file_get_contents( __DIR__ . '/../../src/Locations/Storage/LocationRepository.php' );
 dpd_import_assert( is_string( $location_repository_source ) && str_contains( $location_repository_source, 'dpd_get_candidate_rows_or_throw' ) && str_contains( $location_repository_source, '$this->wpdb->last_error = \'\'' ) && str_contains( $location_repository_source, 'invalid SQL result' ), 'DPD batch candidate lookup queries fail closed on SQL and non-array result errors.' );
@@ -1929,7 +2167,7 @@ dpd_import_assert( is_string( $status_segment ) && str_contains( $status_segment
 dpd_import_assert( is_string( $step_segment ) && str_contains( $step_segment, 'job_id' ) && str_contains( $step_segment, 'expected_byte_offset' ) && str_contains( $step_segment, 'DPD_GEOGRAPHY_AJAX_STEP_LIMIT' ), 'DPD geography import step AJAX handler passes job_id, expected byte offset, and server step limit.' );
 dpd_import_assert( is_string( $admin_source ) && str_contains( $admin_source, 'private const DPD_GEOGRAPHY_AJAX_STEP_LIMIT = 500' ), 'browser DPD geography import step limit is capped at 500 rows.' );
 $runner_source = file_get_contents( __DIR__ . '/../../assets/admin/dpd-geography-import.js' );
-dpd_import_assert( is_string( $runner_source ) && ! str_contains( $runner_source, 'setInterval' ) && str_contains( $runner_source, 'wdc_dpd_geography_import_step' ) && str_contains( $runner_source, 'expected_byte_offset' ), 'DPD geography browser runner uses separate sequential step requests without setInterval.' );
+dpd_import_assert( is_string( $runner_source ) && ! str_contains( $runner_source, 'setInterval' ) && ! str_contains( $runner_source, 'wdc_dpd_geography_import_step' ) && str_contains( $runner_source, 'wdc_dpd_geography_import_status' ), 'DPD geography browser runner only polls state; server-side Action Scheduler workers own import progress.' );
 dpd_import_assert( is_string( $runner_source ) && str_contains( $runner_source, 'operationControl.outcome === \'reset_required\'' ) && str_contains( $runner_source, 'Этот импорт создан предыдущей версией runner' ), 'DPD geography browser runner stops legacy protocol jobs until reset.' );
 $lock_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportLockService.php' );
 dpd_import_assert( is_string( $lock_source ) && str_contains( $lock_source, 'DELETE FROM {$this->wpdb->options}' ) && str_contains( $lock_source, 'option_value = %s' ) && str_contains( $lock_source, 'public function force_release' ) && str_contains( $lock_source, 'delete_option( self::OPTION_NAME' ), 'DPD geography import lock release/takeover uses atomic SQL compare-delete, while admin force reset can delete the lock option.' );

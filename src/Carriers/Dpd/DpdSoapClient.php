@@ -17,7 +17,7 @@ final class DpdSoapClient implements DpdSoapClientInterface {
 	 */
 	public function call( string $service, string $method, array $payload, DpdCredentials $credentials, array $options = array() ): DpdSoapResponse {
 		if ( ! $this->is_available() ) {
-			throw new DpdException( 'PHP SOAP extension is not available.' );
+			throw new DpdException( 'PHP SOAP extension / SoapClient is unavailable. DPD SOAP API calls cannot be executed.' );
 		}
 		if ( ! $credentials->is_complete() ) {
 			throw new DpdException( 'DPD credentials are incomplete.' );

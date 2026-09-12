@@ -5,6 +5,8 @@ namespace WallsShop\WDC\Carriers\Dpd\Geography;
 
 use Throwable;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget;
+use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\LocationWriteLock;
@@ -13,8 +15,14 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 defined( 'ABSPATH' ) || exit;
 
 final class DpdGeographyImportService {
+	public const WORKER_HOOK = 'wdc_dpd_geography_import_worker';
 	private const DEFAULT_STEP_LIMIT = 3000;
 	private const MATCH_BATCH_SIZE = 500;
+	private const WORKER_STEP_LIMIT = 500;
+	private const WORKER_SOFT_TIME_BUDGET_SECONDS = 18.0;
+	private const MAX_STEPS_PER_WORKER_SLICE = 10;
+	private const MEMORY_BUDGET_FRACTION = 0.8;
+	private const ACTION_GROUP = 'walls-delivery-calc';
 	private const LOCK_BUSY_RETRY_MS = 1500;
 	private const STEP_LOCK_TTL_SECONDS = 600;
 	private const START_LOCK_TTL_SECONDS = 1800;
@@ -29,9 +37,25 @@ final class DpdGeographyImportService {
 		private LocationDeliveryCodeRepository $delivery_codes,
 		private ?DpdSettings $settings = null,
 		private ?DpdGeographyImportLockService $lock = null,
-		private ?LocationWriteLock $locations_write_lock = null
+		private ?LocationWriteLock $locations_write_lock = null,
+		private ?ActionScheduler $scheduler = null,
+		private mixed $execution_budget_factory = null,
+		private mixed $ftp_download = null
 	) {
 		$this->lock ??= new DpdGeographyImportLockService();
+	}
+
+	public function register(): void {
+		add_action( self::WORKER_HOOK, array( $this, 'run_background_worker' ), 10, 2 );
+		$this->scheduler?->when_initialized(
+			'dpd-geography-import-worker',
+			function (): void {
+				$current = $this->state->current();
+				if ( $this->active_phase( (string) ( $current['phase'] ?? '' ) ) ) {
+					$this->schedule_worker_once( (string) ( $current['job_id'] ?? '' ), (int) ( $current['byte_offset'] ?? 0 ) );
+				}
+			}
+		);
 	}
 
 	/**
@@ -42,7 +66,7 @@ final class DpdGeographyImportService {
 	public function import_file( string $path, string $source, string $source_file ): array {
 		$job = $this->run_locked_start(
 			$source,
-			fn(): array => $this->start_from_existing_file_unlocked( $path, $source, $source_file, false )
+			fn(): array => $this->start_from_existing_file_unlocked( $path, $source, $source_file, false, false )
 		);
 		while ( in_array( (string) ( $job['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
 			$job = $this->step( (string) $job['job_id'], 10000 );
@@ -94,7 +118,7 @@ final class DpdGeographyImportService {
 		return $this->run_locked_start(
 			'ftp',
 			function () use ( $ftp ): array {
-				$download = $ftp->download_latest();
+				$download = is_callable( $this->ftp_download ) ? ( $this->ftp_download )( $ftp ) : $ftp->download_latest();
 				if ( 'warning' === (string) ( $download['status'] ?? '' ) ) {
 					$current = $this->state->public_state();
 					$current['status'] = 'warning';
@@ -115,6 +139,73 @@ final class DpdGeographyImportService {
 	 */
 	public function step( string $job_id = '', int $limit = self::DEFAULT_STEP_LIMIT, ?int $expected_byte_offset = null ): array {
 		return $this->with_locations_write_lock( fn(): array => $this->step_with_import_lock( $job_id, $limit, $expected_byte_offset ), true );
+	}
+
+	/**
+	 * Action Scheduler callback. Each step is independently checkpointed and
+	 * owns the shared location-write lock only for that atomic unit.
+	 *
+	 * @return array<string,mixed>
+	 */
+	public function run_background_worker( string $job_id = '', int $expected_byte_offset = 0 ): array {
+		$initial = $this->state->current();
+		if ( $job_id !== (string) ( $initial['job_id'] ?? '' ) || ! $this->active_phase( (string) ( $initial['phase'] ?? '' ) ) ) {
+			return $this->state->public_state();
+		}
+		if ( $expected_byte_offset !== (int) ( $initial['byte_offset'] ?? 0 ) ) {
+			return $this->with_step_control( $this->state->public_state(), 'stale' );
+		}
+
+		$budget = $this->new_execution_budget();
+		$budget->start();
+		$stop_reason = '';
+		try {
+			while ( $budget->can_continue() ) {
+				$current = $this->state->current();
+				if ( $job_id !== (string) ( $current['job_id'] ?? '' ) ) {
+					return $this->state->public_state();
+				}
+				if ( ! $this->active_phase( (string) ( $current['phase'] ?? '' ) ) ) {
+					$stop_reason = $this->terminal_stop_reason( (string) ( $current['phase'] ?? '' ) );
+					break;
+				}
+				$offset = (int) ( $current['byte_offset'] ?? 0 );
+				$result = $this->step( $job_id, self::WORKER_STEP_LIMIT, $offset );
+				$control = (string) ( $result['step_control']['outcome'] ?? '' );
+				if ( 'busy' === $control ) {
+					$stop_reason = 'lock_busy';
+					break;
+				}
+				if ( 'stale' === $control ) {
+					return $this->state->public_state();
+				}
+				$budget->mark_unit_processed();
+				$current = $this->state->current();
+				if ( $job_id !== (string) ( $current['job_id'] ?? '' ) ) {
+					return $this->state->public_state();
+				}
+				if ( ! $this->active_phase( (string) ( $current['phase'] ?? '' ) ) ) {
+					$stop_reason = $this->terminal_stop_reason( (string) ( $current['phase'] ?? '' ) );
+					break;
+				}
+			}
+		} catch ( Throwable $throwable ) {
+			$stop_reason = 'error';
+			$this->fail_background_if_owned( $job_id, 'DPD geography background worker failed: ' . $this->sanitize_error( $throwable->getMessage() ) );
+		}
+
+		if ( '' === $stop_reason ) {
+			$stop_reason = $budget->stop_reason();
+		}
+		$this->save_worker_metrics_if_owned( $job_id, $budget, $stop_reason );
+		$current = $this->state->current();
+		if ( $job_id === (string) ( $current['job_id'] ?? '' ) && $this->active_phase( (string) ( $current['phase'] ?? '' ) ) ) {
+			if ( ! $this->schedule_worker_once( $job_id, (int) ( $current['byte_offset'] ?? 0 ) ) ) {
+				$this->fail_background_if_owned( $job_id, 'Unable to schedule DPD geography import continuation.' );
+			}
+		}
+
+		return $this->state->public_state();
 	}
 
 	private function step_with_import_lock( string $job_id, int $limit, ?int $expected_byte_offset ): array {
@@ -147,7 +238,11 @@ final class DpdGeographyImportService {
 			if ( null !== $expected_byte_offset && $expected_byte_offset !== (int) ( $state['byte_offset'] ?? 0 ) ) {
 				return $this->with_step_control( $this->state->public_state(), 'stale' );
 			}
-			return $this->step_unlocked( $state, max( 1, $limit ) );
+			$started_at = microtime( true );
+			$result = $this->step_unlocked( $state, max( 1, $limit ) );
+			$this->record_step_metrics_if_owned( $lock_job_id, (int) round( ( microtime( true ) - $started_at ) * 1000 ) );
+
+			return isset( $result['step_control'] ) ? $result : $this->state->public_state();
 		} finally {
 			$this->lock?->release( $token );
 		}
@@ -186,9 +281,11 @@ final class DpdGeographyImportService {
 		);
 		foreach ( array_chunk( $step['rows'], self::MATCH_BATCH_SIZE ) as $rows ) {
 			$context = $this->match_context_for_rows( $rows, $patch );
+			$candidates = array();
 			foreach ( $rows as $row ) {
-				$this->process_row( $stage_table, $row, $patch, $context );
+				$this->process_row( $row, $patch, $context, $candidates );
 			}
+			$this->stage_candidates( $stage_table, $candidates, $patch );
 			if ( $this->step_state_is_stale( $start_job_id, $start_offset ) ) {
 				return $this->with_step_control( $this->state->public_state(), 'stale' );
 			}
@@ -232,6 +329,7 @@ final class DpdGeographyImportService {
 		}
 		try {
 			$current = $this->state->current();
+			$this->unschedule_worker( (string) ( $current['job_id'] ?? '' ), (int) ( $current['byte_offset'] ?? 0 ) );
 			$stage_table = (string) ( $current['stage_table'] ?? '' );
 			if ( '' !== $stage_table ) {
 				$this->stage->drop( $stage_table );
@@ -247,7 +345,9 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	public function force_cancel(): array {
+		$current = $this->state->current();
 		$this->state->force_cancel( 'DPD geography import was force-cancelled by admin.' );
+		$this->unschedule_worker( (string) ( $current['job_id'] ?? '' ), (int) ( $current['byte_offset'] ?? 0 ) );
 		$this->lock?->force_release();
 
 		return $this->state->public_state();
@@ -266,7 +366,7 @@ final class DpdGeographyImportService {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function start_from_existing_file_unlocked( string $path, string $source, string $source_file, bool $delete_on_finish ): array {
+	private function start_from_existing_file_unlocked( string $path, string $source, string $source_file, bool $delete_on_finish, bool $schedule_background = true ): array {
 		$stage_table = '';
 		try {
 			$inspect = $this->parser->inspect_header( $path );
@@ -295,6 +395,9 @@ final class DpdGeographyImportService {
 					'last_message' => $delete_on_finish ? 'DPD geography import job created.' : 'DPD geography import job created for existing file.',
 				)
 			);
+			if ( $schedule_background && $this->scheduler instanceof ActionScheduler && ! $this->schedule_worker_once( $job_id, (int) $inspect['data_offset'] ) ) {
+				return $this->fail_with_report( 'DPD geography import job was created, but its background worker could not be scheduled.' );
+			}
 
 			return $this->state->public_state();
 		} catch ( Throwable $throwable ) {
@@ -310,11 +413,11 @@ final class DpdGeographyImportService {
 	 * @param array<string,string> $row
 	 * @param array<string,mixed> $patch
 	 */
-	private function process_row( string $stage_table, array $row, array &$patch, DpdGeographyMatchContext $context ): void {
+	private function process_row( array $row, array &$patch, DpdGeographyMatchContext $context, array &$candidates ): void {
 		$country = strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) );
 		if ( 'RU' !== $country ) {
 			if ( in_array( $country, array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) {
-				$this->process_foreign_row( $stage_table, $row, $patch, $country );
+				$this->process_foreign_row( $row, $patch, $country, $candidates );
 				return;
 			}
 			$this->inc( $patch, 'skipped_non_ru' );
@@ -349,30 +452,14 @@ final class DpdGeographyImportService {
 		if ( ! empty( $match['resolved_after_fias_disambiguation'] ) ) {
 			$this->inc( $patch, 'resolved_after_fias_disambiguation' );
 		}
-		$result = $this->stage->upsert_candidate( $stage_table, $location_id, $dpd_city_id, $method );
-		if ( 'inserted' === $result ) {
-			$this->inc( $patch, 'saved_candidates' );
-			return;
-		}
-		if ( 'unchanged' === $result ) {
-			$this->inc( $patch, 'unchanged_mappings' );
-			return;
-		}
-		if ( 'conflict' === $result ) {
-			$this->inc( $patch, 'conflicts' );
-			return;
-		}
-		$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
-		$errors[] = 'Failed to stage mapping for location_id=' . $location_id;
-		$patch['errors'] = $errors;
-		$this->inc( $patch, 'errors_total' );
+		$candidates[] = array( 'location_id' => $location_id, 'dpd_city_id' => $dpd_city_id, 'match_method' => $method, 'foreign_location_outcome' => '' );
 	}
 
 	/**
 	 * @param array<string,string> $row
 	 * @param array<string,mixed> $patch
 	 */
-	private function process_foreign_row( string $stage_table, array $row, array &$patch, string $country ): void {
+	private function process_foreign_row( array $row, array &$patch, string $country, array &$candidates ): void {
 		$this->inc( $patch, 'foreign_rows' );
 		$this->inc( $patch, 'foreign_' . strtolower( $country ) . '_rows' );
 		$dpd_city_id = preg_replace( '/\D+/', '', (string) ( $row['dpd_city_id'] ?? '' ) ) ?? '';
@@ -453,19 +540,46 @@ final class DpdGeographyImportService {
 			$this->add_error( $patch, 'Failed to save foreign DPD location for dpd_city_id=' . $dpd_city_id . ' country_code=' . $country . ' place_name=' . $place . ': missing saved id' );
 			return;
 		}
-		$result = $this->stage->upsert_candidate( $stage_table, $saved_id, $dpd_city_id, 'foreign' );
-		if ( 'conflict' === $result ) {
-			$this->inc( $patch, 'foreign_mapping_conflicts' );
-			$this->inc( $patch, 'conflicts' );
-			return;
-		}
-		if ( ! in_array( $result, array( 'inserted', 'unchanged' ), true ) ) {
-			$this->add_error( $patch, 'Failed to stage foreign DPD mapping for dpd_city_id=' . $dpd_city_id . ' country_code=' . $country . ' place_name=' . $place );
-			return;
-		}
-		$this->inc( $patch, 'inserted' === $result ? 'saved_candidates' : 'unchanged_mappings' );
+		$candidates[] = array(
+			'location_id' => $saved_id,
+			'dpd_city_id' => $dpd_city_id,
+			'match_method' => 'foreign',
+			'foreign_location_outcome' => null === $existing ? 'foreign_locations_inserted' : 'foreign_locations_updated',
+			'error_context' => 'dpd_city_id=' . $dpd_city_id . ' country_code=' . $country . ' place_name=' . $place,
+		);
+	}
 
-		$this->inc( $patch, null === $existing ? 'foreign_locations_inserted' : 'foreign_locations_updated' );
+	/**
+	 * @param array<int,array<string,mixed>> $candidates
+	 * @param array<string,mixed> $patch
+	 */
+	private function stage_candidates( string $stage_table, array $candidates, array &$patch ): void {
+		if ( array() === $candidates ) {
+			return;
+		}
+		$results = $this->stage->upsert_candidates_batch( $stage_table, $candidates );
+		foreach ( $candidates as $index => $candidate ) {
+			$result = (string) ( $results[ $index ] ?? 'invalid' );
+			if ( 'inserted' === $result ) {
+				$this->inc( $patch, 'saved_candidates' );
+			} elseif ( 'unchanged' === $result ) {
+				$this->inc( $patch, 'unchanged_mappings' );
+			} elseif ( 'conflict' === $result ) {
+				$this->inc( $patch, 'conflicts' );
+				if ( 'foreign' === (string) ( $candidate['match_method'] ?? '' ) ) {
+					$this->inc( $patch, 'foreign_mapping_conflicts' );
+				}
+				continue;
+			} else {
+				$context = (string) ( $candidate['error_context'] ?? 'location_id=' . (int) ( $candidate['location_id'] ?? 0 ) );
+				$this->add_error( $patch, 'Failed to stage DPD mapping for ' . $context );
+				continue;
+			}
+			$outcome = (string) ( $candidate['foreign_location_outcome'] ?? '' );
+			if ( '' !== $outcome ) {
+				$this->inc( $patch, $outcome );
+			}
+		}
 	}
 
 	private function normalize_foreign_place_type( string $type ): string {
@@ -871,6 +985,87 @@ final class DpdGeographyImportService {
 		$state['last_message'] = 'Этот импорт создан предыдущей версией runner. Выполните сброс и запустите импорт заново.';
 
 		return $state;
+	}
+
+	private function active_phase( string $phase ): bool {
+		return in_array( $phase, array( 'ready', 'importing' ), true );
+	}
+
+	private function terminal_stop_reason( string $phase ): string {
+		return match ( $phase ) {
+			'finished' => 'eof',
+			'failed' => 'error',
+			default => 'cancelled',
+		};
+	}
+
+	private function schedule_worker_once( string $job_id, int $byte_offset ): bool {
+		if ( ! $this->scheduler instanceof ActionScheduler ) {
+			return false;
+		}
+		$args = array( $job_id, max( 0, $byte_offset ) );
+		if ( $this->scheduler->has_scheduled( self::WORKER_HOOK, $args, self::ACTION_GROUP ) ) {
+			return true;
+		}
+
+		return null !== $this->scheduler->schedule_single( time() + 5, self::WORKER_HOOK, $args, self::ACTION_GROUP );
+	}
+
+	private function unschedule_worker( string $job_id, int $byte_offset ): void {
+		if ( $this->scheduler instanceof ActionScheduler && '' !== $job_id ) {
+			$this->scheduler->unschedule( self::WORKER_HOOK, array( $job_id, max( 0, $byte_offset ) ), self::ACTION_GROUP );
+		}
+	}
+
+	private function new_execution_budget(): BackgroundExecutionBudget {
+		if ( is_callable( $this->execution_budget_factory ) ) {
+			$budget = ( $this->execution_budget_factory )();
+			if ( $budget instanceof BackgroundExecutionBudget ) {
+				return $budget;
+			}
+		}
+		$memory_limit = (string) ini_get( 'memory_limit' );
+
+		return new BackgroundExecutionBudget(
+			self::WORKER_SOFT_TIME_BUDGET_SECONDS,
+			self::MAX_STEPS_PER_WORKER_SLICE,
+			BackgroundExecutionBudget::memory_threshold_from_limit( $memory_limit, self::MEMORY_BUDGET_FRACTION )
+		);
+	}
+
+	private function save_worker_metrics_if_owned( string $job_id, BackgroundExecutionBudget $budget, string $stop_reason ): void {
+		$current = $this->state->current();
+		if ( $job_id !== (string) ( $current['job_id'] ?? '' ) ) {
+			return;
+		}
+		$this->state->update(
+			array(
+				'worker_slice_units' => $budget->units_processed(),
+				'worker_slice_duration_ms' => (int) round( $budget->elapsed_seconds() * 1000 ),
+				'worker_slice_stop_reason' => $stop_reason,
+			)
+		);
+	}
+
+	private function record_step_metrics_if_owned( string $job_id, int $duration_ms ): void {
+		$current = $this->state->current();
+		if ( $job_id !== (string) ( $current['job_id'] ?? '' ) ) {
+			return;
+		}
+		$this->state->update(
+			array(
+				'last_step_duration_ms' => max( 0, $duration_ms ),
+				'max_step_duration_ms' => max( max( 0, $duration_ms ), (int) ( $current['max_step_duration_ms'] ?? 0 ) ),
+			)
+		);
+	}
+
+	private function fail_background_if_owned( string $job_id, string $message ): void {
+		$current = $this->state->current();
+		if ( $job_id !== (string) ( $current['job_id'] ?? '' ) || ! $this->active_phase( (string) ( $current['phase'] ?? '' ) ) ) {
+			return;
+		}
+		$this->fail_with_report( $message );
 	}
 
 	private function copy_to_import_temp( string $source, string $name ): string {
