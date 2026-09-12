@@ -6,7 +6,7 @@ Branch: `fix/russian-post-background-pipeline`
 
 Baseline HEAD: `be221f5b8872e9ba56bc2e7a56af872140a4b5c3`
 
-Plugin version: `1.0.13`; schema version: `1.0.0`
+Plugin version: `1.0.14`; schema version: `1.0.0`
 
 The Russian Post pilot batches exact FIAS lookups and staging inserts. Production acceptance of 1.0.9 completed successfully; the temporary 1.0.8 profiler was removed in 1.0.10. Ozon and Yandex remain outside this implementation phase.
 
@@ -186,6 +186,14 @@ Acceleration depends on table sizes. For local stages, replacing one 500/10/100-
 DPD pickup autosync performs OPS and PVZ import in one locked callback. It has no continuation gap and needs no cron-throughput optimization.
 
 DPD geography import was moved from its browser-driven loop to the shared bounded-worker policy in 1.0.13. Manual/SFTP source acquisition creates a durable job and one Action Scheduler worker. Each callback performs multiple 500-row checkpointed steps while its 18-second, 10-unit, and 80%-memory limits permit. The browser performs read-only polling. Stage N+1 was removed with bounded existing-row prefetch and prepared multi-row writes; the already batched RU matcher and set-based transactional finalization were retained.
+
+### DPD foreign-location performance follow-up (1.0.14)
+
+The accepted 1.0.13 production import read 261,592 rows, including 24,209 supported foreign rows (20,810 BY), in about 5h30m; its slowest 500-row step was 132,024ms. Code-level profiling and a deterministic 500-row smoke reproduced the foreign hot path as 500 DPD mapping reads, 500 non-sargable identity reads, 500 redundant `find_by_id()` reads, and 500 unconditional location updates. The identity SQL constrained `active,country_code`, but each remaining predicate used `REPLACE(LOWER(searchable_text)) LIKE '%token%'`, so the compound index only narrowed the country and every row repeated the broad scan.
+
+Version 1.0.14 keeps the exact normalization, mapped-ID preference, lowest-ID duplicate choice, legacy empty-district fallback, semantic counters, staging behavior, worker limits, and finalization. Per 500-row step it now deduplicates identities, prefetches DPD mappings in 250-ID chunks, prefetches foreign candidates per country in 100-identity chunks, replays sequential identity mutations in memory, and writes only unique changed/new locations in 100-row prepared statements. A failed bulk statement falls back to the established per-row save path so row-level warning behavior remains available. `foreign_locations_updated` still means “an existing canonical row was processed”; it is intentionally not redefined as “an SQL UPDATE occurred.”
+
+Structural fixtures record the before/after query model. For 500 existing BY rows the path changes from 500 mapping + 500 identity + 500 `find_by_id` + 500 updates to 2 mapping queries + 5 identity prefetches + zero `find_by_id` + zero no-op writes. For 500 almost-unique AM/BY/KZ/KG rows it uses 2 mapping queries + 7 country/chunk identity prefetches + 5 location inserts. These are query-count assertions rather than machine-specific wall-time thresholds. No persistent column, index, migration, RU matcher, worker, or finalization change is involved; production duration and max-step acceptance remain required.
 
 ## 10. Shipment status autosync
 
