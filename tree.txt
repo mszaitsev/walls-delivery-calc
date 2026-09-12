@@ -329,6 +329,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2BuilderRunnerService.php
 |-- src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2BuilderService.php
 |-- src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2Repository.php
+|-- src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2ExecutionLock.php
 |-- src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2Runner.php
 |-- src/Carriers/YandexDelivery/LocationMappingV2/YandexGeoV2RegionEnrichmentRunner.php
 |-- src/Carriers/YandexDelivery/LocationMappingV2/YandexGeoV2RegionEnrichmentService.php

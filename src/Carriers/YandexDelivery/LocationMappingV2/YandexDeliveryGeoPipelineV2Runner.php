@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService;
 use WallsShop\WDC\Calendar\Services\TimezoneService;
+use WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -22,6 +23,9 @@ final class YandexDeliveryGeoPipelineV2Runner {
 	private const STAGE_REGION_MAPPING = 'region_mapping';
 	private const STAGE_LOCATION_MAPPING = 'location_mapping';
 	private const STAGE_DONE = 'done';
+	private const WORKER_SOFT_TIME_BUDGET_SECONDS = 18.0;
+	private const MAX_UNITS_PER_WORKER_SLICE = 25;
+	private const MEMORY_BUDGET_FRACTION = 0.8;
 
 	public function __construct(
 		private YandexDeliveryPickupPointV2RunnerService $pickup_runner,
@@ -32,7 +36,9 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		private YandexRegionMappingV2Repository $region_mapping_repository,
 		private YandexLocationMappingV2Runner $location_mapping_runner,
 		private YandexLocationMappingV2Repository $location_mapping_repository,
-		private TimezoneService $timezone
+		private TimezoneService $timezone,
+		private YandexDeliveryGeoPipelineV2ExecutionLock $execution_lock,
+		private mixed $execution_budget_factory = null
 	) {
 	}
 
@@ -47,7 +53,6 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		$state['started_at'] = $this->now();
 		$state['updated_at'] = $state['started_at'];
 		$state['message'] = 'Запускаем полное обновление Яндекс ПВЗ/географии.';
-		$this->pickup_runner->reset();
 		$this->save_state( $state );
 		$this->schedule_next_step( $state );
 
@@ -74,28 +79,73 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		if ( 'running' !== (string) ( $state['status'] ?? '' ) ) {
 			return $state;
 		}
+		$session_id = (string) ( $state['session_id'] ?? '' );
+		$token = $this->execution_lock->acquire( $session_id );
+		if ( null === $token ) {
+			$this->schedule_next_step( $state );
+			return $this->current_state();
+		}
 
 		try {
-			$stage = (string) ( $state['stage'] ?? self::STAGE_IMPORT_PVZ );
-			$state = match ( $stage ) {
-				self::STAGE_IMPORT_PVZ => $this->run_import_stage( $state ),
-				self::STAGE_BUILD_GEO_V2 => $this->run_geo_builder_stage( $state ),
-				self::STAGE_REGION_ENRICHMENT => $this->run_region_enrichment_stage( $state ),
-				self::STAGE_REGION_MAPPING => $this->run_region_mapping_stage( $state ),
-				self::STAGE_LOCATION_MAPPING => $this->run_location_mapping_stage( $state ),
-				default => $this->complete( $state ),
-			};
-		} catch ( \Throwable $exception ) {
-			$state = $this->fail( $state, $exception );
-		}
-		$this->save_state( $state );
-		$this->schedule_next_step( $state );
+			$result = $this->process_one_atomic_step( $session_id, $token );
+			$this->schedule_next_step( $result['state'] );
 
-		return $state;
+			return $result['state'];
+		} finally {
+			$this->execution_lock->release( $session_id, $token );
+		}
 	}
 
-	public function run_scheduled_step(): void {
-		$this->run_step();
+	public function run_scheduled_step( string $session_id = '' ): void {
+		if ( '' === trim( $session_id ) ) {
+			$this->ensure_running_continuation();
+			return;
+		}
+
+		$state = $this->current_state();
+		if ( ! $this->is_running_owner( $state, $session_id ) ) {
+			return;
+		}
+		$token = $this->execution_lock->acquire( $session_id );
+		if ( null === $token ) {
+			$this->schedule_next_step( $state );
+			return;
+		}
+
+		$budget = $this->new_execution_budget();
+		$budget->start();
+		try {
+			while ( $budget->can_continue() ) {
+				$state = $this->current_state();
+				if ( ! $this->is_running_owner( $state, $session_id ) || ! $this->execution_lock->owns( $session_id, $token ) ) {
+					return;
+				}
+
+				$result = $this->process_one_atomic_step( $session_id, $token );
+				if ( empty( $result['processed'] ) ) {
+					return;
+				}
+				$budget->mark_unit_processed();
+
+				$state = $this->current_state();
+				if ( ! $this->is_running_owner( $state, $session_id ) ) {
+					return;
+				}
+				if ( ! $this->execution_lock->owns( $session_id, $token ) || ! $this->execution_lock->renew( $session_id, $token ) ) {
+					return;
+				}
+				if ( ! empty( $result['heavy_download'] ) ) {
+					break;
+				}
+			}
+
+			$state = $this->current_state();
+			if ( $this->is_running_owner( $state, $session_id ) && $this->execution_lock->owns( $session_id, $token ) ) {
+				$this->schedule_next_step( $state );
+			}
+		} finally {
+			$this->execution_lock->release( $session_id, $token );
+		}
 	}
 
 	public function run_scheduled_start(): void {
@@ -112,28 +162,28 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		if ( 'running' !== (string) ( $state['status'] ?? '' ) ) {
 			return $state;
 		}
-		match ( (string) ( $state['stage'] ?? '' ) ) {
+		$stage = (string) ( $state['stage'] ?? '' );
+		$state['status'] = 'paused';
+		$state['updated_at'] = $this->now();
+		$state['message'] = 'Полное обновление Яндекс ПВЗ/географии поставлено на паузу.';
+		$this->save_state( $state );
+		$this->clear_scheduled_step();
+		match ( $stage ) {
 			self::STAGE_IMPORT_PVZ => $this->pickup_runner->pause(),
 			self::STAGE_BUILD_GEO_V2 => $this->geo_builder_runner->pause(),
 			self::STAGE_REGION_ENRICHMENT => $this->region_enrichment_runner->pause(),
 			self::STAGE_LOCATION_MAPPING => $this->location_mapping_runner->pause(),
 			default => null,
 		};
-		$state['status'] = 'paused';
-		$this->clear_scheduled_step();
-		$state['updated_at'] = $this->now();
-		$state['message'] = 'Полное обновление Яндекс ПВЗ/географии поставлено на паузу.';
-		$this->save_state( $state );
-
-		return $state;
+		return $this->current_state();
 	}
 
 	/** @return array<string,mixed> */
 	public function reset(): array {
 		$state = $this->base_state( 'idle', self::STAGE_IMPORT_PVZ );
 		$state['message'] = 'Состояние полного обновления сброшено.';
-		$this->clear_scheduled_step();
 		$this->save_state( $state );
+		$this->clear_scheduled_step();
 
 		return $state;
 	}
@@ -148,8 +198,42 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		return is_array( $state ) && array() !== $state ? array_merge( $this->base_state( 'idle', self::STAGE_IMPORT_PVZ ), $state ) : $this->base_state( 'idle', self::STAGE_IMPORT_PVZ );
 	}
 
+	/** @return array{state:array<string,mixed>,processed:bool,heavy_download:bool} */
+	private function process_one_atomic_step( string $session_id, string $token ): array {
+		$state = $this->current_state();
+		if ( ! $this->is_running_owner( $state, $session_id ) ) {
+			return array( 'state' => $state, 'processed' => false, 'heavy_download' => false );
+		}
+
+		$stage = (string) ( $state['stage'] ?? self::STAGE_IMPORT_PVZ );
+		$heavy_download = self::STAGE_IMPORT_PVZ === $stage && ! array_key_exists( self::STAGE_IMPORT_PVZ, $state['summary'] );
+		try {
+			$next = match ( $stage ) {
+				self::STAGE_IMPORT_PVZ => $this->run_import_stage( $state ),
+				self::STAGE_BUILD_GEO_V2 => $this->run_geo_builder_stage( $state ),
+				self::STAGE_REGION_ENRICHMENT => $this->run_region_enrichment_stage( $state ),
+				self::STAGE_REGION_MAPPING => $this->run_region_mapping_stage( $state ),
+				self::STAGE_LOCATION_MAPPING => $this->run_location_mapping_stage( $state ),
+				default => $this->complete( $state ),
+			};
+		} catch ( \Throwable $exception ) {
+			$next = $this->fail( $state, $exception );
+		}
+
+		$current = $this->current_state();
+		if ( ! $this->is_running_owner( $current, $session_id ) || ! $this->execution_lock->owns( $session_id, $token ) ) {
+			return array( 'state' => $current, 'processed' => true, 'heavy_download' => $heavy_download );
+		}
+		$this->save_state( $next );
+
+		return array( 'state' => $next, 'processed' => true, 'heavy_download' => $heavy_download );
+	}
+
 	/** @param array<string,mixed> $state @return array<string,mixed> */
 	private function run_import_stage( array $state ): array {
+		if ( ! array_key_exists( self::STAGE_IMPORT_PVZ, $state['summary'] ) ) {
+			$this->pickup_runner->reset();
+		}
 		$pickup_state = $this->pickup_runner->current_state();
 		$status = (string) ( $pickup_state['status'] ?? 'idle' );
 		if ( 'idle' === $status ) {
@@ -359,10 +443,23 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		if ( 'running' !== (string) ( $state['status'] ?? '' ) || ! function_exists( 'wp_schedule_single_event' ) ) {
 			return;
 		}
-		if ( function_exists( 'wp_next_scheduled' ) && wp_next_scheduled( self::CRON_HOOK ) ) {
+		$session_id = (string) ( $state['session_id'] ?? '' );
+		if ( '' === $session_id ) {
 			return;
 		}
-		wp_schedule_single_event( time() + 1, self::CRON_HOOK );
+		$this->clear_legacy_scheduled_step();
+		$args = array( $session_id );
+		if ( function_exists( 'wp_next_scheduled' ) && wp_next_scheduled( self::CRON_HOOK, $args ) ) {
+			return;
+		}
+		wp_schedule_single_event( time() + 1, self::CRON_HOOK, $args );
+	}
+
+	private function ensure_running_continuation(): void {
+		$state = $this->current_state();
+		if ( 'running' === (string) ( $state['status'] ?? '' ) ) {
+			$this->schedule_next_step( $state );
+		}
 	}
 
 	private function clear_scheduled_step(): void {
@@ -399,6 +496,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 	}
 
 	public function ensure_schedule(): void {
+		$this->ensure_running_continuation();
 		$settings = $this->schedule_settings();
 		if ( empty( $settings['enabled'] ) || ! function_exists( 'wp_schedule_single_event' ) ) {
 			return;
@@ -507,6 +605,39 @@ final class YandexDeliveryGeoPipelineV2Runner {
 
 	private function percent( int $processed, int $total ): ?int {
 		return $total > 0 ? (int) min( 100, round( $processed * 100 / $total ) ) : null;
+	}
+
+	private function clear_legacy_scheduled_step(): void {
+		if ( ! function_exists( 'wp_next_scheduled' ) || ! function_exists( 'wp_unschedule_event' ) ) {
+			return;
+		}
+		$timestamp = wp_next_scheduled( self::CRON_HOOK, array() );
+		if ( $timestamp ) {
+			wp_unschedule_event( (int) $timestamp, self::CRON_HOOK, array() );
+		}
+	}
+
+	/** @param array<string,mixed> $state */
+	private function is_running_owner( array $state, string $session_id ): bool {
+		return 'running' === (string) ( $state['status'] ?? '' )
+			&& '' !== $session_id
+			&& hash_equals( (string) ( $state['session_id'] ?? '' ), $session_id );
+	}
+
+	private function new_execution_budget(): BackgroundExecutionBudget {
+		if ( is_callable( $this->execution_budget_factory ) ) {
+			$budget = ( $this->execution_budget_factory )();
+			if ( $budget instanceof BackgroundExecutionBudget ) {
+				return $budget;
+			}
+		}
+		$memory_limit = function_exists( 'ini_get' ) ? (string) ini_get( 'memory_limit' ) : '';
+
+		return new BackgroundExecutionBudget(
+			self::WORKER_SOFT_TIME_BUDGET_SECONDS,
+			self::MAX_UNITS_PER_WORKER_SLICE,
+			BackgroundExecutionBudget::memory_threshold_from_limit( $memory_limit, self::MEMORY_BUDGET_FRACTION )
+		);
 	}
 
 	private function now(): string {

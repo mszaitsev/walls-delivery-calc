@@ -1,6 +1,6 @@
 # Cron And Background Jobs
 
-Version: 1.0.14
+Version: 1.0.15
 
 WDC business clock times use `Asia/Novosibirsk`; scheduler APIs receive Unix timestamps. Owners register callbacks during plugin bootstrap and defer Action Scheduler inspection/creation until `action_scheduler_init`. Registration after that hook ensures the schedule immediately. Expected pre-initialization and disabled/no-work states are silent.
 
@@ -26,6 +26,8 @@ Since 1.0.7, `init`, `batch`, and `finalize` use one foreign-callback policy: a 
 Version 1.0.10 retains the accepted 1.0.9 exact-FIAS prefetch and bounded 100-row staging inserts. The temporary batch profiler and lock forensic journal have been removed; operational state keeps only lifecycle, progress, guard, memory, and worker-slice fields.
 
 DPD Geography manual CSV and SFTP starts now queue the one-shot `wdc_dpd_geography_import_worker`; they do not add a recurring schedule. One callback runs up to ten independently checkpointed 500-row steps within an 18-second soft budget and the shared 80%-of-finite-memory limit. A budget stop creates one continuation for the current job and byte offset. The admin browser only polls status. The once-per-minute system cron with `DISABLE_WP_CRON=true` remains the recommended trigger model; it may still leave a minute between slices, but no longer leaves that gap between every 500-row step.
+
+The Yandex full pickup/geography continuation remains direct WP-Cron. Its callback runs up to 25 independently checkpointed stage units within an 18-second soft budget and the shared 80%-of-finite-memory guard; unlimited or unknown memory still remains bounded by time and unit caps. Existing atomic sizes remain 500 pickup objects, 500 geo IDs, 10 enrichment rows, one region sync, and 100 location-mapping geo IDs. The full JSON download counts as one heavy unit and ends the slice before local import work. Each continuation carries the outer `session_id`; a 300-second carrier-owned option lease with a random token prevents overlap and uses owner-safe renew/release and expired takeover. A legacy no-argument callback performs no work and may only repair one current owner-scoped continuation. Bootstrap schedule ensure repairs a missing continuation without running work inline.
 
 DPD SOAP calls require the PHP `soap` extension and `SoapClient`. Automatic DPD SFTP geography acquisition requires the PHP `ssh2` extension; manual CSV upload remains available without `ssh2`.
 

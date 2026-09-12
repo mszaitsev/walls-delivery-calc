@@ -1,14 +1,14 @@
 # WDC background execution optimization audit
 
-Audit date: 2026-09-11
+Audit date: 2026-09-12
 
-Branch: `fix/russian-post-background-pipeline`
+Branch: `perf/yandex-geo-pipeline-bounded-worker`
 
-Baseline HEAD: `be221f5b8872e9ba56bc2e7a56af872140a4b5c3`
+Baseline HEAD: `2f9b478b337c4f9f3331ce92b7c051dbe10e6ddb`
 
-Plugin version: `1.0.14`; schema version: `1.0.0`
+Plugin version: `1.0.15`; schema version: `1.0.0`
 
-The Russian Post pilot batches exact FIAS lookups and staging inserts. Production acceptance of 1.0.9 completed successfully; the temporary 1.0.8 profiler was removed in 1.0.10. Ozon and Yandex remain outside this implementation phase.
+The Russian Post pilot batches exact FIAS lookups and staging inserts. Production acceptance of 1.0.9 completed successfully; the temporary 1.0.8 profiler was removed in 1.0.10. DPD Geography and the Yandex full geography pipeline now use bounded worker slices. Ozon remains outside this implementation phase.
 
 This is an architecture report. It does not change production code, schedules, schemas, versions, or server configuration.
 
@@ -177,9 +177,17 @@ The outer runner performs exactly one stage operation and schedules `time()+1` t
 
 The full JSON download remains one heavy/API unit. After it succeeds, the streamed import and all local stages are good bounded-loop candidates. No provider-required delay was found in the outer pipeline. Nevertheless, a slice should treat the download as one unit, re-check state after every lower-level call, and stop if a stage reports `error`, `paused`, or a future explicit retry state.
 
-The outer runner currently has a session ID but no dedicated owner lease. Before increasing work per callback, implementation should either prove that WP-Cron's event uniqueness plus persisted status prevents overlap across manual start/resume and scheduled execution, or add a minimal owner lease for the outer pipeline. This is the largest concurrency gap among the three candidates.
+Before 1.0.15 the outer runner had a session ID but no dedicated owner lease. The implementation added a minimal carrier-owned lease before increasing work per callback; WP-Cron event uniqueness and server `flock` are not treated as the application ownership contract.
 
 Acceleration depends on table sizes. For local stages, replacing one 500/10/100-row unit per minute with a 20-second slice should reduce wait boundaries by approximately the number of units completed per slice (often 10–100x for fast SQL batches). The download itself will not become faster.
+
+### Yandex implementation result (1.0.15)
+
+The outer WP-Cron callback now processes a bounded slice instead of one local unit per minute-level wake-up. One slice allows at most 18 seconds, 25 atomic units, and 80% of a finite PHP `memory_limit`; time and unit caps remain mandatory when the memory limit is unlimited or unknown. The existing 500-object pickup import, 500-geo-ID build, 10-row enrichment, one region sync, and 100-geo-ID location mapping units and their lower-runner checkpoints are unchanged.
+
+The full JSON download remains one remote atomic unit, counts toward the slice, and always stops that slice before staging initialization or SQL import. Continuations remain direct WP-Cron but now carry the immutable outer `session_id`. A carrier-owned 300-second option lease stores session, random token, and expiry; acquire uses atomic `add_option`, renew/release compare the complete stored value, and expired takeover first compare-deletes the old value. Stale callbacks and owners cannot work on, renew, release, or overwrite a new session.
+
+Pause persists the outer terminal-for-worker state before pausing the lower runner, so a callback finishing its current atomic unit cannot overwrite the pause. Reset invalidates the old session before clearing continuations; initialization of the lower pickup runner occurs only inside the new owner's first locked unit. Bootstrap schedule ensure performs only an idempotent continuation repair. A legacy no-argument callback performs no work and can only establish the current owner-scoped continuation.
 
 ## 9. DPD
 
@@ -399,7 +407,7 @@ Integration/production-like:
 2. **Shared primitive:** introduce and unit-test the small execution-budget helper; no scheduler abstraction.
 3. **Russian Post pilot — implemented in 1.0.5:** the existing 500-object atomic batch is wrapped by a 15-unit/18-second worker slice with an 80% finite-memory-limit guard. Checkpoints, activity timestamps, and owner renewals remain per batch; the callback schedules exactly one continuation on budget exhaustion or one finalize action on EOF. Production tuning should record slice duration, batches, objects, and stop reason on the 184k snapshot.
 4. **Ozon:** add remote-aware slicing; preserve explicit retry delay and salvage cap; measure quota/load.
-5. **Yandex:** first strengthen/prove outer ownership, then slice local stages; leave download isolated.
+5. **Yandex — implemented in 1.0.15:** the outer pipeline has a session-and-token option lease and runs local work in 18-second/25-unit/80%-memory slices; the download remains an isolated terminal slice unit and continuations are owner-scoped.
 6. **Operational option:** only after application changes, evaluate one Action Scheduler WP-CLI runner as an optional accelerator for the whole WooCommerce queue. It must not be a WDC installation requirement.
 7. **Deferred review:** use shipment status duration/order-count diagnostics to decide whether it needs its own paginated worker project. Keep browser maintenance flows unchanged unless a separate UX requirement asks for tab-independent execution.
 

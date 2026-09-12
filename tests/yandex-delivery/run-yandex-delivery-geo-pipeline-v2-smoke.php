@@ -7,6 +7,8 @@ namespace {
 
 	$GLOBALS['yd_geo_pipeline_v2_options'] = array();
 	$GLOBALS['yd_geo_pipeline_v2_scheduled'] = array();
+	$GLOBALS['yd_geo_pipeline_v2_schedule_calls'] = 0;
+	$GLOBALS['yd_geo_pipeline_v2_atomic_units'] = 0;
 
 	function get_option( string $name, mixed $default = false ): mixed {
 		return $GLOBALS['yd_geo_pipeline_v2_options'][ $name ] ?? $default;
@@ -17,23 +19,50 @@ namespace {
 		return true;
 	}
 
+	function add_option( string $name, mixed $value, string $deprecated = '', string|bool $autoload = 'yes' ): bool {
+		if ( array_key_exists( $name, $GLOBALS['yd_geo_pipeline_v2_options'] ) ) {
+			return false;
+		}
+		$GLOBALS['yd_geo_pipeline_v2_options'][ $name ] = $value;
+		return true;
+	}
+
+	function delete_option( string $name ): bool {
+		if ( ! array_key_exists( $name, $GLOBALS['yd_geo_pipeline_v2_options'] ) ) {
+			return false;
+		}
+		unset( $GLOBALS['yd_geo_pipeline_v2_options'][ $name ] );
+		return true;
+	}
+
 	function current_time( string $type ): string {
 		return '2026-06-29 12:00:00';
 	}
 
 	function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool {
+		++$GLOBALS['yd_geo_pipeline_v2_schedule_calls'];
 		$GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] = compact( 'timestamp', 'hook', 'args' );
 		return true;
 	}
 
-	function wp_next_scheduled( string $hook ): int|false {
-		return isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] ) ? (int) $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ]['timestamp'] : false;
+	function wp_next_scheduled( string $hook, array $args = array() ): int|false {
+		if ( ! isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] ) || $args !== $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ]['args'] ) {
+			return false;
+		}
+		return (int) $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ]['timestamp'];
 	}
 
 	function wp_clear_scheduled_hook( string $hook ): int {
 		$removed = isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] ) ? 1 : 0;
 		unset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] );
 		return $removed;
+	}
+	function wp_unschedule_event( int $timestamp, string $hook, array $args = array() ): bool {
+		if ( isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] ) && $args === $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ]['args'] ) {
+			unset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] );
+			return true;
+		}
+		return false;
 	}
 	function yd_geo_pipeline_v2_assert( bool $condition, string $message ): void {
 		if ( ! $condition ) {
@@ -66,11 +95,13 @@ namespace WallsShop\WDC\Carriers\YandexDelivery\Pickup {
 		private int $steps = 0;
 		public int $truncate_count_at_step = 0;
 		public int $start_full_api_sync_count = 0;
+		public int $import_step_count = 0;
 
 		public function reset(): array { $this->state = array( 'status' => 'idle', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => '' ); $this->steps = 0; return $this->state; }
-		public function start_full_api_sync(): array { ++$this->start_full_api_sync_count; $this->state = array( 'status' => 'ready_to_import', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => 'downloaded', 'saved' => 0 ); return $this->state; }
+		public function start_full_api_sync(): array { ++$this->start_full_api_sync_count; ++$GLOBALS['yd_geo_pipeline_v2_atomic_units']; $this->state = ! empty( $GLOBALS['yd_geo_pipeline_v2_download_error'] ) ? array( 'status' => 'error', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => 'download failed', 'saved' => 0 ) : array( 'status' => 'ready_to_import', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => 'downloaded', 'saved' => 0 ); if ( ! empty( $GLOBALS['yd_geo_pipeline_v2_overlap_callback'] ) ) { $GLOBALS['yd_geo_pipeline_v2_overlap_callback'](); } return $this->state; }
 		public function current_state(): array { return $this->state; }
 		public function start_import(): array {
+			++$GLOBALS['yd_geo_pipeline_v2_atomic_units'];
 			$repository = $GLOBALS['yd_pipeline_fake_pickup_repository'] ?? null;
 			if ( empty( $this->state['pickup_points_staging'] ) && $repository instanceof YandexDeliveryPickupPointV2Repository ) {
 				$repository->prepare_staging_table();
@@ -78,9 +109,12 @@ namespace WallsShop\WDC\Carriers\YandexDelivery\Pickup {
 			}
 			$this->state['status'] = 'importing';
 			$this->state['message'] = 'importing';
+			if ( ! empty( $GLOBALS['yd_geo_pipeline_v2_between_units_callback'] ) ) { $callback = $GLOBALS['yd_geo_pipeline_v2_between_units_callback']; $GLOBALS['yd_geo_pipeline_v2_between_units_callback'] = null; $callback(); }
 			return $this->state;
 		}
 		public function run_import_step(): array {
+			++$GLOBALS['yd_geo_pipeline_v2_atomic_units'];
+			++$this->import_step_count;
 			$repository = $GLOBALS['yd_pipeline_fake_pickup_repository'] ?? null;
 			++$this->steps;
 			if ( $repository instanceof YandexDeliveryPickupPointV2Repository ) {
@@ -131,6 +165,7 @@ namespace WallsShop\WDC\Carriers\YandexDelivery\GeoV2 {
 		}
 		public function current_state(): array { return $this->state; }
 		public function run_step(): array {
+			++$GLOBALS['yd_geo_pipeline_v2_atomic_units'];
 			++$this->steps;
 			if ( 1 === $this->steps ) {
 				$this->state = array( 'status' => 'building', 'processed_geo_ids' => 1, 'message' => 'geo halfway' );
@@ -151,23 +186,23 @@ namespace WallsShop\WDC\Carriers\YandexDelivery\GeoV2 {
 namespace WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2 {
 	final class YandexGeoV2RegionEnrichmentRunner {
 		private array $state = array( 'status' => 'idle', 'processed' => 0, 'pending_empty_regions_remaining' => 0, 'message' => '' );
-		public function start(): array { $this->state = array( 'status' => 'done', 'processed' => 2, 'pending_empty_regions_remaining' => 0, 'updated' => 1, 'needs_review' => 0, 'not_found' => 0, 'skipped' => 0, 'errors' => 0, 'message' => 'enrichment done' ); return $this->state; }
+		public function start(): array { ++$GLOBALS['yd_geo_pipeline_v2_atomic_units']; $this->state = array( 'status' => 'done', 'processed' => 2, 'pending_empty_regions_remaining' => 0, 'updated' => 1, 'needs_review' => 0, 'not_found' => 0, 'skipped' => 0, 'errors' => 0, 'message' => 'enrichment done' ); return $this->state; }
 		public function current_state(): array { return $this->state; }
 		public function run_step(): array { return $this->state; }
 		public function pause(): array { $this->state['status'] = 'paused'; return $this->state; }
 	}
 
 	final class YandexRegionMappingV2Repository {
-		public function sync_from_sources(): array { return array( 'yandex_regions' => 2, 'added' => 1, 'needs_review' => 0 ); }
+		public function sync_from_sources(): array { ++$GLOBALS['yd_geo_pipeline_v2_atomic_units']; return array( 'yandex_regions' => 2, 'added' => 1, 'needs_review' => 0 ); }
 	}
 
 	final class YandexLocationMappingV2Runner {
 		private array $state = array( 'status' => 'idle', 'processed' => 0, 'message' => '' );
 		private int $steps = 0;
 		public function reset(): array { $this->state = array( 'status' => 'idle', 'processed' => 0, 'message' => '' ); $this->steps = 0; return $this->state; }
-		public function start(): array { $repository = $GLOBALS['yd_pipeline_fake_mapping_repository'] ?? null; if ( $repository instanceof YandexLocationMappingV2Repository ) { $repository->prepare_staging_table(); } $this->state = array( 'status' => 'mapping', 'processed' => 0, 'message' => 'mapping started' ); return $this->state; }
+		public function start(): array { ++$GLOBALS['yd_geo_pipeline_v2_atomic_units']; $repository = $GLOBALS['yd_pipeline_fake_mapping_repository'] ?? null; if ( $repository instanceof YandexLocationMappingV2Repository ) { $repository->prepare_staging_table(); } $this->state = array( 'status' => 'mapping', 'processed' => 0, 'message' => 'mapping started' ); return $this->state; }
 		public function current_state(): array { return $this->state; }
-		public function run_step(): array { ++$this->steps; $repository = $GLOBALS['yd_pipeline_fake_mapping_repository'] ?? null; if ( $repository instanceof YandexLocationMappingV2Repository ) { if ( 1 === $this->steps ) { $repository->staging_rows[] = array( 'status' => 'mapped' ); } else { $repository->staging_rows[] = array( 'status' => 'mapped' ); $repository->promote_staging_to_live(); } } $this->state = 1 === $this->steps ? array( 'status' => 'mapping', 'processed' => 1, 'message' => 'mapping halfway' ) : array( 'status' => 'done', 'processed' => 2, 'message' => 'mapping done' ); return $this->state; }
+		public function run_step(): array { ++$GLOBALS['yd_geo_pipeline_v2_atomic_units']; ++$this->steps; $repository = $GLOBALS['yd_pipeline_fake_mapping_repository'] ?? null; if ( $repository instanceof YandexLocationMappingV2Repository ) { if ( 1 === $this->steps ) { $repository->staging_rows[] = array( 'status' => 'mapped' ); } else { $repository->staging_rows[] = array( 'status' => 'mapped' ); $repository->promote_staging_to_live(); } } $this->state = 1 === $this->steps ? array( 'status' => 'mapping', 'processed' => 1, 'message' => 'mapping halfway' ) : array( 'status' => 'done', 'processed' => 2, 'message' => 'mapping done' ); return $this->state; }
 		public function pause(): array { $this->state['status'] = 'paused'; return $this->state; }
 	}
 
@@ -187,6 +222,7 @@ namespace {
 	$root = dirname( __DIR__, 2 );
 	$pipeline_file = $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2Runner.php';
 	$pipeline_source = (string) file_get_contents( $pipeline_file );
+	$execution_lock_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2ExecutionLock.php' );
 	$pickup_repository_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2Repository.php' );
 	$pickup_runner_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2RunnerService.php' );
 	$admin_source = (string) file_get_contents( $root . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
@@ -194,10 +230,15 @@ namespace {
 	$js_source = (string) file_get_contents( $root . '/assets/admin/yandex-delivery-pickup-v2-runner.js' );
 	$mapper_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMapperV2Service.php' );
 	$geo_builder_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2BuilderService.php' );
+	$geo_builder_runner_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2BuilderRunnerService.php' );
+	$region_enrichment_runner_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexGeoV2RegionEnrichmentRunner.php' );
+	$location_mapping_runner_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Runner.php' );
 	$geo_repository_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2Repository.php' );
 	$mapping_repository_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' );
 	$plugin_main = (string) file_get_contents( $root . '/walls-delivery-calc.php' );
 
+	require_once $root . '/src/Infrastructure/Background/BackgroundExecutionBudget.php';
+	require_once $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2ExecutionLock.php';
 	require_once $pipeline_file;
 
 	foreach ( array( 'import_pvz', 'build_geo_v2', 'region_enrichment', 'region_mapping', 'location_mapping', 'done' ) as $stage ) {
@@ -211,6 +252,9 @@ namespace {
 	yd_geo_pipeline_v2_assert( str_contains( $pipeline_source, 'count_active_unique_geo_ids' ), 'Pipeline must use active unique pickup geoId total for geo_v2 build progress.' );
 	yd_geo_pipeline_v2_assert( str_contains( $pipeline_source, '$this->geo_repository->count_active()' ), 'Pipeline must use active geo_v2 total for location mapping progress.' );
 	yd_geo_pipeline_v2_assert( ! str_contains( $pipeline_source, "'mapped', 'manual', 'needs_review'" ), 'Pipeline location mapping summary must not expose unused manual status.' );
+	yd_geo_pipeline_v2_assert( str_contains( $pipeline_source, 'WORKER_SOFT_TIME_BUDGET_SECONDS = 18.0' ) && str_contains( $pipeline_source, 'MAX_UNITS_PER_WORKER_SLICE = 25' ) && str_contains( $pipeline_source, 'MEMORY_BUDGET_FRACTION = 0.8' ), 'Yandex worker must keep the accepted 18-second/25-unit/80%-memory budget.' );
+	yd_geo_pipeline_v2_assert( str_contains( $pickup_runner_source, 'BATCH_SIZE = 500' ) && str_contains( $geo_builder_runner_source, 'BATCH_SIZE = 500' ) && str_contains( $region_enrichment_runner_source, 'BATCH_SIZE = 10' ) && str_contains( $location_mapping_runner_source, 'BATCH_SIZE = 100' ), 'Existing Yandex atomic batch sizes must remain unchanged.' );
+	yd_geo_pipeline_v2_assert( str_contains( $execution_lock_source, 'add_option(' ) && str_contains( $execution_lock_source, 'option_value = %s' ) && str_contains( $execution_lock_source, "'token' => \$token" ), 'Outer execution lease must use atomic add and token-scoped compare operations.' );
 
 	yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipelineV2Runner::class' ) && str_contains( $plugin_source, 'new YandexDeliveryGeoPipelineV2Runner' ), 'Plugin DI must register pipeline runner.' );
 yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipelineV2Runner::CRON_HOOK' ) && str_contains( $plugin_source, 'run_scheduled_step' ), 'Plugin must register pipeline step cron hook.' );
@@ -228,7 +272,7 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipel
 	yd_geo_pipeline_v2_assert( str_contains( $geo_builder_source, "'sample_points_json' => \$this->json( array( 'addresses'" ) && str_contains( $geo_builder_source, 'sample_addresses' ), 'Geo builder must persist compact address-only sample JSON.' );
 	yd_geo_pipeline_v2_assert( str_contains( $geo_repository_source, 'compact_region_enrichment_audit' ) && str_contains( $geo_repository_source, 'wdc_yandex_geo_v2_region_enrichment_debug_raw' ), 'Geo repository must compact region enrichment audit by default.' );
 	yd_geo_pipeline_v2_assert( str_contains( $mapping_repository_source, 'find_recent_no_match' ) && ! str_contains( $mapping_repository_source, "'sql_search_terms' =>" ), 'Review/no_match repository output must not depend on heavy sql_search_terms.' );
-yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 1.0.14' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '1.0.14' )" ) && str_contains( $plugin_main, "define( 'WDC_SCHEMA_VERSION', '1.0.0' )" ), 'Plugin version must be 1.0.14 while the unchanged schema baseline remains 1.0.0.' );
+yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 1.0.15' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '1.0.15' )" ) && str_contains( $plugin_main, "define( 'WDC_SCHEMA_VERSION', '1.0.0' )" ), 'Plugin version must be 1.0.15 while the unchanged schema baseline remains 1.0.0.' );
 
 	$pickup_runner = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService();
 	$pickup_repository = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository();
@@ -247,7 +291,8 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 1.0.14' ) && st
 		new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexRegionMappingV2Repository(),
 		new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Runner(),
 		$mapping_repository,
-		new \WallsShop\WDC\Calendar\Services\TimezoneService()
+		new \WallsShop\WDC\Calendar\Services\TimezoneService(),
+		new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2ExecutionLock()
 	);
 
 	$schedule = $runner->save_schedule_settings( true, array( 1, 3 ), '04:30' );
@@ -273,6 +318,7 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 1.0.14' ) && st
 	$runner->run_scheduled_start();
 	yd_geo_pipeline_v2_assert( $session === (string) ( $runner->current_state()['session_id'] ?? '' ), 'Scheduled start must not create a second pipeline while one is running.' );
 	yd_geo_pipeline_v2_assert( isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ] ), 'Pipeline start must schedule the next server-side step.' );
+	yd_geo_pipeline_v2_assert( array( $session ) === $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ]['args'], 'Pipeline continuation must be scoped to the current session.' );
 	yd_geo_pipeline_v2_assert( 0 === $pickup_runner->start_full_api_sync_count && 'idle' === $pickup_runner->current_state()['status'], 'Pipeline start must not download JSON synchronously.' );
 	$state = $runner->run_step();
 	yd_geo_pipeline_v2_assert( 'import_pvz' === $state['stage'] && 'ready_to_import' === $pickup_runner->current_state()['status'] && 1 === $pickup_runner->start_full_api_sync_count, 'First server step must download JSON for import_pvz.' );
@@ -307,6 +353,146 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 1.0.14' ) && st
 	yd_geo_pipeline_v2_assert( ! array_key_exists( 'manual', $state['summary']['location_mapping'] ?? array() ), 'location_mapping summary must not contain manual.' );
 	$state = $runner->run_step();
 	 yd_geo_pipeline_v2_assert( 'done' === $state['stage'] && $mapping_repository->promoted && 2 === count( $mapping_repository->rows ), 'Location mapping staging must replace live mapping only after done.' );
+
+	$make_runner = static function ( ?callable $budget_factory = null ): array {
+		$GLOBALS['yd_geo_pipeline_v2_options'] = array();
+		$GLOBALS['yd_geo_pipeline_v2_scheduled'] = array();
+		$GLOBALS['yd_geo_pipeline_v2_schedule_calls'] = 0;
+		$GLOBALS['yd_geo_pipeline_v2_atomic_units'] = 0;
+		$GLOBALS['yd_geo_pipeline_v2_download_error'] = false;
+		$GLOBALS['yd_geo_pipeline_v2_overlap_callback'] = null;
+		$GLOBALS['yd_geo_pipeline_v2_between_units_callback'] = null;
+		$pickup = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService();
+		$pickup_repository = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository();
+		$geo_builder = new \WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderRunnerService();
+		$geo_repository = new \WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository();
+		$mapping_repository = new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository();
+		$GLOBALS['yd_pipeline_fake_pickup_repository'] = $pickup_repository;
+		$GLOBALS['yd_pipeline_fake_geo_repository'] = $geo_repository;
+		$GLOBALS['yd_pipeline_fake_mapping_repository'] = $mapping_repository;
+		$lock = new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2ExecutionLock();
+		$runner = new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner(
+			$pickup,
+			$pickup_repository,
+			$geo_builder,
+			$geo_repository,
+			new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexGeoV2RegionEnrichmentRunner(),
+			new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexRegionMappingV2Repository(),
+			new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Runner(),
+			$mapping_repository,
+			new \WallsShop\WDC\Calendar\Services\TimezoneService(),
+			$lock,
+			$budget_factory
+		);
+
+		return compact( 'runner', 'pickup', 'pickup_repository', 'geo_builder', 'geo_repository', 'mapping_repository', 'lock' );
+	};
+	$run_scheduled = static function ( object $runner, string $session_id ): void {
+		unset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ] );
+		$runner->run_scheduled_step( $session_id );
+	};
+
+	$bundle = $make_runner( static fn(): \WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget => new \WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget( 100.0, 3 ) );
+	$started = $bundle['runner']->start();
+	$session = (string) $started['session_id'];
+	$run_scheduled( $bundle['runner'], $session );
+	yd_geo_pipeline_v2_assert( 1 === $bundle['pickup']->start_full_api_sync_count && 0 === $bundle['pickup']->import_step_count, 'Heavy JSON download must run once and end its worker slice before local import.' );
+	yd_geo_pipeline_v2_assert( array( $session ) === ( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ]['args'] ?? array() ), 'Heavy download must leave one owner-scoped continuation.' );
+	$before_units = $GLOBALS['yd_geo_pipeline_v2_atomic_units'];
+	$run_scheduled( $bundle['runner'], $session );
+	yd_geo_pipeline_v2_assert( 3 === $GLOBALS['yd_geo_pipeline_v2_atomic_units'] - $before_units, 'Scheduled worker must process multiple local units and stop exactly at the unit cap.' );
+	yd_geo_pipeline_v2_assert( 'build_geo_v2' === (string) $bundle['runner']->current_state()['stage'], 'Three local units after download must preserve stage order and reach geo_v2.' );
+	$run_scheduled( $bundle['runner'], $session );
+	$run_scheduled( $bundle['runner'], $session );
+	$run_scheduled( $bundle['runner'], $session );
+	yd_geo_pipeline_v2_assert( 'done' === (string) $bundle['runner']->current_state()['status'] && ! isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ] ), 'Terminal done must leave zero continuation.' );
+
+	$clock = 0.0;
+	$bundle = $make_runner( static function () use ( &$clock ): \WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget {
+		return new \WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget( 18.0, 25, null, static function () use ( &$clock ): float { $clock += 10.0; return $clock; } );
+	} );
+	$session = (string) $bundle['runner']->start()['session_id'];
+	$run_scheduled( $bundle['runner'], $session );
+	$before_units = $GLOBALS['yd_geo_pipeline_v2_atomic_units'];
+	$run_scheduled( $bundle['runner'], $session );
+	yd_geo_pipeline_v2_assert( 1 === $GLOBALS['yd_geo_pipeline_v2_atomic_units'] - $before_units && 'importing' === $bundle['pickup']->current_state()['status'], 'Deterministic fake clock must stop the local loop on time budget.' );
+
+	$memory = 0;
+	$bundle = $make_runner( static function () use ( &$memory ): \WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget {
+		$memory = 0;
+		return new \WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget( 100.0, 25, 80, static fn(): float => 0.0, static function () use ( &$memory ): int { $memory += 50; return $memory; } );
+	} );
+	$session = (string) $bundle['runner']->start()['session_id'];
+	$run_scheduled( $bundle['runner'], $session );
+	$before_units = $GLOBALS['yd_geo_pipeline_v2_atomic_units'];
+	$run_scheduled( $bundle['runner'], $session );
+	yd_geo_pipeline_v2_assert( 1 === $GLOBALS['yd_geo_pipeline_v2_atomic_units'] - $before_units && 'importing' === $bundle['pickup']->current_state()['status'], 'Deterministic memory provider must stop the local loop on memory budget.' );
+
+	$bundle = $make_runner();
+	$GLOBALS['yd_geo_pipeline_v2_download_error'] = true;
+	$session = (string) $bundle['runner']->start()['session_id'];
+	$run_scheduled( $bundle['runner'], $session );
+	yd_geo_pipeline_v2_assert( 'error' === (string) $bundle['runner']->current_state()['status'] && ! isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ] ), 'Download error must be terminal and leave zero continuation.' );
+
+	$bundle = $make_runner();
+	$old_session = (string) $bundle['runner']->start()['session_id'];
+	$bundle['runner']->reset();
+	$new_session = (string) $bundle['runner']->start()['session_id'];
+	$before_units = $GLOBALS['yd_geo_pipeline_v2_atomic_units'];
+	$bundle['runner']->run_scheduled_step( $old_session );
+	yd_geo_pipeline_v2_assert( $new_session === (string) $bundle['runner']->current_state()['session_id'] && $before_units === $GLOBALS['yd_geo_pipeline_v2_atomic_units'], 'Stale callback must do zero work and must not overwrite a new session.' );
+
+	unset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ] );
+	$before_units = $GLOBALS['yd_geo_pipeline_v2_atomic_units'];
+	$bundle['runner']->run_scheduled_step();
+	yd_geo_pipeline_v2_assert( $before_units === $GLOBALS['yd_geo_pipeline_v2_atomic_units'] && array( $new_session ) === ( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ]['args'] ?? array() ), 'Legacy callback without args must do no work and self-heal one owner-scoped continuation.' );
+	unset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ] );
+	$bundle['runner']->ensure_schedule();
+	$calls = $GLOBALS['yd_geo_pipeline_v2_schedule_calls'];
+	$bundle['runner']->ensure_schedule();
+	yd_geo_pipeline_v2_assert( $calls === $GLOBALS['yd_geo_pipeline_v2_schedule_calls'], 'Schedule ensure must restore a missing continuation without creating a duplicate.' );
+
+	$bundle = $make_runner();
+	$session = (string) $bundle['runner']->start()['session_id'];
+	$run_scheduled( $bundle['runner'], $session );
+	$GLOBALS['yd_geo_pipeline_v2_between_units_callback'] = static fn() => $bundle['runner']->pause();
+	$run_scheduled( $bundle['runner'], $session );
+	yd_geo_pipeline_v2_assert( 'paused' === (string) $bundle['runner']->current_state()['status'] && 0 === $bundle['pickup']->import_step_count, 'Pause between units must prevent the next local unit and leave zero continuation.' );
+	$resumed = $bundle['runner']->resume();
+	$calls = $GLOBALS['yd_geo_pipeline_v2_schedule_calls'];
+	$bundle['runner']->resume();
+	yd_geo_pipeline_v2_assert( $session === (string) $resumed['session_id'] && 'running' === (string) $resumed['status'] && $calls === $GLOBALS['yd_geo_pipeline_v2_schedule_calls'], 'Resume must keep the same session and create at most one owner-scoped continuation.' );
+
+	$bundle = $make_runner();
+	$old_session = (string) $bundle['runner']->start()['session_id'];
+	$run_scheduled( $bundle['runner'], $old_session );
+	$new_session = '';
+	$GLOBALS['yd_geo_pipeline_v2_between_units_callback'] = static function () use ( $bundle, &$new_session ): void {
+		$bundle['runner']->reset();
+		$new_session = (string) $bundle['runner']->start()['session_id'];
+	};
+	$run_scheduled( $bundle['runner'], $old_session );
+	yd_geo_pipeline_v2_assert( '' !== $new_session && $new_session === (string) $bundle['runner']->current_state()['session_id'] && 0 === $bundle['pickup']->import_step_count, 'Reset/new session between units must make the old worker stale without overwriting the new owner.' );
+	yd_geo_pipeline_v2_assert( array( $new_session ) === ( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ]['args'] ?? array() ), 'Reset/new session race must retain only the new owner continuation.' );
+
+	$bundle = $make_runner();
+	$session = (string) $bundle['runner']->start()['session_id'];
+	$GLOBALS['yd_geo_pipeline_v2_overlap_callback'] = static fn() => $bundle['runner']->run_scheduled_step( $session );
+	$run_scheduled( $bundle['runner'], $session );
+	yd_geo_pipeline_v2_assert( 1 === $bundle['pickup']->start_full_api_sync_count, 'Second overlapping worker must not process the active pipeline while its lease is owned.' );
+
+	$bundle = $make_runner();
+	$token_a = $bundle['lock']->acquire( 'session-a' );
+	yd_geo_pipeline_v2_assert( is_string( $token_a ) && null === $bundle['lock']->acquire( 'session-b' ), 'Execution lease must reject a second owner while active.' );
+	$lease = $GLOBALS['yd_geo_pipeline_v2_options'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2ExecutionLock::OPTION_NAME ];
+	$lease['expires_at'] = 0;
+	$GLOBALS['yd_geo_pipeline_v2_options'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2ExecutionLock::OPTION_NAME ] = $lease;
+	$token_b = $bundle['lock']->acquire( 'session-b' );
+	yd_geo_pipeline_v2_assert( is_string( $token_b ), 'Expired lease must allow compare-delete takeover by a new owner.' );
+	yd_geo_pipeline_v2_assert( ! $bundle['lock']->renew( 'session-a', (string) $token_a ), 'Stale owner must not renew the current owner lease.' );
+	$bundle['lock']->release( 'session-a', (string) $token_a );
+	yd_geo_pipeline_v2_assert( $bundle['lock']->owns( 'session-b', (string) $token_b ), 'Stale owner must not release the current owner lease.' );
+	$bundle['lock']->release( 'session-b', (string) $token_b );
 
 	echo "Yandex Delivery geo pipeline v2 smoke OK\n";
 }
