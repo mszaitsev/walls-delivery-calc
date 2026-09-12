@@ -1,6 +1,6 @@
 # Cron And Background Jobs
 
-Version: 1.0.12
+Version: 1.0.13
 
 WDC business clock times use `Asia/Novosibirsk`; scheduler APIs receive Unix timestamps. Owners register callbacks during plugin bootstrap and defer Action Scheduler inspection/creation until `action_scheduler_init`. Registration after that hook ensures the schedule immediately. Expected pre-initialization and disabled/no-work states are silent.
 
@@ -24,6 +24,10 @@ Manual Russian Post cancellation makes the persisted terminal state authoritativ
 Since 1.0.7, `init`, `batch`, and `finalize` use one foreign-callback policy: a callback whose immutable argument `import_id` differs from the persisted active job fails without recording diagnostics into, cleaning, failing, renewing, scheduling for, or unlocking that job. Unexpected-failure handling rechecks state ownership before building a result and before cleanup, and never lets mutable current state replace the callback owner ID.
 
 Version 1.0.10 retains the accepted 1.0.9 exact-FIAS prefetch and bounded 100-row staging inserts. The temporary batch profiler and lock forensic journal have been removed; operational state keeps only lifecycle, progress, guard, memory, and worker-slice fields.
+
+DPD Geography manual CSV and SFTP starts now queue the one-shot `wdc_dpd_geography_import_worker`; they do not add a recurring schedule. One callback runs up to ten independently checkpointed 500-row steps within an 18-second soft budget and the shared 80%-of-finite-memory limit. A budget stop creates one continuation for the current job and byte offset. The admin browser only polls status. The once-per-minute system cron with `DISABLE_WP_CRON=true` remains the recommended trigger model; it may still leave a minute between slices, but no longer leaves that gap between every 500-row step.
+
+DPD SOAP calls require the PHP `soap` extension and `SoapClient`. Automatic DPD SFTP geography acquisition requires the PHP `ssh2` extension; manual CSV upload remains available without `ssh2`.
 
 The Russian Post weekly start is configured by ISO weekday (`1` Monday through `7` Sunday) and a quarter-hour `HH:MM` value. Its only business timezone is `Asia/Novosibirsk`. A fresh install defaults to Monday 09:00. An upgraded installation with weekly scheduling enabled but without the new explicit fields keeps its existing WP-Cron timestamp and derives the displayed weekday/time from that event until the administrator explicitly saves the form. Changing enabled state, weekday, or time synchronizes the event immediately; bootstrap `sync_schedule()` remains a duplicate-free self-healing check.
 

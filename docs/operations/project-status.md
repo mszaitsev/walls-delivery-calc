@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.12
+Version: 1.0.13
 
-The current Walls Delivery Calc release source is version 1.0.12. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. The accepted 1.0.9 Russian Post exact-FIAS prefetch and bulk staging writes remain in production; temporary performance and lock-forensic diagnostics are removed. Russian Post weekly pickup refresh keeps its explicit weekday and quarter-hour time in `Asia/Novosibirsk`. Russian Post shipment tracking exposes the complete 490-row native status catalog and configurable universal mapping in Delivery Services. Version 1.0.12 intentionally changes only native operation `2:25` from non-terminal to terminal, matching the current official catalog while retaining universal status `delivered`; all other mapping rows remain unchanged. Tracking cadence remains owned exclusively by the common shipment status autosync. Matching decisions, worker-slice limits, lock lifecycle, and schema baseline remain unchanged.
+The current Walls Delivery Calc release source is version 1.0.13. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. DPD Geography now continues through a bounded server-side Action Scheduler worker after manual CSV or SFTP source acquisition; the browser only polls progress. Existing 500-row matching semantics and set-based finalization are unchanged, while staging candidate persistence uses bounded prefetch and bulk writes instead of a SELECT plus write per row. PHP `soap`/`SoapClient` is required for DPD SOAP APIs and PHP `ssh2` for automatic SFTP geography download; manual CSV remains the fallback. Russian Post 1.0.9–1.0.12 optimizations, scheduling, status mapping, and lifecycle semantics remain unchanged.
 
 Current production scope includes:
 

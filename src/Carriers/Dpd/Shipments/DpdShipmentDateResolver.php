@@ -16,7 +16,8 @@ final class DpdShipmentDateResolver {
 
 	public function __construct(
 		private ?CalendarService $calendar = null,
-		private ?TimezoneService $timezone = null
+		private ?TimezoneService $timezone = null,
+		private mixed $clock = null
 	) {
 	}
 
@@ -24,7 +25,7 @@ final class DpdShipmentDateResolver {
 	 * @return array{date:string,calendar_used:bool,fallback_used:bool}
 	 */
 	public function default_date( ?DateTimeImmutable $now = null ): array {
-		$now = $now ?? ( $this->timezone instanceof TimezoneService ? $this->timezone->now() : new DateTimeImmutable( 'now', new DateTimeZone( TimezoneService::TIMEZONE ) ) );
+		$now = $now ?? $this->now();
 		$date = $now->format( 'H:i:s' ) >= self::CUTOFF_TIME
 			? $now->modify( '+1 day' )->format( 'Y-m-d' )
 			: $now->format( 'Y-m-d' );
@@ -53,7 +54,7 @@ final class DpdShipmentDateResolver {
 			return array( 'Дата отправки DPD должна быть в формате YYYY-MM-DD.' );
 		}
 
-		$now = $now ?? ( $this->timezone instanceof TimezoneService ? $this->timezone->now() : new DateTimeImmutable( 'now', new DateTimeZone( TimezoneService::TIMEZONE ) ) );
+		$now = $now ?? $this->now();
 		if ( $date < $now->format( 'Y-m-d' ) ) {
 			$errors[] = 'Дата отправки DPD не может быть в прошлом.';
 		}
@@ -62,5 +63,16 @@ final class DpdShipmentDateResolver {
 		}
 
 		return $errors;
+	}
+
+	private function now(): DateTimeImmutable {
+		if ( is_callable( $this->clock ) ) {
+			$now = ( $this->clock )();
+			if ( $now instanceof DateTimeImmutable ) {
+				return $now->setTimezone( new DateTimeZone( TimezoneService::TIMEZONE ) );
+			}
+		}
+
+		return $this->timezone instanceof TimezoneService ? $this->timezone->now() : new DateTimeImmutable( 'now', new DateTimeZone( TimezoneService::TIMEZONE ) );
 	}
 }

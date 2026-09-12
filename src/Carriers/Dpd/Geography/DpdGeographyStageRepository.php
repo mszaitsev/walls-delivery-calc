@@ -6,6 +6,9 @@ namespace WallsShop\WDC\Carriers\Dpd\Geography;
 defined( 'ABSPATH' ) || exit;
 
 final class DpdGeographyStageRepository {
+	private const WRITE_CHUNK_SIZE = 200;
+	private const SELECT_CHUNK_SIZE = 250;
+
 	private \wpdb $wpdb;
 
 	public function __construct( ?\wpdb $db = null ) {
@@ -60,77 +63,125 @@ final class DpdGeographyStageRepository {
 	}
 
 	public function upsert_candidate( string $table_name, int $location_id, string|int $dpd_city_id, string $match_method ): string {
-		$location_id = max( 0, $location_id );
-		$dpd_city_id = preg_replace( '/\D+/', '', (string) $dpd_city_id ) ?? '';
-		$match_method = $this->normalize_match_method( $match_method );
-		if ( 0 === $location_id || '' === $dpd_city_id || '0' === $dpd_city_id ) {
-			return 'invalid';
+		$results = $this->upsert_candidates_batch(
+			$table_name,
+			array( array( 'location_id' => $location_id, 'dpd_city_id' => $dpd_city_id, 'match_method' => $match_method ) )
+		);
+
+		return (string) ( $results[0] ?? 'invalid' );
+	}
+
+	/**
+	 * Apply candidate rows with the same ordered conflict semantics as repeated
+	 * upsert_candidate() calls, but with bounded set reads and writes.
+	 *
+	 * @param array<int,array{location_id:int,dpd_city_id:string|int,match_method:string}> $candidates
+	 * @return array<int,string>
+	 */
+	public function upsert_candidates_batch( string $table_name, array $candidates ): array {
+		$normalized = array();
+		$results = array_fill( 0, count( $candidates ), 'invalid' );
+		foreach ( $candidates as $index => $candidate ) {
+			$location_id = max( 0, (int) ( $candidate['location_id'] ?? 0 ) );
+			$dpd_city_id = preg_replace( '/\D+/', '', (string) ( $candidate['dpd_city_id'] ?? '' ) ) ?? '';
+			if ( 0 === $location_id || '' === $dpd_city_id || '0' === $dpd_city_id ) {
+				continue;
+			}
+			$normalized[ (int) $index ] = array(
+				'location_id' => $location_id,
+				'dpd_city_id' => $dpd_city_id,
+				'match_method' => $this->normalize_match_method( (string) ( $candidate['match_method'] ?? '' ) ),
+			);
 		}
-		$now = $this->now();
+		if ( array() === $normalized ) {
+			return $results;
+		}
 
 		if ( $this->is_test_mode() ) {
 			$this->create_if_missing_for_test( $table_name );
-			$current = $this->wpdb->dpd_geography_stage_tables[ $table_name ][ $location_id ] ?? null;
-			if ( is_array( $current ) ) {
-				if ( 'conflict' === (string) ( $current['status'] ?? '' ) ) {
-					return 'conflict';
-				}
-				if ( (string) ( $current['dpd_city_id'] ?? '' ) === $dpd_city_id ) {
-					return 'unchanged';
-				}
-				$this->wpdb->dpd_geography_stage_tables[ $table_name ][ $location_id ] = array(
-					'location_id' => $location_id,
-					'dpd_city_id' => null,
-					'match_method' => $match_method,
-					'status' => 'conflict',
-					'updated_at' => $now,
-				);
-				return 'conflict';
-			}
-			$this->wpdb->dpd_geography_stage_tables[ $table_name ][ $location_id ] = array(
-				'location_id' => $location_id,
-				'dpd_city_id' => $dpd_city_id,
-				'match_method' => $match_method,
-				'status' => 'candidate',
-				'updated_at' => $now,
-			);
-			return 'inserted';
 		}
-
-		$row = $this->wpdb->get_row(
-			$this->wpdb->prepare( 'SELECT dpd_city_id, status FROM ' . $this->safe_table_name( $table_name ) . ' WHERE location_id = %d LIMIT 1', $location_id ),
-			ARRAY_A
-		);
+		$current = $this->existing_rows( $table_name, array_values( array_unique( array_column( $normalized, 'location_id' ) ) ) );
+		$changed = array();
+		$now = $this->now();
+		foreach ( $normalized as $index => $candidate ) {
+			$location_id = $candidate['location_id'];
+			$row = $current[ $location_id ] ?? null;
 			if ( is_array( $row ) ) {
 				if ( 'conflict' === (string) ( $row['status'] ?? '' ) ) {
-					return 'conflict';
+					$results[ $index ] = 'conflict';
+					continue;
 				}
-			if ( (string) ( $row['dpd_city_id'] ?? '' ) === $dpd_city_id ) {
-				return 'unchanged';
+				if ( (string) ( $row['dpd_city_id'] ?? '' ) === $candidate['dpd_city_id'] ) {
+					$results[ $index ] = 'unchanged';
+					continue;
+				}
+				$row = array( 'location_id' => $location_id, 'dpd_city_id' => null, 'match_method' => $candidate['match_method'], 'status' => 'conflict', 'updated_at' => $now );
+				$current[ $location_id ] = $row;
+				$changed[ $location_id ] = $row;
+				$results[ $index ] = 'conflict';
+				continue;
 			}
-			$result = $this->wpdb->update(
-				$table_name,
-				array( 'dpd_city_id' => null, 'match_method' => $match_method, 'status' => 'conflict', 'updated_at' => $now ),
-				array( 'location_id' => $location_id ),
-				array( '%d', '%s', '%s', '%s' ),
-				array( '%d' )
+			$row = array( 'location_id' => $location_id, 'dpd_city_id' => $candidate['dpd_city_id'], 'match_method' => $candidate['match_method'], 'status' => 'candidate', 'updated_at' => $now );
+			$current[ $location_id ] = $row;
+			$changed[ $location_id ] = $row;
+			$results[ $index ] = 'inserted';
+		}
+
+		if ( $this->is_test_mode() ) {
+			foreach ( $changed as $location_id => $row ) {
+				$this->wpdb->dpd_geography_stage_tables[ $table_name ][ $location_id ] = $row;
+			}
+			return $results;
+		}
+
+		foreach ( array_chunk( array_values( $changed ), self::WRITE_CHUNK_SIZE ) as $rows ) {
+			$this->write_rows( $table_name, $rows );
+		}
+
+		return $results;
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	private function existing_rows( string $table_name, array $location_ids ): array {
+		if ( $this->is_test_mode() ) {
+			return $this->wpdb->dpd_geography_stage_tables[ $table_name ] ?? array();
+		}
+		$found = array();
+		foreach ( array_chunk( $location_ids, self::SELECT_CHUNK_SIZE ) as $ids ) {
+			$placeholders = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+			$rows = $this->wpdb->get_results(
+				$this->wpdb->prepare( 'SELECT location_id, dpd_city_id, status FROM ' . $this->safe_table_name( $table_name ) . " WHERE location_id IN ({$placeholders})", ...$ids ),
+				ARRAY_A
 			);
-			if ( false === $result ) {
-				$this->throw_sql_error( 'DPD geography stage conflict update failed' );
+			if ( ! is_array( $rows ) ) {
+				$this->throw_sql_error( 'DPD geography stage candidate prefetch failed' );
 			}
-			return 'conflict';
+			foreach ( $rows as $row ) {
+				$location_id = (int) ( $row['location_id'] ?? 0 );
+				if ( $location_id > 0 ) {
+					$found[ $location_id ] = $row;
+				}
+			}
 		}
+		return $found;
+	}
 
-		$result = $this->wpdb->insert(
-			$table_name,
-			array( 'location_id' => $location_id, 'dpd_city_id' => (int) $dpd_city_id, 'match_method' => $match_method, 'status' => 'candidate', 'updated_at' => $now ),
-			array( '%d', '%d', '%s', '%s', '%s' )
-		);
-		if ( false === $result ) {
-			$this->throw_sql_error( 'DPD geography stage insert failed' );
+	/** @param array<int,array<string,mixed>> $rows */
+	private function write_rows( string $table_name, array $rows ): void {
+		$values = array();
+		$args = array();
+		foreach ( $rows as $row ) {
+			if ( null === $row['dpd_city_id'] ) {
+				$values[] = '(%d, NULL, %s, %s, %s)';
+				array_push( $args, (int) $row['location_id'], (string) $row['match_method'], (string) $row['status'], (string) $row['updated_at'] );
+			} else {
+				$values[] = '(%d, %d, %s, %s, %s)';
+				array_push( $args, (int) $row['location_id'], (int) $row['dpd_city_id'], (string) $row['match_method'], (string) $row['status'], (string) $row['updated_at'] );
+			}
 		}
-
-		return 'inserted';
+		$sql = 'INSERT INTO ' . $this->safe_table_name( $table_name ) . ' (location_id, dpd_city_id, match_method, status, updated_at) VALUES ' . implode( ', ', $values )
+			. ' ON DUPLICATE KEY UPDATE dpd_city_id = VALUES(dpd_city_id), match_method = VALUES(match_method), status = VALUES(status), updated_at = VALUES(updated_at)';
+		$this->query_or_throw( $this->wpdb->prepare( $sql, ...$args ), 'DPD geography stage batch write failed' );
 	}
 
 	/**

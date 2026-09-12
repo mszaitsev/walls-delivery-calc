@@ -193,7 +193,8 @@ $settings->save_runtime_tariffs_from_admin(
 );
 $pickup_service = new DpdPickupPointService( new DpdPickupPointRepository(), new LocationDeliveryCodeRepository() );
 $calendar = new CalendarService( new CalendarRepository(), new YearGenerator(), $settings_repo, new TimezoneService() );
-$date_resolver = new DpdShipmentDateResolver( $calendar, new TimezoneService() );
+$fixture_now = new DateTimeImmutable( '2026-06-18 12:00:00', new DateTimeZone( TimezoneService::TIMEZONE ) );
+$date_resolver = new DpdShipmentDateResolver( $calendar, new TimezoneService(), static fn(): DateTimeImmutable => $fixture_now );
 $factory = new OrderShipmentDraftFactory( new DeliveryServiceRepository(), new ShipmentServiceSettings(), null, null, null, null, null, $settings, $pickup_service, $date_resolver );
 $builder = new DpdShipmentPayloadBuilder( $settings );
 $adapter = new DpdShipmentAdapter( $builder, shipment_test_actual_cost_resolver() );
@@ -232,7 +233,7 @@ dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'wdc-dpd-date-ro
 dpd_shipment_assert( array( DeliveryType::PICKUP, DeliveryType::COURIER ) === array_column( $draft['services'], 'delivery_type' ), 'DPD modal must allow pickup/courier delivery type switch.' );
 dpd_shipment_assert( array( 'ECN', 'CSM' ) === array_column( $draft['services'][0]['tariffs'], 'object_code' ), 'DPD modal must allow active tariff switch.' );
 
-$future_pickup_date = gmdate( 'Y-m-d', strtotime( '+1 day' ) );
+$future_pickup_date = $fixture_now->modify( '+1 day' )->format( 'Y-m-d' );
 $request = $factory->create_request_from_admin_data(
 	$pickup_order,
 	array(

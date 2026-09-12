@@ -284,8 +284,6 @@ final class DeliveryServicesAdminPage {
 				array(
 					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 					'nonce' => wp_create_nonce( 'wdc_dpd_geography_import' ),
-					'stepLimit' => self::DPD_GEOGRAPHY_AJAX_STEP_LIMIT,
-					'stepDelayMs' => 250,
 					'busyRetryMs' => 1500,
 				)
 			);
@@ -3295,7 +3293,7 @@ final class DeliveryServicesAdminPage {
 		</form>
 		<div style="max-width: 860px; margin-top: 12px; padding: 10px; border-left: 4px solid <?php echo esc_attr( $sftp_available ? '#00a32a' : '#dba617' ); ?>; background: #fff;">
 			<strong><?php echo esc_html( $sftp_available ? '[OK]' : '[WARNING]' ); ?></strong>
-			<?php echo esc_html( $sftp_available ? __( 'SFTP extension available.', 'walls-delivery-calc' ) : __( 'SFTP extension is not available. Manual CSV upload remains available.', 'walls-delivery-calc' ) ); ?>
+			<?php echo esc_html( $sftp_available ? __( 'PHP ssh2 extension is available.', 'walls-delivery-calc' ) : __( 'PHP ssh2 extension is not available. Automatic DPD SFTP geography download is unavailable; manual CSV upload remains available.', 'walls-delivery-calc' ) ); ?>
 			<form method="post" style="margin-top: 8px;" onsubmit="return window.confirm('<?php echo esc_js( __( 'Текущий запуск будет признан недействительным. Используйте это после аварийного завершения или зависшего импорта.', 'walls-delivery-calc' ) ); ?>');">
 				<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 				<input type="hidden" name="wdc_delivery_services_action" value="force_cancel_dpd_geography_import">
@@ -3331,7 +3329,7 @@ final class DeliveryServicesAdminPage {
 			<?php endif; ?>
 			<table class="widefat striped" style="max-width: 860px;">
 				<tbody>
-				<?php foreach ( array( 'phase', 'status', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'foreign_rows', 'foreign_am_rows', 'foreign_by_rows', 'foreign_kz_rows', 'foreign_kg_rows', 'foreign_locations_inserted', 'foreign_locations_updated', 'foreign_save_failed', 'foreign_mapping_conflicts', 'foreign_duplicate_identity_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_own_fias', 'matched_by_city_fias', 'resolved_after_fias_disambiguation', 'true_fias_ambiguity', 'matched_by_kladr', 'matched_by_name', 'match_batches', 'max_match_batch_rows', 'lookup_query_groups', 'match_context_candidates_peak', 'saved_candidates', 'finalized_mappings', 'finalized_changes', 'stale_cleared', 'stale_cleanup_skipped', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors_total', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
+				<?php foreach ( array( 'phase', 'status', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'foreign_rows', 'foreign_am_rows', 'foreign_by_rows', 'foreign_kz_rows', 'foreign_kg_rows', 'foreign_locations_inserted', 'foreign_locations_updated', 'foreign_save_failed', 'foreign_mapping_conflicts', 'foreign_duplicate_identity_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_own_fias', 'matched_by_city_fias', 'resolved_after_fias_disambiguation', 'true_fias_ambiguity', 'matched_by_kladr', 'matched_by_name', 'match_batches', 'max_match_batch_rows', 'lookup_query_groups', 'match_context_candidates_peak', 'saved_candidates', 'finalized_mappings', 'finalized_changes', 'stale_cleared', 'stale_cleanup_skipped', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'last_step_duration_ms', 'max_step_duration_ms', 'worker_slice_units', 'worker_slice_duration_ms', 'worker_slice_stop_reason', 'errors_total', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
 					<tr>
 						<th><?php echo esc_html( $key ); ?></th>
 						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $this->admin_state_value( $state, $key ) ); ?></td>
@@ -4216,7 +4214,7 @@ final class DeliveryServicesAdminPage {
 			<table class="form-table" role="presentation">
 				<?php $this->checkbox_row( DpdSettings::RUNTIME_ENABLE_COURIER_RATES_KEY, __( 'Использовать курьерские тарифы', 'walls-delivery-calc' ), $this->dpd_settings->runtime_courier_rates_enabled() ); ?>
 			</table>
-			<p class="description"><?php echo esc_html__( 'DPD checkout всегда считает отправку от терминала. Доставка до пункта выдачи считается всегда; доставка до двери считается отдельным запросом только при включенной галке. Выбор конкретного пункта DPD и карта будут добавлены позже.', 'walls-delivery-calc' ); ?></p>
+			<p class="description"><?php echo esc_html__( 'DPD checkout всегда считает отправку от терминала. Доставка до пункта выдачи считается всегда; доставка до двери считается отдельным запросом только при включенной галке.', 'walls-delivery-calc' ); ?></p>
 			<?php submit_button( __( 'Сохранить тарифы DPD', 'walls-delivery-calc' ) ); ?>
 		</form>
 		<?php

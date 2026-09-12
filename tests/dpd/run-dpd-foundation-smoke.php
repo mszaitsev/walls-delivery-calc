@@ -155,6 +155,7 @@ $fake_soap = new DpdFakeSoapClient();
 $api = new DpdApiClient( $settings, $fake_soap );
 $diagnostic = $api->checkConnectionDryRun();
 dpd_smoke_assert( false === $diagnostic['success'], 'DPD dry diagnostic must fail gracefully when SOAP transport is unavailable.' );
+dpd_smoke_assert( str_contains( $diagnostic['message'], 'PHP SOAP extension / SoapClient is unavailable. DPD SOAP API calls cannot be executed.' ), 'DPD dry diagnostic must name the exact PHP SOAP/SoapClient prerequisite.' );
 dpd_smoke_assert( isset( $diagnostic['details']['endpoints'][ DpdEndpoints::SERVICE_GEOGRAPHY ], $diagnostic['details']['endpoints'][ DpdEndpoints::SERVICE_CALCULATOR ] ), 'DPD dry diagnostic must inspect geography and calculator endpoints without live calls.' );
 dpd_smoke_assert( 0 === count( $fake_soap->calls ), 'DPD dry diagnostic must not execute a SOAP API call.' );
 $settings->save_connection_result( false, 'clientKey=test-client-key clientNumber test-client-number production-client-key production-client-number' );
