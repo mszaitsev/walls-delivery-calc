@@ -6,6 +6,15 @@
 		return;
 	}
 
+	var lowerOwnershipMessage = 'Полное обновление Яндекс ПВЗ/географии уже управляет этой стадией. Используйте управление полным обновлением.';
+	var geoPipelineActive = ['running', 'paused'].indexOf(String((config.geoPipelineInitialState || {}).status || '')) !== -1;
+	var lowerOwnershipRefreshers = [];
+
+	function setGeoPipelineActive(state) {
+		geoPipelineActive = ['running', 'paused'].indexOf(String((state || {}).status || '')) !== -1;
+		lowerOwnershipRefreshers.forEach(function (refresh) { refresh(); });
+	}
+
 	function post(action) {
 		var body = new window.FormData();
 		body.append('action', action);
@@ -66,6 +75,32 @@
 		var continueButton = options.continueSelector ? root.querySelector(options.continueSelector) : null;
 		var pauseButton = root.querySelector(options.pauseSelector);
 		var resetButton = root.querySelector(options.resetSelector);
+		var mutationButtons = [startButton, continueButton, pauseButton, resetButton].filter(Boolean);
+
+		function refreshOwnership() {
+			var owned = !!options.standalone && geoPipelineActive;
+			root.setAttribute('data-wdc-yandex-full-pipeline-owned', owned ? 'true' : 'false');
+			mutationButtons.forEach(function (button) {
+				button.disabled = owned;
+				if (owned) {
+					button.setAttribute('title', lowerOwnershipMessage);
+				} else {
+					button.removeAttribute('title');
+				}
+			});
+		}
+
+		function standaloneMutationBlocked() {
+			if (!options.standalone || !geoPipelineActive) {
+				return false;
+			}
+			looping = false;
+			refreshOwnership();
+			if (summary) {
+				summary.textContent = lowerOwnershipMessage;
+			}
+			return true;
+		}
 
 		function render(state) {
 			root.setAttribute(options.statusAttribute, value(state, 'status'));
@@ -78,6 +113,10 @@
 			fields.forEach(function (field) {
 				field.textContent = value(state, field.getAttribute(options.fieldAttribute) || '');
 			});
+			if (options.fullPipeline) {
+				setGeoPipelineActive(state);
+			}
+			refreshOwnership();
 		}
 
 		function showError(error) {
@@ -89,6 +128,9 @@
 
 		function loop(state) {
 			render(state);
+			if (standaloneMutationBlocked()) {
+				return;
+			}
 			if (options.readyStatus && state.status === options.readyStatus) {
 				post(options.continueAction).then(loop).catch(showError);
 				return;
@@ -107,31 +149,46 @@
 
 		if (startButton) {
 			startButton.addEventListener('click', function () {
+				if (standaloneMutationBlocked()) {
+					return;
+				}
 				looping = true;
 				post(options.startAction).then(loop).catch(showError);
 			});
 		}
 		if (continueButton) {
 			continueButton.addEventListener('click', function () {
+				if (standaloneMutationBlocked()) {
+					return;
+				}
 				looping = true;
 				post(options.continueAction).then(loop).catch(showError);
 			});
 		}
 		if (pauseButton) {
 			pauseButton.addEventListener('click', function () {
+				if (standaloneMutationBlocked()) {
+					return;
+				}
 				looping = false;
 				post(options.pauseAction).then(render).catch(showError);
 			});
 		}
 		if (resetButton) {
 			resetButton.addEventListener('click', function () {
+				if (standaloneMutationBlocked()) {
+					return;
+				}
 				looping = false;
 				post(options.resetAction).then(render).catch(showError);
 			});
 		}
 
+		if (options.standalone) {
+			lowerOwnershipRefreshers.push(refreshOwnership);
+		}
 		render(options.initialState || {});
-		if (options.initialState && options.initialState.status === options.runningStatus) {
+		if (options.initialState && options.initialState.status === options.runningStatus && !standaloneMutationBlocked()) {
 			looping = true;
 			loop(options.initialState);
 		}
@@ -154,6 +211,7 @@
 		pauseAction: 'wdc_yandex_delivery_geo_pipeline_v2_pause',
 		resetAction: 'wdc_yandex_delivery_geo_pipeline_v2_reset',
 		runningStatus: 'running',
+		fullPipeline: true,
 		pollOnly: true,
 		pollInterval: 2000,
 		initialState: config.geoPipelineInitialState || {}
@@ -175,6 +233,7 @@
 		resetAction: 'wdc_yandex_delivery_pickup_v2_runner_reset',
 		readyStatus: 'ready_to_import',
 		runningStatus: 'importing',
+		standalone: true,
 		initialState: config.initialState || {}
 	});
 
@@ -192,6 +251,7 @@
 		pauseAction: 'wdc_yandex_delivery_geo_v2_builder_pause',
 		resetAction: 'wdc_yandex_delivery_geo_v2_builder_reset',
 		runningStatus: 'building',
+		standalone: true,
 		initialState: config.geoBuilderInitialState || {}
 	});
 
@@ -209,6 +269,7 @@
 		pauseAction: 'wdc_yandex_geo_v2_region_enrichment_pause',
 		resetAction: 'wdc_yandex_geo_v2_region_enrichment_reset',
 		runningStatus: 'enriching_regions',
+		standalone: true,
 		initialState: config.geoRegionEnrichmentInitialState || {}
 	});
 	runner({
@@ -225,6 +286,7 @@
 		pauseAction: 'wdc_yandex_location_mapping_v2_pause',
 		resetAction: 'wdc_yandex_location_mapping_v2_reset',
 		runningStatus: 'mapping',
+		standalone: true,
 		initialState: config.locationMappingInitialState || {}
 	});
 }());

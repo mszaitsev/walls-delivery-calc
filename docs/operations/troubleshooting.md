@@ -34,6 +34,8 @@ For a Russian Post pickup import, a queued/running state must have the same `imp
 
 For the Yandex full geography pipeline, a running outer state should have exactly one `wdc_yandex_delivery_geo_pipeline_v2_run_step` event whose sole argument is the current `session_id`. A transient no-argument event left by an upgrade is safe: it performs no work and repairs the owner-scoped continuation if needed. The short-lived outer execution lease is released between slices; while a callback is active it must contain the same session plus its private token. Do not delete the lease to accelerate an active worker.
 
+While the Yandex full pipeline is `running` or `paused`, do not drive pickup import, geo builder, region enrichment, region mapping/manual overrides, or location mapping through standalone controls or direct AJAX. The server returns HTTP 409 for these mutations and the browser disables their loops because the outer pipeline is their sole executor. Before this ownership guard, a browser loop could race the background worker, make counters appear to roll backward, and attempt another pickup batch after successful promotion had correctly deleted the downloaded JSON. A not-readable JSON error with a lower offset behind already-published live counts is characteristic of that old race, not evidence that successful cleanup itself should be disabled.
+
 ## Shipments
 
 For a failed shipment action, verify adapter/mapper/provider registration, current order/carrier identity, creation-attempt state, capability/nonce checks, and the carrier's safe diagnostic fields. An uncertain create result must remain reconcilable; do not submit again until the carrier cabinet has been checked.

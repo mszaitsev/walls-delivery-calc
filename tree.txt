@@ -888,6 +888,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- tests/yandex-delivery/run-yandex-delivery-geo-v2-region-enrichment-smoke.php
 |-- tests/yandex-delivery/run-yandex-delivery-location-mapping-v2-smoke.php
 |-- tests/yandex-delivery/run-yandex-delivery-pickup-selection-smoke.php
+|-- tests/yandex-delivery/run-yandex-delivery-pickup-v2-browser-smoke.js
 |-- tests/yandex-delivery/run-yandex-delivery-pickup-v2-foundation-smoke.php
 |-- tests/yandex-delivery/run-yandex-delivery-pickup-v2-runner-smoke.php
 |-- tests/yandex-delivery/run-yandex-delivery-pricing-calculator-smoke.php

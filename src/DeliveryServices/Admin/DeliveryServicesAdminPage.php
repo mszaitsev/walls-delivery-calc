@@ -454,6 +454,9 @@ final class DeliveryServicesAdminPage {
 		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
 			return;
 		}
+		if ( $this->reject_yandex_standalone_mutation_while_geo_pipeline_active() ) {
+			return;
+		}
 		try {
 			$state = $callback();
 			$state['last_action'] = $state['last_action'] ?? $last_action;
@@ -518,6 +521,9 @@ final class DeliveryServicesAdminPage {
 		if ( ! $this->can_handle_yandex_delivery_geo_v2_builder_ajax() ) {
 			return;
 		}
+		if ( $this->reject_yandex_standalone_mutation_while_geo_pipeline_active() ) {
+			return;
+		}
 		try {
 			wp_send_json_success( $callback() );
 		} catch ( \Throwable $exception ) {
@@ -554,6 +560,9 @@ final class DeliveryServicesAdminPage {
 		if ( ! $this->can_handle_yandex_geo_v2_region_enrichment_ajax() ) {
 			return;
 		}
+		if ( $this->reject_yandex_standalone_mutation_while_geo_pipeline_active() ) {
+			return;
+		}
 		try {
 			wp_send_json_success( $callback() );
 		} catch ( \Throwable $exception ) {
@@ -581,6 +590,9 @@ final class DeliveryServicesAdminPage {
 	private function handle_yandex_location_mapping_v2_ajax( callable $callback ): void {
 		$this->register_yandex_pickup_v2_ajax_shutdown_guard();
 		if ( ! $this->can_handle_yandex_location_mapping_v2_ajax() ) {
+			return;
+		}
+		if ( $this->reject_yandex_standalone_mutation_while_geo_pipeline_active() ) {
 			return;
 		}
 		try {
@@ -759,6 +771,31 @@ final class DeliveryServicesAdminPage {
 			wp_send_json_error( array( 'message' => __( 'Runner Яндекс ПВЗ/география недоступен.', 'walls-delivery-calc' ) ), 500 );
 			return false;
 		}
+
+		return true;
+	}
+
+	private function is_yandex_geo_pipeline_active(): bool {
+		if ( ! $this->yandex_delivery_geo_pipeline_v2_runner instanceof YandexDeliveryGeoPipelineV2Runner ) {
+			return false;
+		}
+
+		$status = (string) ( $this->yandex_delivery_geo_pipeline_v2_runner->current_state()['status'] ?? '' );
+
+		return in_array( $status, array( 'running', 'paused' ), true );
+	}
+
+	private function reject_yandex_standalone_mutation_while_geo_pipeline_active(): bool {
+		if ( ! $this->is_yandex_geo_pipeline_active() ) {
+			return false;
+		}
+
+		wp_send_json_error(
+			array(
+				'message' => __( 'Полное обновление Яндекс ПВЗ/географии уже управляет этой стадией. Используйте управление полным обновлением.', 'walls-delivery-calc' ),
+			),
+			409
+		);
 
 		return true;
 	}
@@ -2698,6 +2735,16 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? YandexDeliverySettings::SERVICE_KEY ) );
+		if ( $this->is_yandex_geo_pipeline_active() ) {
+			$this->save_yandex_region_mapping_v2_result(
+				'error',
+				'Полное обновление Яндекс ПВЗ/географии',
+				'Полное обновление Яндекс ПВЗ/географии уже управляет этой стадией. Используйте управление полным обновлением.',
+				array()
+			);
+			wp_safe_redirect( add_query_arg( array( 'page' => self::MENU_SLUG, 'service' => $service_key, 'tab' => 'yandex_delivery_pickup' ), admin_url( 'admin.php' ) ) );
+			exit;
+		}
 		if ( 'sync_yandex_region_mapping_v2' === $action ) {
 			$report = $this->yandex_region_mapping_v2_repository->sync_from_sources();
 			$this->save_yandex_region_mapping_v2_result( 'success', 'Сопоставление регионов Яндекса', 'Список регионов обновлен.', $report );
