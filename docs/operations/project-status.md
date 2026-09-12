@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.11
+Version: 1.0.12
 
-The current Walls Delivery Calc release source is version 1.0.11. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. The accepted 1.0.9 Russian Post exact-FIAS prefetch and bulk staging writes remain in production; temporary performance and lock-forensic diagnostics are removed. Russian Post weekly pickup refresh keeps its explicit weekday and quarter-hour time in `Asia/Novosibirsk`. Russian Post shipment tracking now exposes the complete 490-row native status catalog and configurable universal mapping in Delivery Services while preserving every 1.0.10 mapping and terminal lifecycle decision. Tracking cadence remains owned exclusively by the common shipment status autosync. Matching decisions, worker-slice limits, lock lifecycle, and schema baseline remain unchanged.
+The current Walls Delivery Calc release source is version 1.0.12. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. The accepted 1.0.9 Russian Post exact-FIAS prefetch and bulk staging writes remain in production; temporary performance and lock-forensic diagnostics are removed. Russian Post weekly pickup refresh keeps its explicit weekday and quarter-hour time in `Asia/Novosibirsk`. Russian Post shipment tracking exposes the complete 490-row native status catalog and configurable universal mapping in Delivery Services. Version 1.0.12 intentionally changes only native operation `2:25` from non-terminal to terminal, matching the current official catalog while retaining universal status `delivered`; all other mapping rows remain unchanged. Tracking cadence remains owned exclusively by the common shipment status autosync. Matching decisions, worker-slice limits, lock lifecycle, and schema baseline remain unchanged.
 
 Current production scope includes:
 

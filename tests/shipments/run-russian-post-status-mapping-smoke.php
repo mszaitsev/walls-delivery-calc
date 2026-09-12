@@ -136,8 +136,20 @@ foreach ( $new_pairs as $key => $label ) {
 	russian_post_status_mapping_assert( false === $catalog[ $key ]['terminal'], 'New official pair must retain its current non-terminal dictionary metadata: ' . $key );
 }
 
-russian_post_status_mapping_assert( DeliveryStatus::DELIVERED === $defaults['2:25'], 'Compatibility pair 2:25 must remain delivered.' );
-russian_post_status_mapping_assert( false === $catalog['2:25']['terminal'], '2:25 remains terminal=false for backward compatibility, although the current official Russian Post dictionary reports isTerminal=true.' );
+russian_post_status_mapping_assert( DeliveryStatus::DELIVERED === $defaults['2:25'], 'Official pair 2:25 must remain delivered.' );
+russian_post_status_mapping_assert( true === $catalog['2:25']['terminal'], 'Official pair 2:25 must be terminal.' );
+$mapped_225 = $mapper->map_record( array( 'operation_type_id' => '2', 'operation_attr_id' => '25' ) );
+russian_post_status_mapping_assert( DeliveryStatus::DELIVERED === $mapped_225['universal_status_code'] && true === $mapped_225['carrier_status_is_terminal'], 'Runtime mapper must resolve 2:25 as delivered and terminal.' );
+
+$unchanged_225_rows = array_diff_key( $catalog, array( '2:25' => true ) );
+$unchanged_225_fingerprint_rows = array();
+foreach ( $unchanged_225_rows as $key => $row ) {
+	$unchanged_225_fingerprint_rows[ $key ] = $key . '|' . $row['status'] . '|' . ( $row['terminal'] ? 'true' : 'false' );
+}
+ksort( $unchanged_225_fingerprint_rows, SORT_STRING );
+russian_post_status_mapping_assert( 489 === count( $unchanged_225_fingerprint_rows ), 'The status catalog excluding 2:25 must contain 489 unchanged rows.' );
+$unchanged_225_fingerprint = hash( 'sha256', implode( "\n", $unchanged_225_fingerprint_rows ) );
+russian_post_status_mapping_assert( '47827082e1f569eb40397ab0d00e3a204c82be6077f6afe00639d3dc138ae6d8' === $unchanged_225_fingerprint, 'All 489 rows other than 2:25 must retain their 1.0.11 universal and terminal metadata; got ' . $unchanged_225_fingerprint . '.' );
 
 $legacy_rows = array_diff_key( $catalog, array_fill_keys( array_keys( $new_pairs ), true ) );
 $legacy_fingerprint_rows = array();
@@ -147,13 +159,16 @@ foreach ( $legacy_rows as $key => $row ) {
 ksort( $legacy_fingerprint_rows, SORT_STRING );
 russian_post_status_mapping_assert( 486 === count( $legacy_fingerprint_rows ), 'Legacy compatibility set must contain 486 pairs.' );
 $legacy_fingerprint = hash( 'sha256', implode( "\n", $legacy_fingerprint_rows ) );
-russian_post_status_mapping_assert( 'c025ba98e316f93831b6b493f410e86518a16aa4010247f26b98fa2267d1cdbd' === $legacy_fingerprint, 'All 486 legacy universal and terminal mappings must remain byte-for-byte compatible with 1.0.10; got ' . $legacy_fingerprint . '.' );
+russian_post_status_mapping_assert( 'b81166a27837dfe8c830a451fb88b658d6d489b156e236699ef979612b972a38' === $legacy_fingerprint, 'The 486-row legacy fingerprint must differ from 1.0.10 only for the intentional 2:25 terminal correction; got ' . $legacy_fingerprint . '.' );
 
 $mapper->save_mapping( array( '2:1' => DeliveryStatus::IN_TRANSIT, '2:25' => DeliveryStatus::UNKNOWN, 'not:official' => DeliveryStatus::DELIVERED ) );
 $reloaded = new RussianPostTrackingStatusMapper( new SettingsRepository() );
 $mapped_override = $reloaded->map_record( array( 'operation_type_id' => '2', 'operation_attr_id' => '1' ) );
 russian_post_status_mapping_assert( DeliveryStatus::IN_TRANSIT === $mapped_override['universal_status_code'], 'Saved override must be consumed after mapper reload.' );
 russian_post_status_mapping_assert( true === $mapped_override['carrier_status_is_terminal'], 'Universal override must not change carrier terminal metadata.' );
+$mapped_225_override = $reloaded->map_record( array( 'operation_type_id' => '2', 'operation_attr_id' => '25' ) );
+russian_post_status_mapping_assert( DeliveryStatus::UNKNOWN === $mapped_225_override['universal_status_code'], 'Saved universal override must be consumed for 2:25.' );
+russian_post_status_mapping_assert( true === $mapped_225_override['carrier_status_is_terminal'], 'Saved universal override must not change official terminal metadata for 2:25.' );
 russian_post_status_mapping_assert( ! array_key_exists( 'not:official', $reloaded->mapping() ), 'Unknown native keys must not be persisted.' );
 $mapper->save_mapping( array( '2:1' => 'invalid-status' ) );
 russian_post_status_mapping_assert( DeliveryStatus::DELIVERED === $mapper->map_record( array( 'operation_type_id' => '2', 'operation_attr_id' => '1' ) )['universal_status_code'], 'Invalid universal override must fall back to the catalog default.' );

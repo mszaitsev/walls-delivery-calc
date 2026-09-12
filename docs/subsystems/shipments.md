@@ -1,6 +1,6 @@
 # Shipments
 
-Version: 1.0.11
+Version: 1.0.12
 
 Shipment code lives under `src/Shipments` and carrier-owned shipment modules. Implementations exist for CDEK, DPD, Russian Post, Yandex Delivery, Jet Logistic, PEK, and Ozon Delivery; shared behavior is defined by the Shipment Framework.
 
@@ -8,7 +8,7 @@ PEK supports the verified RU create/preview/persist/manual-attach/status/documen
 
 Creation uses server-owned idempotency/correlation state where supported. Status normalization, mutation reconciliation, safe diagnostics, document access, cancellation eligibility, and persistence mapping remain carrier-owned behind shared interfaces. Carrier-specific payloads must not leak secrets or customer payloads into production logs.
 
-Russian Post tracking uses the 490-row official native operation catalog owned by `RussianPostTrackingStatusMapper`. The Delivery Services `status_mapping` tab exposes each `operation_type_id:operation_attr_id` pair and lets an administrator override only its universal `DeliveryStatus`; native terminal metadata remains immutable. In the absence of persisted settings, all 486 mappings supported by 1.0.10 retain their prior universal and terminal behavior, while four newly catalogued pairs default to `unknown`. Tracking updates—including saved overrides—run through the same Shipment Framework adapter registry and global shipment status autosync used by other carriers. Russian Post has no carrier-specific status cadence, enablement flag, or status cron; its independently configured weekly pickup-point import is unrelated.
+Russian Post tracking uses the 490-row official native operation catalog owned by `RussianPostTrackingStatusMapper`. The Delivery Services `status_mapping` tab exposes each `operation_type_id:operation_attr_id` pair and lets an administrator override only its universal `DeliveryStatus`; native terminal metadata remains immutable. Four newly catalogued pairs default to `unknown`. Version 1.0.12 intentionally aligns `2:25` («Вручение — Адресату по QR коду») with the official carrier metadata by keeping `delivered` and changing only its terminal flag to `true`; every other native row is unchanged. Tracking updates—including saved overrides—run through the same Shipment Framework adapter registry and global shipment status autosync used by other carriers. Russian Post has no carrier-specific status cadence, enablement flag, or status cron; its independently configured weekly pickup-point import is unrelated.
 
 ## Ozon Delivery Shipments
 
