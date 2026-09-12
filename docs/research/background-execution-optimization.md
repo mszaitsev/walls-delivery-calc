@@ -141,6 +141,8 @@ Proposed change:
 - crash safety remains the existing byte-offset + staging upsert contract;
 - no transaction spans multiple batches.
 
+The 1.0.15 admin status contract is presentation-safe across slow/out-of-order AJAX responses. The persisted Russian Post option carries a globally monotonic `state_revision`: every successful state transition stores the expected persisted revision plus one, including queue/start of a new `import_id`, worker metrics, terminal CAS, cancellation, and stale reset. Browser polling is single-flight, ignores lower positive revisions after a newer render, retries after transport errors, and remains status-only. This changes neither worker execution nor its batches, schedule, lease, or staging lifecycle.
+
 ## 7. Ozon deep dive
 
 Current phases are discovery, enrichment, then ready/activation:
@@ -195,7 +197,7 @@ Production acceptance exposed a second ownership boundary: the legacy standalone
 
 DPD pickup autosync performs OPS and PVZ import in one locked callback. It has no continuation gap and needs no cron-throughput optimization.
 
-DPD geography import was moved from its browser-driven loop to the shared bounded-worker policy in 1.0.13. Manual/SFTP source acquisition creates a durable job and one Action Scheduler worker. Each callback performs multiple 500-row checkpointed steps while its 18-second, 10-unit, and 80%-memory limits permit. The browser performs read-only polling. Stage N+1 was removed with bounded existing-row prefetch and prepared multi-row writes; the already batched RU matcher and set-based transactional finalization were retained.
+DPD geography import was moved from its browser-driven loop to the shared bounded-worker policy in 1.0.13. Manual/SFTP source acquisition creates a durable job and one Action Scheduler worker. Each callback performs multiple 500-row checkpointed steps while its 18-second, 10-unit, and 80%-memory limits permit. The browser performs read-only, single-flight polling and already rejects responses whose persisted `state_revision` is lower than the last rendered revision; no DPD production change was needed for the 1.0.15 status-freshness audit. Stage N+1 was removed with bounded existing-row prefetch and prepared multi-row writes; the already batched RU matcher and set-based transactional finalization were retained.
 
 ### DPD foreign-location performance follow-up (1.0.14)
 

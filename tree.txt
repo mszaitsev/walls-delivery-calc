@@ -843,6 +843,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- tests/pickup/run-russian-post-cross-job-callback-race-smoke.php
 |-- tests/pickup/run-russian-post-import-optimization-smoke.php
 |-- tests/pickup/run-russian-post-pickup-import-smoke.php
+|-- tests/pickup/run-russian-post-pickup-import-runner-smoke.js
 |-- tests/pickup/run-russian-post-weekly-schedule-smoke.php
 |-- tests/pickup/run-russian-post-wp-file-api-smoke.php
 |-- tests/rules/run-rules-admin-smoke.php
