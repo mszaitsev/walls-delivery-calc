@@ -24,6 +24,12 @@ if ( ! function_exists( 'sanitize_text_field' ) ) {
 	}
 }
 
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( string $value ): string {
+		return strtolower( preg_replace( '/[^a-z0-9_\-]/', '', $value ) ?? '' );
+	}
+}
+
 if ( ! function_exists( 'wp_unslash' ) ) {
 	function wp_unslash( mixed $value ): mixed {
 		return $value;
@@ -214,6 +220,15 @@ final class WdcSmokeSession {
 	public function get( string $key, mixed $default = null ): mixed {
 		return $this->data[ $key ] ?? $default;
 	}
+
+	/** @return array<string,mixed> */
+	public function get_session_data(): array {
+		return $this->data;
+	}
+
+	public function __unset( string $key ): void {
+		unset( $this->data[ $key ] );
+	}
 }
 
 final class WdcSmokeWooCommerce {
@@ -251,6 +266,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 require_once dirname( __DIR__ ) . '/fixtures/TestDemoCarrier.php';
 
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Calendar\Services\CalendarService;
 use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
 use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
@@ -278,6 +294,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
 use WallsShop\WDC\Checkout\WooCommerce\OrderDeliveryCustomerCommentsDisplay;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
@@ -288,10 +305,14 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
+use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Normalization\AddressNormalizerInterface;
@@ -401,6 +422,71 @@ function wc_checkout_grouped_tariff_rate( string $tariff_key, string $tariff_tit
 		Money::from_rubles( $price_rub ),
 		DateRange::range( $min_days, $max_days )
 	);
+}
+
+function wc_checkout_cdek_tariff_rate( string $tariff_key, string $tariff_title, int $min_days, int $max_days, string $planned_date, string $planned_comment, float $price_rub, float $crossed_price_rub ): DeliveryRate {
+	$delivery_days = $min_days === $max_days ? DateRange::single( $min_days ) : DateRange::range( $min_days, $max_days );
+
+	return new DeliveryRate(
+		'cdek:pickup:' . $tariff_key,
+		'cdek',
+		'CDEK',
+		'cdek',
+		'СДЭК до ПВЗ',
+		$tariff_key,
+		$tariff_title,
+		DeliveryType::PICKUP,
+		'СДЭК до ПВЗ, ' . $tariff_title . ' - ' . DeliveryDaysFormatter::format( $delivery_days ),
+		Money::from_rubles( $price_rub ),
+		null,
+		Money::from_rubles( $crossed_price_rub ),
+		$delivery_days,
+		$planned_date,
+		$planned_comment,
+		array(),
+		false,
+		'',
+		true,
+		false,
+		array(
+			'tariff_selector_group' => true,
+			'checkout_group_id' => 'cdek:pickup',
+			'pickup_family' => 'cdek:pickup',
+			'pickup_method_title' => 'СДЭК до ПВЗ',
+		)
+	);
+}
+
+final class WdcSmokeGroupedCdekCarrier implements CarrierAdapterInterface {
+	public int $quote_calls = 0;
+
+	public function get_identity(): CarrierIdentity {
+		return new CarrierIdentity( 'cdek', 'CDEK', 'api', true );
+	}
+
+	public function get_capabilities(): CarrierCapabilities {
+		return new CarrierCapabilities( supports_quotes: true, supports_pickup_delivery: true );
+	}
+
+	public function supports_country( string $countryCode ): bool {
+		return 'RU' === strtoupper( trim( $countryCode ) );
+	}
+
+	public function quote( QuoteRequest $request ): DeliveryQuote {
+		$this->quote_calls++;
+
+		return new DeliveryQuote(
+			'cdek-grouped-smoke-' . $this->quote_calls,
+			'cdek',
+			$request->destination,
+			$request->package,
+			array(
+				wc_checkout_cdek_tariff_rate( '136', 'Посылка склад-склад', 5, 6, '2026-09-22', 'Доставка планируется* с 22 сентября (вторник).', 412, 915 ),
+				wc_checkout_cdek_tariff_rate( '368', 'Супер-экспресс до 18 склад-склад', 2, 2, '2026-09-19', 'Доставка планируется* с 19 сентября (суббота).', 2812, 3314.74 ),
+			),
+			true
+		);
+	}
 }
 
 function wc_checkout_smoke_assert( bool $condition, string $message ): void {
@@ -609,6 +695,27 @@ function wc_checkout_smoke_package( string $country = 'RU' ): array {
 			),
 		),
 	);
+}
+
+/**
+ * Mirrors the WooCommerce shipping-for-package cache boundary used before calculate_shipping().
+ *
+ * @param array<string,mixed> $package
+ * @return array<int|string,array<string,mixed>>
+ */
+function wc_checkout_smoke_cached_shipping_rates( NewShippingMethod $method, array $package, int $package_index = 0 ): array {
+	$key = 'shipping_for_package_' . $package_index;
+	$cached = WC()->session->get( $key );
+	if ( is_array( $cached ) && is_array( $cached['rates'] ?? null ) ) {
+		return $cached['rates'];
+	}
+
+	$method->rates = array();
+	$method->calculate_shipping( $package );
+	$payload = array( 'rates' => $method->rates );
+	WC()->session->set( $key, $payload );
+
+	return $payload['rates'];
 }
 
 function wc_checkout_smoke_orchestrator(): CheckoutOrchestrator {
@@ -2073,6 +2180,91 @@ wc_checkout_smoke_assert( 1 === substr_count( $dpd_grouped_html, 'class="wdc-pla
 wc_checkout_smoke_assert( ! str_contains( $dpd_grouped_html, 'wdc-platform-planned-delivery-comment wdc-shipping-rate-comment">7-9 дней' ), 'Grouped checkout rate must not render a bare duration as the planned delivery comment.' );
 $domestic_tariff_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/domestic-tariff-selector.js' );
 wc_checkout_smoke_assert( str_contains( $domestic_tariff_js, 'data-planned-delivery-comment' ) && str_contains( $domestic_tariff_js, '.wdc-platform-planned-delivery-comment' ), 'Tariff selector JavaScript must update the shared planned comment from variant payload.' );
+
+$cdek_tariff_a_comment = 'Доставка планируется* с 22 сентября (вторник).';
+$cdek_tariff_b_comment = 'Доставка планируется* с 19 сентября (суббота).';
+$cdek_tariff_rates = array(
+	wc_checkout_cdek_tariff_rate( '136', 'Посылка склад-склад', 5, 6, '2026-09-22', $cdek_tariff_a_comment, 412, 915 ),
+	wc_checkout_cdek_tariff_rate( '368', 'Супер-экспресс до 18 склад-склад', 2, 2, '2026-09-19', $cdek_tariff_b_comment, 2812, 3314.74 ),
+);
+$session->save_selected_tariff( 'cdek:pickup', array( 'object_code' => '368', 'title' => 'Супер-экспресс до 18 склад-склад' ) );
+$cdek_grouped = $reflection->invoke( $method, $cdek_tariff_rates )[0] ?? null;
+wc_checkout_smoke_assert( $cdek_grouped instanceof DeliveryRate && '368' === $cdek_grouped->tariff_key, 'CDEK-like grouped rate must use the selected nested tariff as its active rate.' );
+wc_checkout_smoke_assert( 2812.0 === $cdek_grouped->price->get_rubles() && 3314.74 === $cdek_grouped->crossed_price?->get_rubles(), 'Selected grouped rate must use the active tariff price and crossed price.' );
+wc_checkout_smoke_assert( str_contains( $cdek_grouped->title, 'Супер-экспресс до 18 склад-склад' ) && str_contains( $cdek_grouped->title, '2 дня' ), 'Selected grouped rate title must be built from the active tariff title and delivery days.' );
+wc_checkout_smoke_assert( $cdek_tariff_b_comment === $cdek_grouped->planned_delivery_comment, 'Selected grouped rate must use the active tariff canonical planned comment.' );
+$cdek_variants = is_array( $cdek_grouped->meta['tariff_variants'] ?? null ) ? $cdek_grouped->meta['tariff_variants'] : array();
+$cdek_variant_b = array_values( array_filter( $cdek_variants, static fn( array $variant ): bool => '368' === (string) ( $variant['object_code'] ?? '' ) ) )[0] ?? array();
+wc_checkout_smoke_assert( '2 дня' === (string) ( $cdek_variant_b['delivery_days_label'] ?? '' ), 'Selected tariff variant must keep its short delivery-days label.' );
+wc_checkout_smoke_assert( $cdek_tariff_b_comment === (string) ( $cdek_variant_b['planned_delivery_comment'] ?? '' ) && '2 дня' !== (string) ( $cdek_variant_b['planned_delivery_comment'] ?? '' ), 'Tariff variant planned comment must contain the canonical backend comment, never the short duration label.' );
+$cdek_mapped = $rate_mapper->map( $cdek_grouped );
+wc_checkout_smoke_assert( 2812.0 === (float) $cdek_mapped['cost'] && 331474 === (int) ( $cdek_mapped['meta_data']['crossed_price']['amount_kopecks'] ?? 0 ), 'WC mapper must expose the selected tariff cost and crossed price.' );
+wc_checkout_smoke_assert( $cdek_tariff_b_comment === (string) ( $cdek_mapped['meta_data']['planned_delivery_comment'] ?? '' ), 'WC mapper must expose the selected tariff canonical planned comment.' );
+ob_start();
+( new CheckoutRateRenderer() )->render( (object) array( 'id' => $cdek_mapped['id'], 'meta_data' => $cdek_mapped['meta_data'] ) );
+$cdek_grouped_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( (bool) preg_match( '/value="368"[^>]*data-planned-delivery-comment="Доставка планируется\* с 19 сентября \(суббота\)\."[^>]*checked="checked"/u', $cdek_grouped_html ), 'Selected nested tariff radio must remain checked and carry its canonical planned comment.' );
+
+$grouped_registry = new CarrierRegistry();
+$grouped_carrier = new WdcSmokeGroupedCdekCarrier();
+$grouped_registry->register( $grouped_carrier );
+$grouped_logger = new CheckoutLogger();
+$grouped_orchestrator = new CheckoutOrchestrator(
+	$grouped_registry,
+	new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+	new RateSorter(),
+	new FallbackRateFactory(),
+	new CarrierExecutionGuard( $grouped_logger ),
+	$grouped_logger,
+	wc_checkout_smoke_lead_time_normalizer( 0 )
+);
+NewShippingMethod::configure(
+	$grouped_orchestrator,
+	$mapper,
+	$rate_mapper,
+	$session,
+	new RuleRepository(),
+	$settings,
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.10.0' ),
+	new Logger()
+);
+$grouped_method = new NewShippingMethod();
+$session->save_selected_tariff( 'cdek:pickup', array( 'object_code' => '136', 'title' => 'Посылка склад-склад' ) );
+$session->save_pickup_selection_for_family( 'cdek:pickup', array( 'carrier_key' => 'cdek', 'service_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_code' => 'CDEK-PVZ-1', 'point_address' => 'Тестовый ПВЗ' ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:pickup' ) );
+$initial_cached_rates = wc_checkout_smoke_cached_shipping_rates( $grouped_method, wc_checkout_smoke_package() );
+$initial_cached_rate = array_values( $initial_cached_rates )[0] ?? array();
+$initial_total = WC()->cart->get_cart_contents_total() + (float) ( $initial_cached_rate['cost'] ?? 0 );
+wc_checkout_smoke_assert( 1 === $grouped_carrier->quote_calls && 1412.0 === $initial_total, 'Initial grouped tariff A calculation must call the carrier and contribute 412 rubles to the Woo total.' );
+wc_checkout_smoke_cached_shipping_rates( $grouped_method, wc_checkout_smoke_package() );
+wc_checkout_smoke_assert( 1 === $grouped_carrier->quote_calls, 'Unchanged Woo package cache must reuse the existing grouped tariff A rate before selection changes.' );
+$chosen_grouped_method = WC()->session->get( 'chosen_shipping_methods', array() );
+wc_checkout_smoke_assert( is_array( $chosen_grouped_method ) && '' !== (string) ( $chosen_grouped_method[0] ?? '' ), 'Grouped tariff fixture must retain a chosen top-level shipping method before nested selection.' );
+WC()->session->set( 'shipping_for_package_3', array( 'rates' => array( 'stale-package-three' ) ) );
+$previous_post = $_POST;
+$_POST = array(
+	'service_key' => 'cdek',
+	'checkout_group_id' => 'cdek:pickup',
+	'delivery_type' => DeliveryType::PICKUP,
+	'object_code' => '368',
+	'title' => 'Супер-экспресс до 18 склад-склад',
+);
+( new ShippingMethodRegistrar( $settings, $grouped_orchestrator, $mapper, $rate_mapper, $session, new RuleRepository(), new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.10.0' ), new Logger() ) )->select_domestic_tariff();
+$_POST = $previous_post;
+wc_checkout_smoke_assert( '368' === (string) ( $session->selected_tariff( 'cdek:pickup' )['object_code'] ?? '' ), 'Real tariff-selection AJAX path must persist nested tariff B under the existing checkout group key.' );
+wc_checkout_smoke_assert( null === WC()->session->get( 'shipping_for_package_0' ) && null === WC()->session->get( 'shipping_for_package_3' ), 'Tariff selection must invalidate every current Woo shipping package cache, not only package zero.' );
+wc_checkout_smoke_assert( $chosen_grouped_method === WC()->session->get( 'chosen_shipping_methods', array() ), 'Tariff selection cache invalidation must preserve the chosen top-level WDC shipping method.' );
+wc_checkout_smoke_assert( 'CDEK-PVZ-1' === (string) ( $session->pickup_selection_for_family( 'cdek:pickup' )['point_code'] ?? '' ), 'Tariff selection inside the same pickup family must preserve the selected pickup point.' );
+$selected_cached_rates = wc_checkout_smoke_cached_shipping_rates( $grouped_method, wc_checkout_smoke_package() );
+$selected_cached_rate = array_values( $selected_cached_rates )[0] ?? array();
+$selected_total = WC()->cart->get_cart_contents_total() + (float) ( $selected_cached_rate['cost'] ?? 0 );
+wc_checkout_smoke_assert( 2 === $grouped_carrier->quote_calls, 'The update-checkout calculation after tariff selection must cross the invalidated package-cache boundary and call the carrier again.' );
+wc_checkout_smoke_assert( str_contains( (string) ( $selected_cached_rate['label'] ?? '' ), 'Супер-экспресс до 18 склад-склад' ) && str_contains( (string) ( $selected_cached_rate['label'] ?? '' ), '2 дня' ), 'Recalculated top-level WC label must reflect selected tariff B.' );
+wc_checkout_smoke_assert( 2812.0 === (float) ( $selected_cached_rate['cost'] ?? 0 ) && 3812.0 === $selected_total && $selected_total - $initial_total === 2400.0, 'Recalculated Woo total must use selected tariff B price instead of visually retaining tariff A.' );
+wc_checkout_smoke_assert( 331474 === (int) ( $selected_cached_rate['meta_data']['crossed_price']['amount_kopecks'] ?? 0 ), 'Recalculated top-level WC rate must use selected tariff B crossed price.' );
+wc_checkout_smoke_assert( '368' === (string) ( $selected_cached_rate['meta_data']['selected_tariff_object'] ?? '' ), 'Recalculated WC metadata must keep selected tariff B active.' );
+wc_checkout_smoke_assert( $chosen_grouped_method === WC()->session->get( 'chosen_shipping_methods', array() ) && 'CDEK-PVZ-1' === (string) ( $session->pickup_selection_for_family( 'cdek:pickup' )['point_code'] ?? '' ), 'Recalculation must preserve the chosen grouped method and same-family pickup selection.' );
+
 $stored_rates = $session->rates();
 $first_rate   = array_key_first( $stored_rates );
 WC()->session->set( 'chosen_shipping_methods', array( $first_rate ) );

@@ -30,6 +30,8 @@ git diff --check
 
 Run JavaScript smoke programs in `tests/` with `node`. Browser acceptance tests require their explicitly documented browser dependency and are not replaced by syntax checks.
 
+Classic checkout releases run `tests/checkout/run-woocommerce-checkout-smoke.php`. Its grouped-tariff regression protects Woo shipping-package cache invalidation after nested selection, server-side recalculation of the selected title/price/crossed price and total, canonical planned-comment payloads, checked-state restoration, and preservation of the chosen top-level method and same-family pickup point.
+
 ## Schema acceptance
 
 `tests/database/run-initial-schema-smoke.php` starts from an empty fake database boundary and asserts every 1.0 table, critical column/index, seed, and retired-table absence. Release acceptance additionally requires activation against real MySQL/MariaDB on a clean WordPress/WooCommerce installation.

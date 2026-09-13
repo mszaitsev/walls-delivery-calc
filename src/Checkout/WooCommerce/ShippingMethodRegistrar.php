@@ -308,9 +308,33 @@ final class ShippingMethodRegistrar {
 					'title' => $title,
 				)
 			);
+			$this->clear_shipping_rate_cache();
 		}
 		if ( function_exists( 'wp_send_json_success' ) ) {
 			wp_send_json_success( array( 'service_key' => $service_key, 'checkout_group_id' => $checkout_group_id, 'delivery_type' => $delivery_type, 'object_code' => $object_code ) );
+		}
+	}
+
+	private function clear_shipping_rate_cache(): void {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) ) {
+			return;
+		}
+
+		$session = WC()->session;
+		$keys = array_map( static fn( int $index ): string => 'shipping_for_package_' . $index, range( 0, 19 ) );
+		if ( method_exists( $session, 'get_session_data' ) ) {
+			$data = $session->get_session_data();
+			$keys = array_filter( array_keys( is_array( $data ) ? $data : array() ), static fn( mixed $key ): bool => is_string( $key ) && str_starts_with( $key, 'shipping_for_package_' ) );
+		}
+		foreach ( $keys as $key ) {
+			if ( method_exists( $session, '__unset' ) ) {
+				$session->__unset( $key );
+				continue;
+			}
+
+			if ( method_exists( $session, 'set' ) ) {
+				$session->set( $key, null );
+			}
 		}
 	}
 
