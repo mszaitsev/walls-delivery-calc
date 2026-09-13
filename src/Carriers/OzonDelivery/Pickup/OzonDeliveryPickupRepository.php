@@ -6,6 +6,8 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup;
 defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryPickupRepository {
+	private const DISCOVERY_INSERT_CHUNK_SIZE = 250;
+	private const ENRICHMENT_INSERT_CHUNK_SIZE = 100;
 	private object $wpdb;
 
 	public function __construct( ?object $wpdb = null ) {
@@ -93,9 +95,9 @@ final class OzonDeliveryPickupRepository {
 	}
 
 	/** @param array<string,mixed> $patch */
-	public function update_generation( int $id, array $patch ): void {
+	public function update_generation( int $id, array $patch ): bool {
 		$patch['progress_updated_at'] = current_time( 'mysql', true );
-		$this->wpdb->update( $this->generations_table(), $patch, array( 'id' => $id ) );
+		return false !== $this->wpdb->update( $this->generations_table(), $patch, array( 'id' => $id ) );
 	}
 
 	/**
@@ -114,16 +116,8 @@ final class OzonDeliveryPickupRepository {
 			}
 
 			$now = current_time( 'mysql', true );
-			foreach ( $ids as $point_id ) {
-				$sql = $this->wpdb->prepare(
-					"INSERT IGNORE INTO {$this->ids_table()} (generation_id,point_id,status,created_at,updated_at) VALUES (%d,%d,%s,%s,%s)",
-					$generation_id,
-					$point_id,
-					'pending',
-					$now,
-					$now
-				);
-				if ( false === $this->wpdb->query( $sql ) ) {
+			foreach ( array_chunk( $ids, self::DISCOVERY_INSERT_CHUNK_SIZE ) as $chunk ) {
+				if ( ! $this->insert_discovery_ids( $generation_id, $chunk, $now ) ) {
 					return $this->rollback();
 				}
 			}
@@ -131,7 +125,9 @@ final class OzonDeliveryPickupRepository {
 			$discovered_count = $this->count_ids( $generation_id );
 			$generation_patch['discovered_count'] = $discovered_count;
 			$generation_patch['downloaded_count'] = $discovered_count;
-			$this->update_generation( $generation_id, $generation_patch );
+			if ( ! $this->update_generation( $generation_id, $generation_patch ) ) {
+				return $this->rollback();
+			}
 			if ( false === $this->wpdb->query( 'COMMIT' ) ) {
 				return $this->rollback();
 			}
@@ -168,27 +164,23 @@ final class OzonDeliveryPickupRepository {
 				return $this->rollback();
 			}
 
-			$accepted = 0;
-			foreach ( $points as $row ) {
-				$point_id = (int) ( $row['point_id'] ?? 0 );
-				if ( $point_id <= 0 || ! $this->insert_point( $generation_id, $row ) ) {
-					return $this->rollback();
-				}
-				if ( ! $this->mark_id_status( $generation_id, $point_id, 'enriched', null ) ) {
-					return $this->rollback();
-				}
-				++$accepted;
+			$accepted_ids = array_values( array_map( static fn( array $row ): int => (int) ( $row['point_id'] ?? 0 ), $points ) );
+			if ( in_array( 0, $accepted_ids, true ) || ! $this->insert_points_bulk( $generation_id, $points ) || ! $this->mark_ids_enriched( $generation_id, $accepted_ids ) ) {
+				return $this->rollback();
 			}
-
-			$rejected = 0;
+			$normalized_rejects = array();
 			foreach ( $rejects as $point_id => $code ) {
-				if ( ! $this->mark_id_status( $generation_id, (int) $point_id, 'rejected', $code ) ) {
-					return $this->rollback();
-				}
-				++$rejected;
+				$point_id = (int) $point_id;
+				if ( $point_id <= 0 ) { return $this->rollback(); }
+				$normalized_rejects[ $point_id ] = substr( preg_replace( '/[^a-z0-9_]/', '', strtolower( $code ) ) ?? '', 0, 40 );
 			}
+			if ( ! $this->mark_ids_rejected( $generation_id, $normalized_rejects ) ) {
+				return $this->rollback();
+			}
+			$accepted = count( $accepted_ids );
+			$rejected = count( $normalized_rejects );
 
-			$this->update_generation(
+			if ( ! $this->update_generation(
 				$generation_id,
 				$this->clear_diagnostics(
 					array(
@@ -198,7 +190,9 @@ final class OzonDeliveryPickupRepository {
 						'retry_count'                 => 0,
 					)
 				)
-			);
+			) ) {
+				return $this->rollback();
+			}
 
 			if ( false === $this->wpdb->query( 'COMMIT' ) ) {
 				return $this->rollback();
@@ -497,21 +491,62 @@ final class OzonDeliveryPickupRepository {
 		);
 	}
 
-	private function mark_id_status( int $generation_id, int $point_id, string $status, ?string $reject_code ): bool {
-		$updated = $this->wpdb->update(
-			$this->ids_table(),
-			array(
-				'status'      => $status,
-				'reject_code' => null === $reject_code ? null : substr( preg_replace( '/[^a-z0-9_]/', '', strtolower( $reject_code ) ) ?? '', 0, 40 ),
-				'updated_at'  => current_time( 'mysql', true ),
-			),
-			array(
-				'generation_id' => $generation_id,
-				'point_id'      => $point_id,
-				'status'        => 'pending',
-			)
-		);
+	/** @param array<int,int> $ids */
+	private function insert_discovery_ids( int $generation_id, array $ids, string $now ): bool {
+		if ( array() === $ids ) { return true; }
+		$values = array();
+		$args = array();
+		foreach ( $ids as $point_id ) {
+			$values[] = '(%d,%d,%s,%s,%s)';
+			array_push( $args, $generation_id, (int) $point_id, 'pending', $now, $now );
+		}
+		$sql = $this->wpdb->prepare( "INSERT IGNORE INTO {$this->ids_table()} (generation_id,point_id,status,created_at,updated_at) VALUES " . implode( ',', $values ), ...$args );
+		return false !== $this->wpdb->query( $sql );
+	}
 
-		return 1 === (int) $updated;
+	/** @param array<int,array<string,mixed>> $points */
+	private function insert_points_bulk( int $generation_id, array $points ): bool {
+		foreach ( array_chunk( $points, self::ENRICHMENT_INSERT_CHUNK_SIZE ) as $chunk ) {
+			$values = array();
+			$args = array();
+			foreach ( $chunk as $row ) {
+				$values[] = '(%d,%d,%s,%s,%s,%s,' . ( null === ( $row['latitude'] ?? null ) ? 'NULL' : '%f' ) . ',' . ( null === ( $row['longitude'] ?? null ) ? 'NULL' : '%f' ) . ',%s,%d,%d,' . $this->nullable_int_placeholder( $row['storage_period_days'] ?? null ) . ',' . $this->nullable_int_placeholder( $row['fitting_rooms_count'] ?? null ) . ',' . $this->nullable_int_placeholder( $row['min_weight_g'] ?? null ) . ',' . $this->nullable_int_placeholder( $row['max_weight_g'] ?? null ) . ',' . $this->nullable_int_placeholder( $row['max_width_mm'] ?? null ) . ',' . $this->nullable_int_placeholder( $row['max_length_mm'] ?? null ) . ',' . $this->nullable_int_placeholder( $row['max_height_mm'] ?? null ) . ',%s)';
+				array_push( $args, $generation_id, (int) $row['point_id'], (string) ( $row['name'] ?? '' ), (string) ( $row['point_number'] ?? '' ), (string) ( $row['type'] ?? '' ), (string) ( $row['full_address'] ?? '' ) );
+				foreach ( array( 'latitude', 'longitude' ) as $field ) { if ( null !== ( $row[ $field ] ?? null ) ) { $args[] = (float) $row[ $field ]; } }
+				array_push( $args, (string) ( $row['schedule'] ?? '' ), (int) ( $row['is_active'] ?? 0 ), (int) ( $row['is_bulky'] ?? 0 ) );
+				foreach ( array( 'storage_period_days', 'fitting_rooms_count', 'min_weight_g', 'max_weight_g', 'max_width_mm', 'max_length_mm', 'max_height_mm' ) as $field ) { if ( null !== ( $row[ $field ] ?? null ) ) { $args[] = (int) $row[ $field ]; } }
+				$args[] = (string) ( $row['fingerprint'] ?? '' );
+			}
+			$sql = $this->wpdb->prepare( "INSERT INTO {$this->points_table()} (generation_id,point_id,name,point_number,type,full_address,latitude,longitude,schedule,is_active,is_bulky,storage_period_days,fitting_rooms_count,min_weight_g,max_weight_g,max_width_mm,max_length_mm,max_height_mm,fingerprint) VALUES " . implode( ',', $values ), ...$args );
+			$inserted = $this->wpdb->query( $sql );
+			if ( false === $inserted || count( $chunk ) !== (int) $inserted ) { return false; }
+		}
+		return true;
+	}
+
+	private function nullable_int_placeholder( mixed $value ): string { return null === $value ? 'NULL' : '%d'; }
+
+	/** @param array<int,int> $ids */
+	private function mark_ids_enriched( int $generation_id, array $ids ): bool {
+		if ( array() === $ids ) { return true; }
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$args = array_merge( array( current_time( 'mysql', true ), $generation_id ), $ids );
+		$sql = $this->wpdb->prepare( "UPDATE {$this->ids_table()} SET status='enriched',reject_code=NULL,updated_at=%s WHERE generation_id=%d AND status='pending' AND point_id IN ({$placeholders})", ...$args );
+		return count( $ids ) === (int) $this->wpdb->query( $sql );
+	}
+
+	/** @param array<int,string> $rejects */
+	private function mark_ids_rejected( int $generation_id, array $rejects ): bool {
+		if ( array() === $rejects ) { return true; }
+		$cases = array();
+		$args = array();
+		foreach ( $rejects as $point_id => $code ) { $cases[] = 'WHEN %d THEN %s'; array_push( $args, $point_id, $code ); }
+		$args[] = current_time( 'mysql', true );
+		$args[] = $generation_id;
+		$ids = array_keys( $rejects );
+		array_push( $args, ...$ids );
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$sql = $this->wpdb->prepare( "UPDATE {$this->ids_table()} SET status='rejected',reject_code=CASE point_id " . implode( ' ', $cases ) . " ELSE reject_code END,updated_at=%s WHERE generation_id=%d AND status='pending' AND point_id IN ({$placeholders})", ...$args );
+		return count( $rejects ) === (int) $this->wpdb->query( $sql );
 	}
 }

@@ -75,13 +75,18 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup {
 	final class OzonDeliveryPickupImportLock {
 		public ?string $next_owner = 'OWNER-A';
 		public ?string $owned = 'OWNER-A';
+		public ?string $execution_token = null;
 		/** @var list<string> */
 		public array $released = array();
 
 		public function acquire(): ?string { return $this->next_owner; }
 		public function renew( string $owner ): bool { return true; }
+		public function claim_execution( string $owner ): ?string { if ( ! $this->owns( $owner ) || null !== $this->execution_token ) { return null; } return $this->execution_token = 'EXECUTION-' . $owner; }
+		public function renew_execution( string $owner, string $token ): bool { return $this->owns_execution( $owner, $token ); }
+		public function owns_execution( string $owner, string $token ): bool { return $this->owns( $owner ) && $token === $this->execution_token; }
+		public function release_execution( string $owner, string $token ): void { if ( $this->owns_execution( $owner, $token ) ) { $this->execution_token = null; } }
 		public function owns( string $owner ): bool { return null !== $this->owned && $owner === $this->owned; }
-		public function release( string $owner ): void { $this->released[] = $owner; if ( $this->owns( $owner ) ) { $this->owned = null; } }
+		public function release( string $owner ): void { $this->released[] = $owner; if ( $this->owns( $owner ) ) { $this->owned = null; $this->execution_token = null; } }
 		public function current_owner(): ?string { return $this->owned; }
 	}
 

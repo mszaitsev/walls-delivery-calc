@@ -1,10 +1,12 @@
 # Plugin Architecture
 
-Version: 1.0.15
+Version: 1.0.16
 
 `Plugin.php` is the composition root. It registers infrastructure and activation ownership first, runs the single fresh-install schema migration, and only then registers services whose hooks may access plugin tables. The shared `ActionScheduler` adapter owns readiness coordination; scheduler owners attach callbacks during bootstrap and defer datastore inspection or schedule creation until `action_scheduler_init`.
 
 The Yandex full pickup/geography WP-Cron callback is a carrier-owned bounded worker: one callback processes independently checkpointed local units for at most 18 seconds, 25 units, and 80% of a finite PHP memory limit. A session-and-token option lease excludes overlapping callbacks, continuations carry the outer `session_id`, and bootstrap only repairs a missing continuation. The full JSON download remains one heavy unit and always ends its slice.
+
+The Ozon pickup Action Scheduler callback follows the same bounded-worker contract with carrier-specific limits of 18 seconds, 10 network-heavy units, and 80% of finite memory. Its existing generation transactions remain the atomic boundaries; the carrier-owned lease and exact continuation identity protect overlap, cancellation, and bootstrap self-heal. Repository persistence uses bounded bulk SQL without changing schema or the published-generation snapshot contract.
 
 WooCommerce checkout, order administration, Shipment Framework, carrier catalogs, locations, rules, calendars, pickup providers, REST/AJAX controllers, and background jobs remain separated by their documented subsystem boundaries. The production composition root contains no prepared-FIAS or automatic GAR/SPAS runtime.
 

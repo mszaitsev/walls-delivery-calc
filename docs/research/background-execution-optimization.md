@@ -2,15 +2,15 @@
 
 Audit date: 2026-09-12
 
-Branch: `perf/yandex-geo-pipeline-bounded-worker`
+Branch: `perf/ozon-pickup-bounded-worker`
 
-Baseline HEAD: `2f9b478b337c4f9f3331ce92b7c051dbe10e6ddb`
+Baseline HEAD: `e036ef67e2733d9fe077d93ebbfd522117b65ee0`
 
-Plugin version: `1.0.15`; schema version: `1.0.0`
+Plugin version: `1.0.16`; schema version: `1.0.0`
 
-The Russian Post pilot batches exact FIAS lookups and staging inserts. Production acceptance of 1.0.9 completed successfully; the temporary 1.0.8 profiler was removed in 1.0.10. DPD Geography and the Yandex full geography pipeline now use bounded worker slices. Ozon remains outside this implementation phase.
+Russian Post, DPD Geography, the Yandex full geography pipeline, and Ozon pickup synchronization now use carrier-owned bounded worker slices. Ozon keeps Action Scheduler and its existing API units while removing both the one-unit-per-callback boundary and per-row Stage N+1 persistence.
 
-This is an architecture report. It does not change production code, schedules, schemas, versions, or server configuration.
+This document records both the original audit and the implemented runtime contracts. The Ozon implementation changes no schema, global schedule, API batch size, or server configuration.
 
 ## 1. Executive summary
 
@@ -60,7 +60,7 @@ Abbreviations: AS = Action Scheduler; WP-Cron = WordPress cron; AJAX = authentic
 | # | Class | Subsystem / hook or action | Scheduler and cadence | Owner | Work per callback / batch | Continuation and possible count | Lock / lease and idempotency | Retry / backoff | Cron-wake dependency | Browser behavior | Overview |
 |---:|---|---|---|---|---|---|---|---|---|---|---|
 | 1 | A+B | Russian Post pickup: `wdc_russian_post_pickup_import`, `..._init`, `..._batch`, `..._finalize`; `RussianPostPickupImporter` | Weekly WP-Cron start; AS single actions with WP-Cron fallback | A+B | Init downloads/extracts; batch reads at most 500 passport objects; finalize swaps staging | `+5s` after init and each batch; for 184,442 rows about 369 batch actions plus init/finalize | Unique `import_id`; option lock with token, 10,800s TTL, owner compare/replace renew at every callback; staging and byte offset checkpoints | Pipeline failures are terminal; no intentional inter-batch backoff | **Yes**, every `+5s` action normally waits up to the next minute | 3s status polling is read-only | Yes, top-level weekly task |
-| 2 | A+B+C | Ozon pickup: `wdc_ozon_delivery_pickup_daily`, `..._step`; `OzonDeliveryPickupScheduler` + `OzonDeliveryPickupImportService` | Daily AS recurring start; AS single steps | A+B+C | One remote discovery page, or at most 100 IDs in enrichment; publish when pending set is empty | Normal `+1s`; pages up to 50,000 and rows up to 5,000,000 by safety caps | Random owner option lock, 900s TTL, renew per step; generation/job state and atomic phase-aware commits | Retryable API errors: 2s, 5s, 10s, max 3; 404 info salvage may recursively make up to 199 requests in the same step | **Yes** for ordinary `+1s`; retry delay is intentional even if cron quantizes it | 3s polling reads state only; start/stop are explicit controls | Yes, daily task |
+| 2 | A+B+C | Ozon pickup: `wdc_ozon_delivery_pickup_daily`, `..._step`; `OzonDeliveryPickupScheduler` + `OzonDeliveryPickupImportService` | Daily AS recurring start; AS single worker slices | A+B+C | Up to 10 independently committed discovery pages/100-ID enrichment units within 18s and 80% memory; publish when pending is empty | One owner-scoped continuation between slices; pages up to 50,000 and rows up to 5,000,000 by safety caps | Random owner option lock, 900s TTL, CAS renew/release/takeover plus a per-callback execution token in the same option; generation/job state and atomic phase-aware commits | Retryable API errors end the slice: 2s, 5s, 10s, max 3; 404 info salvage remains inside one unit | **Yes**, between bounded slices only; intentional retry delay is preserved | 3s single-flight status polling only; start/stop are explicit controls | Yes, daily task |
 | 3 | A+B | Yandex full geo/pickup: `wdc_yandex_delivery_geo_pipeline_v2_scheduled_start`, `..._run_step`; `YandexDeliveryGeoPipelineV2Runner` | Configured day/time WP-Cron single start; WP-Cron single continuation | A+B | One orchestrator step: download/start or one lower-level batch/stage transition | `+1s` after every running step; count is sum of pickup, geo-build, enrichment, mapping batches and transitions | Persistent session/state option, but no dedicated owner lease on the outer pipeline; lower stages use staging/promotion where applicable | No explicit delayed retry in the outer runner | **Yes**, every ordinary step waits for the next minute | Full-pipeline UI polls status every 2s and does no work | Yes, configured task |
 | 4 | D | DPD pickup autosync: `wdc_dpd_pickup_points_autosync`; `DpdPickupPointAutoSync` | WP-Cron daily, once for each configured local time | D | `import_all('auto_cron')` fetches/imports OPS and PVZ in one callback | None | Token option lock, 30-minute TTL, owner-checked release; importer upserts by stable point identity | No scheduled continuation/backoff | No; cadence only affects start | No worker polling | Yes |
 | 5 | A+D | Shipment status autosync: `wdc_shipment_status_autosync`; `ShipmentStatusAutoSyncCron` + service | WP-Cron recurring, configurable 15–1440 minutes | A+D | Whole run in one callback: DPD global sync then all configured-status orders and shipments | None | Transient lock, 30-minute TTL, `finally` release; carrier updates operate on persisted shipment identity | Carrier HTTP behavior and CDEK in-process throttle; no continuation schedule | No minute gap after start | Manual run is a separate whole callback | Yes |
@@ -153,6 +153,16 @@ Current phases are discovery, enrichment, then ready/activation:
 - empty pending set marks the generation ready and activates it;
 - the owner lock has a 900-second TTL and is renewed at each scheduled step.
 
+### Ozon implementation result (1.0.16)
+
+Action Scheduler remains the owner of the daily start and `wdc_ozon_delivery_pickup_step`. One step callback now runs a conservative bounded slice of at most 18 seconds, 10 API atomic units, and 80% of a finite PHP memory limit. Unknown/unlimited memory remains bounded by time and units. Each discovery page and each enrichment batch of at most 100 IDs retains its own repository transaction and checkpoint. A retry result ends the slice immediately and creates one exact `(job_id, owner)` continuation with the existing 2/5/10-second backoff.
+
+The scheduler revalidates the SQL building generation, immutable job/owner pair, and option lease between units. The existing 900-second lease now uses compare-and-replace renew and compare-and-delete release/expired takeover, so a stale callback cannot overwrite or delete a newer owner. Exact continuation checks suppress duplicates, and Action Scheduler initialization repairs a missing continuation only when the building generation and current lease owner match; bootstrap never executes import work.
+
+Discovery persists IDs through `INSERT IGNORE` chunks of 250 rows and derives counters from the unchanged unique generation count. Enrichment keeps `INFO_BATCH_SIZE=100`, inserts accepted point rows with one prepared multi-row statement, marks accepted IDs with one set-based update, and marks rejected IDs with one prepared `CASE` update. Affected-row checks require every expected point/ID transition; any short or failed write rolls back the current atomic transaction. No table, index, parser, API request, activation, or snapshot contract changed.
+
+The browser remains status-only and single-flight, so no SQL `state_revision` was added. Terminal generations stop polling. Temporary transport failures no longer permanently stop the panel after three errors; polling resumes on the existing bounded cadence without mutating worker state.
+
 Every normal step schedules `time()+1`, so it suffers minute quantization. The 2/5/10-second retry schedule is intentional backoff and must not be consumed in a tight loop.
 
 Proposed slice:
@@ -222,7 +232,7 @@ Calendar generation is one idempotent callback and schedules only the next month
 | Pipeline | Exact production scheduling site | Requested delay | Nature |
 |---|---|---:|---|
 | Russian Post | `RussianPostPickupImporter::schedule_single()` | 5s | Technical continuation latency; remove between ordinary batches by slicing |
-| Ozon | `OzonDeliveryPickupScheduler::run_step()` default branch | 1s | Technical continuation latency; retain 2/5/10s API retry branch |
+| Ozon | `OzonDeliveryPickupScheduler::run_step()` after a bounded slice | 1s | Technical continuation latency remains only between slices; 2/5/10s API retry branch is retained |
 | Yandex | `YandexDeliveryGeoPipelineV2Runner::schedule_next_step()` | 1s | Technical continuation latency across normal stages |
 
 No other production scheduler call creates second-scale WDC continuation actions.
@@ -410,7 +420,7 @@ Integration/production-like:
 1. **Measurement only:** add bounded state diagnostics for unit duration, slice duration, units/slice, memory peak, continuation reason, and action count. Confirm p50/p95 on production-like data.
 2. **Shared primitive:** introduce and unit-test the small execution-budget helper; no scheduler abstraction.
 3. **Russian Post pilot — implemented in 1.0.5:** the existing 500-object atomic batch is wrapped by a 15-unit/18-second worker slice with an 80% finite-memory-limit guard. Checkpoints, activity timestamps, and owner renewals remain per batch; the callback schedules exactly one continuation on budget exhaustion or one finalize action on EOF. Production tuning should record slice duration, batches, objects, and stop reason on the 184k snapshot.
-4. **Ozon:** add remote-aware slicing; preserve explicit retry delay and salvage cap; measure quota/load.
+4. **Ozon — implemented in 1.0.16:** the existing API pages/100-ID batches run in 18-second/10-unit/80%-memory slices; retry ends the slice, ownership is revalidated between units, a same-option CAS execution token excludes same-owner callback overlap, and Stage N+1 writes are replaced by bounded bulk SQL without schema changes.
 5. **Yandex — implemented in 1.0.15:** the outer pipeline has a session-and-token option lease and runs local work in 18-second/25-unit/80%-memory slices; the download remains an isolated terminal slice unit and continuations are owner-scoped.
 6. **Operational option:** only after application changes, evaluate one Action Scheduler WP-CLI runner as an optional accelerator for the whole WooCommerce queue. It must not be a WDC installation requirement.
 7. **Deferred review:** use shipment status duration/order-count diagnostics to decide whether it needs its own paginated worker project. Keep browser maintenance flows unchanged unless a separate UX requirement asks for tab-independent execution.

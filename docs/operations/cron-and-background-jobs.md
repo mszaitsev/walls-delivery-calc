@@ -1,6 +1,6 @@
 # Cron And Background Jobs
 
-Version: 1.0.15
+Version: 1.0.16
 
 WDC business clock times use `Asia/Novosibirsk`; scheduler APIs receive Unix timestamps. Owners register callbacks during plugin bootstrap and defer Action Scheduler inspection/creation until `action_scheduler_init`. Registration after that hook ensures the schedule immediately. Expected pre-initialization and disabled/no-work states are silent.
 
@@ -34,5 +34,7 @@ DPD SOAP calls require the PHP `soap` extension and `SoapClient`. Automatic DPD 
 The Russian Post weekly start is configured by ISO weekday (`1` Monday through `7` Sunday) and a quarter-hour `HH:MM` value. Its only business timezone is `Asia/Novosibirsk`. A fresh install defaults to Monday 09:00. An upgraded installation with weekly scheduling enabled but without the new explicit fields keeps its existing WP-Cron timestamp and derives the displayed weekday/time from that event until the administrator explicitly saves the form. Changing enabled state, weekday, or time synchronizes the event immediately; bootstrap `sync_schedule()` remains a duplicate-free self-healing check.
 
 Ozon browser polling reads local progress only and never executes background work. Checkout reads published local pickup snapshots and never initiates imports.
+
+Since 1.0.16, one Ozon pickup Action Scheduler callback processes up to ten existing discovery/enrichment API units within an 18-second soft wall-time and 80%-of-finite-memory guard. Each unit keeps its own transaction; a retry ends the slice and retains the existing 2/5/10-second delay. The 900-second owner lease is revalidated between units, and a CAS execution token in that same lease excludes overlapping callbacks even when they carry the same `(job_id, owner)`. Exact continuation checks prevent duplicates, and Action Scheduler initialization repairs a missing continuation without running work inline.
 
 Handlers call application services rather than controllers/renderers. API jobs must be idempotent where possible and protect overlapping execution. There are no prepared-FIAS or automatic GAR/SPAS background jobs in the 1.0 runtime.
