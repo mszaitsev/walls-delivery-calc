@@ -573,6 +573,63 @@ final class WdcRecalcCarrier implements CarrierAdapterInterface {
 	}
 }
 
+final class WdcRecalcCanonicalOrderCarrier implements CarrierAdapterInterface {
+	public function get_identity(): CarrierIdentity {
+		return new CarrierIdentity( 'canonical_order', 'Canonical order', 'api', true );
+	}
+
+	public function get_capabilities(): CarrierCapabilities {
+		return new CarrierCapabilities( supports_quotes: true, supports_pickup_delivery: true );
+	}
+
+	public function supports_country( string $countryCode ): bool {
+		return 'RU' === strtoupper( $countryCode );
+	}
+
+	public function quote( QuoteRequest $request ): DeliveryQuote {
+		return new DeliveryQuote(
+			'canonical-order',
+			'canonical_order',
+			$request->destination,
+			$request->package,
+			array(
+				$this->rate( 'plain-a', 'plain-a', 186 ),
+				$this->rate( 'group-c-free', 'free', 0, true ),
+				$this->rate( 'plain-d', 'plain-d', 1507 ),
+				$this->rate( 'group-c-paid', 'paid', 643, true ),
+				$this->rate( 'plain-b', 'plain-b', 415 ),
+				$this->rate( 'plain-zero', 'plain-zero', 0 ),
+			)
+		);
+	}
+
+	private function rate( string $rate_id, string $tariff_key, float $price, bool $grouped = false ): DeliveryRate {
+		return new DeliveryRate(
+			rate_id: $rate_id,
+			carrier_key: 'canonical_order',
+			carrier_name: 'Canonical order',
+			service_key: 'canonical_order',
+			service_name: 'Canonical order',
+			tariff_key: $tariff_key,
+			tariff_name: $rate_id,
+			delivery_type: DeliveryType::PICKUP,
+			title: $rate_id,
+			price: Money::from_rubles( $price ),
+			original_price: null,
+			crossed_price: null,
+			delivery_days: DateRange::single( 3 ),
+			requires_pickup_point: true,
+			meta: $grouped
+				? array(
+					'tariff_selector_group' => true,
+					'checkout_group_id' => 'group-c',
+					'pickup_method_title' => 'Group C',
+				)
+				: array()
+		);
+	}
+}
+
 final class WdcRecalcYandexLocationCarrier implements CarrierAdapterInterface {
 	public function __construct( private int $expected_location_id ) {}
 
@@ -755,6 +812,23 @@ function wdc_recalc_service( ?OrderQuoteRequestMapper $mapper = null, array $ext
 	);
 
 	return new OrderDeliveryRecalculationService( $mapper ?? new OrderQuoteRequestMapper(), $orchestrator, new OrderShipmentRepository() );
+}
+
+function wdc_recalc_canonical_order_service(): OrderDeliveryRecalculationService {
+	$registry = new CarrierRegistry();
+	$registry->register( new WdcRecalcCanonicalOrderCarrier() );
+	$logger = new CheckoutLogger();
+	$orchestrator = new CheckoutOrchestrator(
+		$registry,
+		new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+		new RateSorter(),
+		new FallbackRateFactory(),
+		new CarrierExecutionGuard( $logger ),
+		$logger,
+		wdc_recalc_lead_time_normalizer( 0 )
+	);
+
+	return new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper(), $orchestrator, new OrderShipmentRepository() );
 }
 
 function wdc_recalc_pek_settings(): PekSettings {
@@ -1404,6 +1478,18 @@ recalc_smoke_assert( 1000 === ( $preview['request']['package']['total_weight_g']
 recalc_smoke_assert( '630099' === ( $preview['request']['destination']['postcode'] ?? '' ), 'Preview must build destination postcode from order.' );
 recalc_smoke_assert( empty( $preview['request']['customer_context']['location_override'] ?? false ), 'Preview without override must keep current order location behavior.' );
 
+$canonical_order_preview = wdc_recalc_canonical_order_service()->preview( $order );
+recalc_smoke_assert(
+	array( 'plain-a', 'plain-b', 'group-c', 'plain-d', 'plain-zero' ) === array_column( $canonical_order_preview['rates'], 'id' ),
+	'Admin normalization must preserve the canonical method order produced by RateSorter, including the grouped method position and zero-cost-last rule.'
+);
+$canonical_group = array_column( $canonical_order_preview['rates'], null, 'id' )['group-c'] ?? array();
+recalc_smoke_assert(
+	array( 'group-c-paid', 'group-c-free' ) === array_column( $canonical_group['tariff_variants'] ?? array(), 'rate_id' )
+		&& 643.0 === (float) ( $canonical_group['cost'] ?? 0 ),
+	'Grouped tariff payload must preserve canonical RateSorter variant order instead of applying local numeric price sorting.'
+);
+
 $location_ajax = wdc_recalc_location_ajax();
 $search_payload = $location_ajax->payload( 'Москва', '', 'RU' );
 $search_items = $search_payload['groups'][0]['items'] ?? array();
@@ -1712,7 +1798,7 @@ $multi_russian_post_payloads = $normalize_rates_method->invoke(
 );
 $multi_russian_post_payload = $multi_russian_post_payloads[0] ?? array();
 $multi_russian_post_tariffs = is_array( $multi_russian_post_payload['tariff_variants'] ?? null ) ? $multi_russian_post_payload['tariff_variants'] : array();
-recalc_smoke_assert( true === (bool) ( $multi_russian_post_payload['is_grouped'] ?? false ) && array( '91008', '91007' ) === array_map( static fn( array $tariff ): string => (string) ( $tariff['object_code'] ?? '' ), $multi_russian_post_tariffs ), 'Multiple meaningful Russian Post domestic tariffs must remain grouped and selectable in order recalculation.' );
+recalc_smoke_assert( true === (bool) ( $multi_russian_post_payload['is_grouped'] ?? false ) && array( '91007', '91008' ) === array_map( static fn( array $tariff ): string => (string) ( $tariff['object_code'] ?? '' ), $multi_russian_post_tariffs ), 'Multiple meaningful Russian Post domestic tariffs must remain grouped, selectable and in their canonical input order during order recalculation.' );
 $multi_russian_post_html = ( new OrderDeliveryRateRenderer() )->render( $multi_russian_post_payloads );
 recalc_smoke_assert( str_contains( $multi_russian_post_html, 'wdc-order-delivery-tariffs' ) && str_contains( $multi_russian_post_html, 'wdc_order_delivery_preview_tariff_' . RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP ) ) && str_contains( $multi_russian_post_html, 'Быстрый тариф - 2-3 дня' ) && str_contains( $multi_russian_post_html, 'Экономичный тариф - 4-6 дней' ), 'Multiple surviving Russian Post tariffs must render nested order recalculation tariff radios.' );
 

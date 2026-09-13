@@ -73,8 +73,9 @@ final class OrderDeliveryRecalculationService {
 	 * @return array<int,array<string,mixed>>
 	 */
 	private function normalize_rates( array $rates ): array {
-		$plain = array();
+		$normalized = array();
 		$tariff_groups = array();
+		$tariff_group_positions = array();
 
 		foreach ( $rates as $rate ) {
 			if ( ! $rate instanceof DeliveryRate || ! $rate->is_available() ) {
@@ -87,22 +88,27 @@ final class OrderDeliveryRecalculationService {
 						? RussianPostDomesticSettings::checkout_group_id( $rate->delivery_type )
 						: $rate->service_key . ':' . $rate->delivery_type;
 				}
+				if ( ! array_key_exists( $group_id, $tariff_groups ) ) {
+					$tariff_group_positions[ $group_id ] = count( $normalized );
+					$normalized[] = null;
+				}
 				$tariff_groups[ $group_id ][] = $rate;
 				continue;
 			}
 
-			$plain[] = $this->rate_payload( $rate );
+			$normalized[] = $this->rate_payload( $rate );
 		}
 
 		foreach ( $tariff_groups as $group_id => $group_rates ) {
+			$position = $tariff_group_positions[ $group_id ];
 			if ( 1 === count( $group_rates ) ) {
-				$plain[] = $this->single_tariff_method_payload( $group_rates[0] );
+				$normalized[ $position ] = $this->single_tariff_method_payload( $group_rates[0] );
 				continue;
 			}
-			$plain[] = $this->tariff_group_payload( $group_id, $group_rates );
+			$normalized[ $position ] = $this->tariff_group_payload( $group_id, $group_rates );
 		}
 
-		return array_values( $plain );
+		return array_values( $normalized );
 	}
 
 	/**
@@ -142,7 +148,6 @@ final class OrderDeliveryRecalculationService {
 			$default = DeliveryType::COURIER === $delivery_type ? DpdSettings::DEFAULT_COURIER_METHOD_TITLE : DpdSettings::DEFAULT_PICKUP_METHOD_TITLE;
 		}
 		$title = trim( (string) ( $first->meta[ $title_key ] ?? '' ) ) ?: $default;
-		usort( $rates, static fn( DeliveryRate $left, DeliveryRate $right ): int => $left->price->get_kopecks() <=> $right->price->get_kopecks() );
 		$cheapest = $rates[0];
 		$cheapest_delivery_comment = $this->delivery_comment( $cheapest );
 

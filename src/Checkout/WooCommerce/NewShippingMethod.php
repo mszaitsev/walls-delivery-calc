@@ -457,7 +457,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 					'delivery_days' => $rate->delivery_days->to_array(),
 					'delivery_days_label' => $delivery_days_label,
 					'planned_delivery_date' => $rate->planned_delivery_date,
-					'planned_delivery_comment' => $delivery_days_label,
+					'planned_delivery_comment' => $rate->planned_delivery_comment,
 					'comments' => $rate->comments,
 					'rate_meta' => $rate->meta,
 				);

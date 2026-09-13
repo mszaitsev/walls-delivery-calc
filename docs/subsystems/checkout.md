@@ -1,10 +1,10 @@
 # Checkout
 
-Version: 1.0.17
+Version: 1.0.18
 
 The WooCommerce checkout boundary maps the current package and canonical destination into a `QuoteRequest`, runs enabled carriers, applies rules and delivery-service post-processing, then publishes only fresh WDC rates. Package mapping is read-only: city selection/profile reconciliation own session mutations, and an active canonical location row is authoritative for identity and coordinates.
 
-Rate sorting supports price and delivery-time modes. A deliberate sort-mode transition resets tariff/method choice once; ordinary recalculation preserves an available chosen WDC method, selected tariff, and same-destination pickup point. A changed canonical destination clears stale pickup state by family. Expected carrier no-match/empty outcomes are silent; technical failures follow the production logging policy.
+Rate sorting supports price and delivery-time modes. Order-admin recalculation preserves the canonical method and grouped-tariff order returned by `RateSorter`; payload normalization and rendering do not apply a separate comparator. A deliberate sort-mode transition resets tariff/method choice once; ordinary recalculation preserves an available chosen WDC method, selected tariff, and same-destination pickup point. Selecting a nested domestic tariff invalidates only WooCommerce `shipping_for_package_*` cache entries, so the next standard `update_checkout` rebuilds the grouped top-level rate from the persisted selection, including its title, price, crossed price, delivery days, and canonical planned-delivery comment; the chosen top-level method and same-family pickup selection remain intact. A changed canonical destination clears stale pickup state by family. Expected carrier no-match/empty outcomes are silent; technical failures follow the production logging policy.
 
 Canonical RU checkout uses the WDC city picker and optional bounded DaData street/house suggestions. Manual or unsupported-country destinations retain the documented fallback behavior. Pickup REST state changes require the checkout nonce, provider/rate context is revalidated server-side, and the frontend supports both path-style and plain-permalink WordPress REST URLs.
 

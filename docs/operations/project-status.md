@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.17
+Version: 1.0.18
 
-The current Walls Delivery Calc release source is version 1.0.17. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Ozon checkout availability now depends on complete credentials plus a configured shipment method for the requested pickup/courier mode; the saved admin test-quote diagnostic is not a production feature gate. Ozon pickup background synchronization, Yandex and DPD bounded workers, Russian Post imports, and Shipment Framework remain unchanged.
+The current Walls Delivery Calc release source is version 1.0.18. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Order-admin delivery recalculation preserves the canonical method and grouped-tariff order produced by checkout `RateSorter`; presentation normalization does not apply a second sorting policy. Ozon pickup background synchronization, Yandex and DPD bounded workers, Russian Post imports, and Shipment Framework remain unchanged.
 
 Current production scope includes:
 

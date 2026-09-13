@@ -1,6 +1,6 @@
 # Production Logging Policy
 
-Version: 1.0.17
+Version: 1.0.18
 
 WDC uses WooCommerce logging with a stable `source` context. Logs must contain identifiers, carrier keys, order IDs, safe endpoint names, status/error codes, and aggregate counters only when those fields help an operator diagnose a failure.
 
