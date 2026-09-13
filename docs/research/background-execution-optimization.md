@@ -6,7 +6,7 @@ Branch: `perf/ozon-pickup-bounded-worker`
 
 Baseline HEAD: `e036ef67e2733d9fe077d93ebbfd522117b65ee0`
 
-Plugin version: `1.0.17`; schema version: `1.0.0`
+Plugin version: `1.0.18`; schema version: `1.0.0`
 
 Russian Post, DPD Geography, the Yandex full geography pipeline, and Ozon pickup synchronization now use carrier-owned bounded worker slices. Ozon keeps Action Scheduler and its existing API units while removing both the one-unit-per-callback boundary and per-row Stage N+1 persistence.
 

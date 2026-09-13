@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 1.0.17
+Version: 1.0.18
 
 Tests are executable smoke programs with no production dependency installer. Run commands from the repository root with a supported PHP and Node.js runtime.
 
@@ -36,7 +36,7 @@ Run JavaScript smoke programs in `tests/` with `node`. Browser acceptance tests 
 
 ## ZIP acceptance
 
-Build `dist/walls-delivery-calc-1.0.17.zip`, inspect its one-folder layout, lint/check the extracted runtime files, and install that ZIP through the standard WordPress upload UI. With `WP_DEBUG` and `WP_DEBUG_LOG` enabled, exercise activation, WDC admin pages, checkout location/rates, pickup map/selection, and recalculation. Any WDC notice, warning, deprecation, or fatal is a release blocker.
+Build `dist/walls-delivery-calc-1.0.18.zip`, inspect its one-folder layout, lint/check the extracted runtime files, and install that ZIP through the standard WordPress upload UI. With `WP_DEBUG` and `WP_DEBUG_LOG` enabled, exercise activation, WDC admin pages, checkout location/rates, pickup map/selection, and recalculation. Any WDC notice, warning, deprecation, or fatal is a release blocker.
 
 Russian Post release checks include `tests/pickup/run-russian-post-weekly-schedule-smoke.php`, the import lifecycle smoke, the optimization smoke, and `node tests/pickup/run-russian-post-pickup-import-runner-smoke.js`. They protect CAS-backed monotonic state revisions across import IDs, owner-safe terminal writes, single-flight status polling, lower-revision rejection, transport recovery, terminal polling stop, bounded exact-FIAS prefetch, bounded bulk staging writes, duplicate/ambiguity behavior, and result parity without depending on the retired production profiler.
 
