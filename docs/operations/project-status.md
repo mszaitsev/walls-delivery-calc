@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.16
+Version: 1.0.17
 
-The current Walls Delivery Calc release source is version 1.0.16. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Ozon pickup discovery/enrichment remains Action Scheduler-owned, but one callback now processes a bounded 18-second/10-unit/80%-memory slice and keeps each API page or 100-ID enrichment batch as its own transaction. Discovery and enrichment persistence use bounded multi-row/set-based SQL instead of per-ID writes, with no schema change. Yandex and DPD bounded workers, Russian Post imports, Shipment Framework, and checkout semantics remain unchanged.
+The current Walls Delivery Calc release source is version 1.0.17. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Ozon checkout availability now depends on complete credentials plus a configured shipment method for the requested pickup/courier mode; the saved admin test-quote diagnostic is not a production feature gate. Ozon pickup background synchronization, Yandex and DPD bounded workers, Russian Post imports, and Shipment Framework remain unchanged.
 
 Current production scope includes:
 

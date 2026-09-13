@@ -136,7 +136,6 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 			'ozon_delivery_pricing_contract_version' => 4,
 			'ozon_delivery_pickup_shipment_method_id' => $this->settings->pickup_shipment_method_id(),
 			'ozon_delivery_courier_shipment_method_id' => $this->settings->courier_shipment_method_id(),
-			'ozon_delivery_pricing_gate' => $this->settings->pricing_live_confirmed() ? 'live_confirmed' : 'closed',
 			'ozon_delivery_requested_delivery_type' => (string) ( $request->customer_context['delivery_type'] ?? '' ),
 			'ozon_delivery_selected_point_id' => (string) ( $selection['point_code'] ?? $selection['point_id'] ?? $snapshot['point_code'] ?? '' ),
 			'ozon_delivery_courier_location_fingerprint' => $this->courier_location_fingerprint( $request ),
@@ -156,7 +155,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 	}
 
 	private function base_runtime_enabled(): bool {
-		return $this->credentials->is_complete() && $this->settings->pricing_live_confirmed();
+		return $this->credentials->is_complete();
 	}
 
 	private function pickup_runtime_enabled(): bool {

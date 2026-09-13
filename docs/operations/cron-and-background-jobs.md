@@ -1,6 +1,6 @@
 # Cron And Background Jobs
 
-Version: 1.0.16
+Version: 1.0.17
 
 WDC business clock times use `Asia/Novosibirsk`; scheduler APIs receive Unix timestamps. Owners register callbacks during plugin bootstrap and defer Action Scheduler inspection/creation until `action_scheduler_init`. Registration after that hook ensures the schedule immediately. Expected pre-initialization and disabled/no-work states are silent.
 
