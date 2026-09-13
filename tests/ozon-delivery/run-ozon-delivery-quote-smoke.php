@@ -14,6 +14,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiResponse;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryHttpClientInterface;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryMessageSanitizer;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryTokenCache;
+use WallsShop\WDC\Carriers\OzonDelivery\Admin\OzonDeliveryQuoteDiagnosticService;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliveryCredentials;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
@@ -145,6 +146,11 @@ oz_quote_assert( 'POST' === ( $checkout_call['method'] ?? '' ) && str_ends_with(
 $body = $checkout_call['body'];
 oz_quote_assert( '+79991234567' === $body['recipient']['phone_number'] && 42 === $body['postings'][0]['shipment_method_id'] && 777 === $body['delivery']['delivery_point']['delivery_point_id'], 'Request body must contain recipient, shipment_method_id and destination delivery_point_id.' );
 oz_quote_assert( 1000 === $body['postings'][0]['dimensions']['weight_g'] && 100 === $body['postings'][0]['dimensions']['length_mm'] && '1000.00' === $body['postings'][0]['declared_value']['amount'], 'Request body must use grams, millimetres and decimal RUB declared value.' );
+$diagnostics = new OzonDeliveryQuoteDiagnosticService( $settings, $service, $phones );
+$diagnostic_success = $diagnostics->run( array( 'ozon_delivery_quote_phone' => '+79991234567', 'ozon_delivery_quote_point_id' => '777', 'ozon_delivery_quote_latitude' => '55.03', 'ozon_delivery_quote_longitude' => '82.92', 'ozon_delivery_quote_weight_g' => '1000', 'ozon_delivery_quote_length_cm' => '10', 'ozon_delivery_quote_width_cm' => '10', 'ozon_delivery_quote_height_cm' => '10', 'ozon_delivery_quote_declared_value_rub' => '1000' ) );
+oz_quote_assert( ! empty( $diagnostic_success['success'] ) && 'POST /v1/order/checkout' === (string) ( $diagnostic_success['endpoint'] ?? '' ) && $diagnostic_success === $settings->last_quote_diagnostic(), 'Admin test quote must still call order_checkout and persist its successful diagnostic.' );
+$diagnostic_failure = $diagnostics->run( array() );
+oz_quote_assert( empty( $diagnostic_failure['success'] ) && 'ozon_quote_diagnostic_input_invalid' === (string) ( $diagnostic_failure['error_code'] ?? '' ) && $diagnostic_failure === $settings->last_quote_diagnostic(), 'Admin test quote must still persist its failure diagnostic semantics.' );
 $packaging = $ozon_packaging->build( $request );
 $courier_payload = $quote_builder->build_courier( $courier_request, $packaging );
 oz_quote_assert( 43 === (int) ( $courier_payload['body']['postings'][0]['shipment_method_id'] ?? 0 ) && isset( $courier_payload['body']['delivery']['courier']['coordinates'] ) && ! isset( $courier_payload['body']['delivery']['delivery_point'] ), 'Courier order_checkout request must use the separate courier shipment_method_id and official delivery.courier.coordinates contract.' );
@@ -253,7 +259,7 @@ try {
 }
 $settings->save_last_quote_diagnostic( array( 'success' => true, 'endpoint' => 'POST /v1/order/checkout', 'shipment_method_id' => 42 ) );
 $settings->save_pricing_settings( array( OzonDeliverySettings::QUOTE_FALLBACK_PHONE_KEY => '+7 (916) 000-11-22' ) );
-oz_quote_assert( 42 === $settings->shipment_method_id() && $settings->pricing_live_confirmed(), 'Saving only the Ozon fallback phone must not reset shipment_method_id or close the pricing live gate.' );
+oz_quote_assert( 42 === $settings->shipment_method_id() && $settings->pricing_live_confirmed(), 'The retained admin diagnostic helper must still recognize a matching successful test after unrelated pricing settings are saved.' );
 $phone_builder = new OzonDeliveryQuoteRequestBuilder( $settings, $phones );
 $customer_phone_payload = $phone_builder->build( $request, $packaging, '777' );
 oz_quote_assert( '+79991234567' === (string) ( $customer_phone_payload['body']['recipient']['phone_number'] ?? '' ), 'Ozon request builder must prefer valid customer recipient_phone over configured fallback phone.' );

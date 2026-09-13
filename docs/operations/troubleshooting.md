@@ -1,12 +1,12 @@
 # Troubleshooting
 
-Version: 1.0.16
+Version: 1.0.17
 
 Start with the safe status/diagnostic panel owned by the affected subsystem. Never enable raw payload logging or expose carrier credentials, tokens, cookies, full addresses, phone numbers, email, or payment data to diagnose a failure.
 
 ## Installation and migrations
 
-On activation, verify the plugin reports version 1.0.16 and that the unchanged schema baseline `wdc_db_version` remains `1.0.0`. A fresh install runs only `database/migrations/0001_initial_schema.php`. If activation reports a migration failure, inspect the WordPress database error and table privileges; do not edit migration options manually or replay deleted 0.x migration files.
+On activation, verify the plugin reports version 1.0.17 and that the unchanged schema baseline `wdc_db_version` remains `1.0.0`. A fresh install runs only `database/migrations/0001_initial_schema.php`. If activation reports a migration failure, inspect the WordPress database error and table privileges; do not edit migration options manually or replay deleted 0.x migration files.
 
 The initial migration is idempotent for an already-correct development database and never drops/truncates business tables. Retired pre-1.0 tables that already exist are inert and may be removed separately only after an operator backup and explicit decision.
 
@@ -21,6 +21,8 @@ If no WDC rate appears:
 5. inspect only the final technical warning/error, not expected empty/no-match results.
 
 If pickup points do not appear, verify that the selected rate has canonical pickup metadata, its destination fingerprint matches the current checkout, the active local catalog exists, and the provider can resolve the selection server-side. Do not accept browser-supplied cargo, location, address, family, or price as authority.
+
+Ozon checkout does not require a previously successful admin test quote. Its runtime prerequisites are complete credentials and a positive pickup or courier `shipment_method_id` for the requested mode; country support remains RU-only. `ozon_delivery_last_quote_diagnostic` is an admin troubleshooting snapshot, not an availability flag. If the prerequisites are present but no Ozon rate appears, inspect the current safe quote warning/API response rather than creating a diagnostic solely to unlock checkout.
 
 ## Background jobs
 

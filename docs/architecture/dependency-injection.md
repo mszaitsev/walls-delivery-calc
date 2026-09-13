@@ -1,6 +1,6 @@
 # Dependency Injection
 
-Version: 1.0.16
+Version: 1.0.17
 
 `Plugin.php` is the only composition root. Runtime services receive required collaborators through constructors; carrier-specific settings, clients, mappers, adapters, document providers, and schedulers remain owned by their carrier modules. Checkout and Rule Engine domain services do not locate WooCommerce globals outside the documented boundary adapters.
 
@@ -26,7 +26,7 @@ Ozon Delivery pickup catalog, quote, diagnostic, runtime services, shipment serv
 
 Jet Logistic DI registers `JetLogisticApiClient` with `JetLogisticCredentials`, so both calculator and tracking calls send the same support-issued access token through the API payload. `JetLogisticApiDiagnosticService` is carrier-owned and is injected only into the embedded Jet admin tabs for read-only connection and tracking diagnostics.
 
-Ozon Delivery wiring is carrier-owned in `Plugin.php`: settings, encrypted credentials, encrypted transient token cache, message sanitizer, WordPress HTTP transport, access-token service, API boundary, explicit OAuth diagnostic, quote request builder/parser/service, safe quote diagnostic, pickup provider, and live-gated runtime carrier. `DeliveryServicesAdminPage` supplies standard service tabs and routes only carrier-specific actions/rendering. Ozon API calls still go only through `OzonDeliveryApiClient` and the existing transport; generic checkout, pickup REST, and Shipment Framework do not branch on Ozon.
+Ozon Delivery wiring is carrier-owned in `Plugin.php`: settings, encrypted credentials, encrypted transient token cache, message sanitizer, WordPress HTTP transport, access-token service, API boundary, explicit OAuth diagnostic, quote request builder/parser/service, safe quote diagnostic, pickup provider, and runtime carrier. Checkout runtime requires complete credentials and the configured shipment method for each requested mode; the persisted admin quote diagnostic is observability only. `DeliveryServicesAdminPage` supplies standard service tabs and routes only carrier-specific actions/rendering. Ozon API calls still go only through `OzonDeliveryApiClient` and the existing transport; generic checkout, pickup REST, and Shipment Framework do not branch on Ozon.
 
 `OzonDeliveryQuoteService` owns the Ozon pickup provider query snapshot placed on the rate metadata. It computes the generic checkout destination fingerprint from trusted `QuoteRequest` context and query location, stores it in `pickup_provider_query.destination_fingerprint` for `CheckoutPickupPointProviderQueryResolver`, and uses the canonical 60 km Ozon destination pickup radius. The Ozon pickup provider reads only the active local snapshot, limits SQL by generation, active flag, and coordinate rectangle before exact radius/cargo filtering, returns the full eligible buyer-map set without arbitrary first-N truncation, and exposes selected-point repricing through generic `requires_rate_refresh` metadata. The resolver and REST controllers are not relaxed and do not recompute trusted context from browser data.
 

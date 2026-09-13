@@ -2,7 +2,7 @@
 
 `postal_code` is enrichment-owned and is never a GAR changed field. The retired location alias index is not generated, exported, created by the 1.0 schema, or used by runtime. Search uses `searchable_text` and canonical hierarchy fields; backup/restore and incremental apply swap locations only.
 
-Version: 1.0.16
+Version: 1.0.17
 
 The manual **Пересобрать display_name** job pages every active canonical location across all countries, including rows whose current `display_name` is empty. Its total uses the same active all-country dataset, and an unexpected end of pagination before `processed` reaches `total` fails the job instead of reporting a false success. Rebuild updates only `display_name`, `searchable_text`, and `updated_at` through `LocationRepository::update_display_fields()`.
 

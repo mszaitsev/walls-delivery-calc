@@ -1,6 +1,6 @@
 # Shipments
 
-Version: 1.0.16
+Version: 1.0.17
 
 Shipment code lives under `src/Shipments` and carrier-owned shipment modules. Implementations exist for CDEK, DPD, Russian Post, Yandex Delivery, Jet Logistic, PEK, and Ozon Delivery; shared behavior is defined by the Shipment Framework.
 

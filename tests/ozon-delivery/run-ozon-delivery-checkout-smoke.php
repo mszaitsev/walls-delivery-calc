@@ -169,7 +169,7 @@ $orchestrator = file_get_contents( $root . '/src/Checkout/Runtime/CheckoutOrches
 $pickup_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
 $pickup_rest = file_get_contents( $root . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
 oz_checkout_assert( str_contains( $plugin, 'OzonDeliveryCarrier::class' ) && str_contains( $plugin, 'OzonDeliveryQuoteService::class' ) && str_contains( $plugin, 'OzonDeliveryPickupPointProvider::class' ), 'Ozon runtime carrier, quote service and pickup provider must be wired.' );
-oz_checkout_assert( str_contains( $carrier, 'pricing_live_confirmed()' ) && str_contains( $carrier, 'supports_courier_delivery: true' ) && str_contains( $carrier, "public const COURIER_RATE_ID = 'ozon_delivery:courier'" ), 'Ozon checkout carrier must expose pickup and courier rates while remaining live-gated.' );
+oz_checkout_assert( ! str_contains( $carrier, 'pricing_live_confirmed()' ) && ! str_contains( $carrier, 'ozon_delivery_pricing_gate' ) && str_contains( $carrier, 'supports_courier_delivery: true' ) && str_contains( $carrier, "public const COURIER_RATE_ID = 'ozon_delivery:courier'" ), 'Ozon checkout carrier must expose pickup and courier rates without using admin quote diagnostics as a runtime or cache gate.' );
 oz_checkout_assert( str_contains( $carrier, "public const TARIFF_KEY = 'pickup'") && str_contains( $carrier, "public const TARIFF_NAME = 'Ozon до ПВЗ'" ) && str_contains( $carrier, "'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY" ), 'Ozon checkout rate must expose pickup service family and buyer title.' );
 oz_checkout_assert( str_contains( $service, 'representative_point' ) && str_contains( $service, 'resolve_selection' ) && str_contains( $service, 'ozon_selected_point_stale' ) && str_contains( $service, 'pickup_provider_query' ), 'Ozon checkout must support representative quote, selected-point repricing and stale selection fail-closed.' );
 oz_checkout_assert( str_contains( $api, 'order_checkout' ) && str_contains( $api, "'/v1/order/checkout'" ) && ! str_contains( $service, 'pickup_list' ) && ! str_contains( $service, 'pickup_info' ), 'Checkout pricing must call only order checkout and not catalog APIs.' );
@@ -253,7 +253,6 @@ $_POST['post_data'] = http_build_query( array( 'billing_phone' => '+7 (913) 123-
 $settings_repo = new SettingsRepository();
 $settings = new OzonDeliverySettings( $settings_repo );
 $settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42', OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => '43' ) );
-$settings->save_last_quote_diagnostic( array( 'success' => true, 'endpoint' => 'POST /v1/order/checkout', 'shipment_method_id' => 42 ) );
 $credentials = new OzonDeliveryCredentials( $settings_repo, new EncryptionService(), new OzonDeliveryTokenCache( new EncryptionService() ) );
 $credentials->save_from_admin( array( OzonDeliverySettings::CLIENT_ID_KEY => 'client', 'ozon_delivery_client_secret' => 'secret' ) );
 $http = new OzonCheckoutSmokeHttp();
@@ -264,8 +263,19 @@ $pickup_repository = new OzonDeliveryPickupRepository( $pickup_db );
 $courier_location_resolver = new OzonDeliveryCourierLocationResolver( $location_repository, $pickup_repository );
 $quote_service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuilder( $settings, null, null, $courier_location_resolver ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( $pickup_repository ), $sanitizer );
 $runtime_carrier = new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger(), null, $courier_location_resolver );
+$diagnostic_free_cache_context = $runtime_carrier->quote_cache_context( $mapped_request );
+oz_checkout_assert( array() === $settings->last_quote_diagnostic() && $runtime_carrier->get_identity()->enabled && $runtime_carrier->supports_country( 'RU' ) && ! $runtime_carrier->supports_country( 'KZ' ), 'Complete credentials and configured shipment methods must enable RU runtime before any admin quote diagnostic has run.' );
+foreach ( array(
+	array( 'success' => false, 'endpoint' => 'POST /v1/order/checkout', 'shipment_method_id' => 42, 'checked_at' => '2020-01-01T00:00:00+00:00' ),
+	array( 'success' => true, 'endpoint' => 'POST /v1/order/checkout', 'shipment_method_id' => 42 ),
+) as $diagnostic_state ) {
+	$settings->save_last_quote_diagnostic( $diagnostic_state );
+	oz_checkout_assert( $runtime_carrier->get_identity()->enabled && $diagnostic_free_cache_context === $runtime_carrier->quote_cache_context( $mapped_request ), 'Empty, failed, old and successful admin diagnostics must not change runtime availability or quote cache context.' );
+}
+$settings->save_last_quote_diagnostic( array() );
+$runtime_calls_before_quote = count( $http->calls );
 $two_rate_quote = $runtime_carrier->quote( $mapped_request );
-oz_checkout_assert( 2 === count( $two_rate_quote->rates ) && 'Ozon до ПВЗ' === $two_rate_quote->rates[0]->title && 'Ozon курьером' === $two_rate_quote->rates[1]->title, 'Ozon checkout must expose independent pickup and courier rates for the same buyer request.' );
+oz_checkout_assert( 2 === count( $two_rate_quote->rates ) && count( $http->calls ) > $runtime_calls_before_quote && 'Ozon до ПВЗ' === $two_rate_quote->rates[0]->title && 'Ozon курьером' === $two_rate_quote->rates[1]->title, 'Ozon checkout must invoke live pickup/courier quote paths and expose both rates without a prior admin test.' );
 oz_checkout_assert( DeliveryType::PICKUP === $two_rate_quote->rates[0]->delivery_type && DeliveryType::COURIER === $two_rate_quote->rates[1]->delivery_type && $two_rate_quote->rates[0]->rate_id !== $two_rate_quote->rates[1]->rate_id, 'Ozon pickup and courier rates must have distinct rate IDs and delivery types.' );
 $courier_call = $http->calls[ count( $http->calls ) - 1 ] ?? array();
 oz_checkout_assert( 43 === (int) ( $courier_call['body']['postings'][0]['shipment_method_id'] ?? 0 ) && isset( $courier_call['body']['delivery']['courier']['coordinates'] ) && ! isset( $courier_call['body']['delivery']['delivery_point'] ), 'Ozon courier rate must call order_checkout with the official courier coordinates delivery object.' );
@@ -287,6 +297,23 @@ $failure_results = is_array( $failure_context['ozon_results'] ?? null ) ? $failu
 oz_checkout_assert( 1 === (int) ( $failure_context['results_count'] ?? 0 ) && 0 === (int) ( $failure_context['usable_results_count'] ?? -1 ) && 1 === (int) ( $failure_context['failed_results_count'] ?? 0 ) && 1 === count( $failure_results ) && 'delivery_availability_error' === (string) ( $failure_results[0]['code'] ?? '' ), 'Failure log context must include safe normalized Ozon result summary.' );
 $failure_context_json = wp_json_encode( $failure_context ) ?: '';
 oz_checkout_assert( ! str_contains( $failure_context_json, '+7913' ) && ! str_contains( $failure_context_json, 'Иван' ) && ! str_contains( $failure_context_json, 'Красный' ) && ! str_contains( $failure_context_json, 'Ленина' ) && ! str_contains( $failure_context_json, 'secret' ), 'Failure log context must not contain phone, recipient, address, secret or raw response fields.' );
+$settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '0', OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => '0' ) );
+$calls_before_disabled_modes = count( $http->calls );
+$disabled_modes_quote = $runtime_carrier->quote( $mapped_request );
+oz_checkout_assert( ! $runtime_carrier->get_identity()->enabled && array() === $disabled_modes_quote->rates && $calls_before_disabled_modes === count( $http->calls ), 'Complete credentials without either shipment method must keep Ozon runtime disabled and avoid API calls.' );
+$settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42', OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => '0' ) );
+$pickup_only_quote = $runtime_carrier->quote( $mapped_request );
+oz_checkout_assert( $runtime_carrier->get_identity()->enabled && 1 === count( $pickup_only_quote->rates ) && DeliveryType::PICKUP === $pickup_only_quote->rates[0]->delivery_type, 'Pickup method alone must enable only pickup runtime.' );
+$settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '0', OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => '43' ) );
+$courier_only_quote = $runtime_carrier->quote( $mapped_request );
+oz_checkout_assert( $runtime_carrier->get_identity()->enabled && 1 === count( $courier_only_quote->rates ) && DeliveryType::COURIER === $courier_only_quote->rates[0]->delivery_type, 'Courier method alone must enable only courier runtime.' );
+$settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42', OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => '43' ) );
+$credentials->clear_client_secret();
+$calls_before_incomplete_credentials = count( $http->calls );
+$incomplete_credentials_quote = $runtime_carrier->quote( $mapped_request );
+oz_checkout_assert( ! $runtime_carrier->get_identity()->enabled && array() === $incomplete_credentials_quote->rates && $calls_before_incomplete_credentials === count( $http->calls ), 'Incomplete credentials must disable Ozon runtime even when shipment methods are configured.' );
+$credentials->save_from_admin( array( OzonDeliverySettings::CLIENT_ID_KEY => 'client', 'ozon_delivery_client_secret' => 'secret' ) );
+oz_checkout_assert( array() === $settings->last_quote_diagnostic(), 'Restoring real runtime prerequisites must not require or synthesize an admin diagnostic.' );
 $mapped_request = oz_checkout_with_delivery_type( $mapped_request, DeliveryType::PICKUP );
 $preliminary_cache_context = $runtime_carrier->quote_cache_context( $mapped_request );
 $carrier_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger(), null, $courier_location_resolver ) )->quote( $mapped_request );
