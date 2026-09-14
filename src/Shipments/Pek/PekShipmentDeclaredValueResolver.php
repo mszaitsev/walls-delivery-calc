@@ -11,6 +11,19 @@ defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentDeclaredValueResolver {
 	public function resolve( ShipmentCreateRequest $request ): Money {
+		$draft_rows = is_array( $request->meta['shipment_item_rows'] ?? null ) ? $request->meta['shipment_item_rows'] : array();
+		if ( array() !== $draft_rows ) {
+			$total = 0;
+			foreach ( $draft_rows as $row ) {
+				if ( is_array( $row ) ) {
+					$total += max( 0, (int) ( $row['unit_price_kopecks'] ?? 0 ) ) * max( 0, (int) ( $row['amount'] ?? 0 ) );
+				}
+			}
+			if ( $total <= 0 ) {
+				throw new \RuntimeException( 'Объявленная стоимость ПЭК должна быть больше нуля.' );
+			}
+			return Money::from_kopecks( $total, 'RUB' );
+		}
 		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $request->order_id ) : null;
 		if ( ! is_object( $order ) || ! method_exists( $order, 'get_items' ) ) {
 			throw new \RuntimeException( 'Не удалось загрузить заказ для расчёта объявленной стоимости ПЭК.' );

@@ -94,7 +94,7 @@ final class RussianPostCreateRequestBuilder {
 			}
 
 			if ( $send_goods ) {
-				$payload['goods'] = array( 'items' => $this->goods_items( $place, $combine_goods, $combined_name ) );
+				$payload['goods'] = array( 'items' => $this->goods_items( $request, $place, $combine_goods, $combined_name ) );
 			}
 
 			$result[] = array_filter(
@@ -220,8 +220,34 @@ final class RussianPostCreateRequestBuilder {
 	/**
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function goods_items( ShipmentPlace $place, bool $combine, string $combined_name ): array {
-		if ( $combine || array() === $place->items ) {
+	private function goods_items( ShipmentCreateRequest $request, ShipmentPlace $place, bool $combine, string $combined_name ): array {
+		if ( $combine ) {
+			return array(
+				array(
+					'description' => $combined_name,
+					'quantity' => 1,
+					'value' => $place->declared_value->get_kopecks() > 0 ? $place->declared_value->get_kopecks() : 0,
+				),
+			);
+		}
+		$draft_rows = is_array( $request->meta['shipment_item_rows'] ?? null ) ? $request->meta['shipment_item_rows'] : array();
+		if ( array() !== $draft_rows ) {
+			$items = array();
+			foreach ( $draft_rows as $row ) {
+				if ( ! is_array( $row ) || (int) ( $row['place_number'] ?? 0 ) !== $place->place_number ) {
+					continue;
+				}
+				$items[] = array(
+					'description' => (string) ( $row['name'] ?? '' ),
+					'quantity' => max( 1, (int) ( $row['amount'] ?? 0 ) ),
+					'value' => max( 0, (int) ( $row['unit_price_kopecks'] ?? 0 ) ),
+					'weight' => max( 0, (int) ( $row['weight'] ?? 0 ) ),
+					'vat-rate' => 'WITHOUT_VAT',
+				);
+			}
+			return $items;
+		}
+		if ( array() === $place->items ) {
 			return array(
 				array(
 					'description' => $combined_name,

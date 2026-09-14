@@ -1,4 +1,5 @@
   const timers = new WeakMap();
+  const previewRequestTokens = new WeakMap();
   const toastTimers = new WeakMap();
   const shipmentPollingTimers = new WeakMap();
   const shipmentPollingTokens = new WeakMap();

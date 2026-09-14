@@ -155,6 +155,7 @@ final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'path' => '/v2/orders',
 			'body' => array() === $errors ? $this->sanitize_request_snapshot( $request, $body ) : array(),
 			'errors' => $errors,
+			'warnings' => $this->builder->warnings( $request ),
 		);
 	}
 

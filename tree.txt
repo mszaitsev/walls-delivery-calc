@@ -880,6 +880,8 @@ Generated for Walls Delivery Calc 1.0.22
 |-- tests/shipments/run-shipment-document-actions-smoke.php
 |-- tests/shipments/run-shipment-lifecycle-contract-smoke.php
 |-- tests/shipments/run-shipment-modal-extensions-smoke.php
+|-- tests/shipments/run-shipment-package-editor-smoke.js
+|-- tests/shipments/run-shipment-package-editor-smoke.php
 |-- tests/shipments/run-shipment-persistence-mappers-smoke.php
 |-- tests/shipments/run-shipment-regression-profile-smoke.php
 |-- tests/shipments/run-shipment-regression-profile.php

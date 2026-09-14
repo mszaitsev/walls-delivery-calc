@@ -617,7 +617,7 @@ final class OrderShipmentsMetabox {
 			<?php endforeach; ?>
 			</tbody>
 		</table>
-		<p><button type="button" class="button" data-wdc-add-manual-shipment-item data-wdc-add-manual-cdek-item><?php echo esc_html__( 'Добавить товар', 'walls-delivery-calc' ); ?></button></p>
+		<p><button type="button" class="button" data-wdc-add-manual-shipment-item data-wdc-add-manual-cdek-item><?php echo esc_html__( 'Добавить товар', 'walls-delivery-calc' ); ?></button> <span data-wdc-fit-item-weight-actions></span></p>
 		<?php
 	}
 

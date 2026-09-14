@@ -19,6 +19,7 @@ return array(
 	'framework.cost-analytics-query' => array( 'path' => 'tests/shipments/run-shipment-cost-analytics-query-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.cost-analytics' => array( 'path' => 'tests/shipments/run-shipment-cost-analytics-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.allocation' => array( 'path' => 'tests/shipments/run-shipment-allocation-smoke.php', 'groups' => array( 'framework' ) ),
+	'framework.package-editor-js' => array( 'path' => 'tests/shipments/run-shipment-package-editor-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.status' => array( 'path' => 'tests/shipments/run-shipment-status-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.adapter-registry' => array( 'path' => 'tests/shipments/run-carrier-adapter-registry-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.pickup-provider-registry' => array( 'path' => 'tests/pickup/run-carrier-pickup-provider-registry-smoke.php', 'groups' => array( 'framework' ) ),

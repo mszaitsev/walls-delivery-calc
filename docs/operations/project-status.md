@@ -1,10 +1,12 @@
 # Project Status
 
-Version: 1.0.22
+Version: 1.0.23
 
-The current Walls Delivery Calc release source is version 1.0.22. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. The standalone WDC configuration console requires `manage_options`; WooCommerce order operational tools retain their explicit `manage_woocommerce` contract. Order-admin delivery recalculation preserves canonical selected-location state/city values when saving pickup delivery, while pickup address and point postcode remain carrier-owned. Yandex manual location overrides may retain a truthful empty source region and bind that incomplete identity to the exact geo id and locality. Calendar admin alignment, background workers, imports, and Shipment Framework remain unchanged.
+The current Walls Delivery Calc release source is version 1.0.23. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. The standalone WDC configuration console requires `manage_options`; WooCommerce order operational tools retain their explicit `manage_woocommerce` contract. Order-admin delivery recalculation preserves canonical selected-location state/city values when saving pickup delivery, while pickup address and point postcode remain carrier-owned. Yandex manual location overrides may retain a truthful empty source region and bind that incomplete identity to the exact geo id and locality. Calendar admin alignment, background workers, imports, and Shipment Framework remain unchanged.
 
 Current production scope includes:
+
+The Shipment package editor now treats its current modal draft as authoritative for summaries, warnings, preview, and create. Package overweight remains non-blocking, and each eligible package has a deterministic **Подогнать вес товаров** action; edits remain ephemeral and do not mutate WooCommerce order/product data.
 
 CDEK destination pickup now supports carrier-specific child-city coverage for eligible canonical RU cities without importing that carrier geography into WDC. Primary versus selected effective CDEK destinations are explicit, and the lazy daily region directory participates in the unified delivery-cache clear.
 

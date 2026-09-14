@@ -103,13 +103,11 @@ final class CdekCreateRequestBuilder {
 
 		$item_rows_count = 0;
 		$known_places = array();
-		$place_weights = array();
 		foreach ( $request->places as $place ) {
 			if ( ! $place instanceof ShipmentPlace ) {
 				continue;
 			}
 			$known_places[ $place->place_number ] = true;
-			$place_weights[ $place->place_number ] = 0;
 			foreach ( array( 'weight_g' => $place->weight_g, 'length_cm' => $place->length_cm, 'width_cm' => $place->width_cm, 'height_cm' => $place->height_cm ) as $field => $value ) {
 				if ( $value <= 0 ) {
 					$errors[] = sprintf( 'Грузоместо %d: %s должен быть больше 0.', $place->place_number, $field );
@@ -135,9 +133,6 @@ final class CdekCreateRequestBuilder {
 			if ( $cost < 0 ) {
 				$errors[] = 'Объявленная стоимость товара СДЭК должна быть не меньше 0.';
 			}
-			if ( isset( $place_weights[ $place_number ] ) ) {
-				$place_weights[ $place_number ] += $weight * $amount;
-			}
 		}
 		if ( $item_rows_count > 126 ) {
 			$errors[] = 'В заказе больше 126 товарных строк СДЭК.';
@@ -147,13 +142,25 @@ final class CdekCreateRequestBuilder {
 		} catch ( \InvalidArgumentException $exception ) {
 			$errors[] = $exception->getMessage();
 		}
+		return array_values( array_unique( $errors ) );
+	}
+
+	/** @return array<int,string> */
+	public function warnings( ShipmentCreateRequest $request ): array {
+		$weights = array();
+		foreach ( $this->item_rows( $request ) as $row ) {
+			$place_number = (int) ( $row['place_number'] ?? 0 );
+			$weights[ $place_number ] = ( $weights[ $place_number ] ?? 0 )
+				+ max( 0, (int) ( $row['weight'] ?? 0 ) ) * max( 0, (int) ( $row['amount'] ?? 0 ) );
+		}
+		$warnings = array();
 		foreach ( $request->places as $place ) {
-			if ( $place instanceof ShipmentPlace && ( $place_weights[ $place->place_number ] ?? 0 ) > $place->weight_g ) {
-				$errors[] = sprintf( 'Вес грузоместа %d меньше суммы весов товаров.', $place->place_number );
+			if ( $place instanceof ShipmentPlace && ( $weights[ $place->place_number ] ?? 0 ) > $place->weight_g ) {
+				$warnings[] = sprintf( 'Вес грузоместа %d меньше суммы весов товаров.', $place->place_number );
 			}
 		}
 
-		return array_values( array_unique( $errors ) );
+		return $warnings;
 	}
 
 	/**

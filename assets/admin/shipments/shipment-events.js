@@ -101,6 +101,17 @@ function initializeShipmentAdmin() {
       return;
     }
 
+    const fitItemWeight = event.target.closest('[data-wdc-fit-shipment-item-weight]');
+    if (fitItemWeight) {
+      const form = findShipmentForm(fitItemWeight);
+      if (form && fitShipmentItemWeights(form, fitItemWeight.getAttribute('data-place-number') || '')) {
+        refreshShipmentItemsSummary(form);
+        dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'item_weights_fitted' });
+        schedulePreview(form);
+      }
+      return;
+    }
+
     const removeManualItem = event.target.closest('[data-wdc-remove-manual-shipment-item]');
     if (removeManualItem) {
       const row = removeManualItem.closest('[data-wdc-shipment-item-row]');
@@ -492,6 +503,7 @@ function requestShipmentActualCost(button, operation) {
     const form = findShipmentForm(event.target);
     if (form) {
       updateScenarioSections(form);
+      updateShipmentPlaceOptions(form);
       dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'paste' });
       schedulePreview(form);
     }
