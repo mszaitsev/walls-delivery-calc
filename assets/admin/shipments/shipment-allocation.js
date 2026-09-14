@@ -128,6 +128,7 @@
     const actions = form && form.querySelector('[data-wdc-fit-item-weight-actions]');
     if (!actions) return;
     const allPlaceWeightsReady = (places || []).length > 0 && (places || []).every((place) => place.weight > 0);
+    const showPlaceNumber = (places || []).length > 1;
     actions.innerHTML = (summaries || []).map((summary) => {
       const enabled = allPlaceWeightsReady
         && summary.place.weight > 50
@@ -135,7 +136,8 @@
         && summary.weight > summary.place.weight;
       return '<button type="button" class="button" data-wdc-fit-shipment-item-weight data-place-number="'
         + escapeHtml(summary.place.number) + '" title="Место ' + escapeHtml(summary.place.number) + '"'
-        + (enabled ? '' : ' disabled') + '>Подогнать вес товаров</button>';
+        + (enabled ? '' : ' disabled') + '>Подогнать вес товаров'
+        + (showPlaceNumber ? ' ' + escapeHtml(summary.place.number) : '') + '</button>';
     }).join(' ');
   }
 
@@ -313,7 +315,9 @@
 
   function updateShipmentSplitAvailability(form, placeCount) {
     if (!form) return;
-    if (placeCount <= 1) mergeShipmentSplitRows(form);
+    if (placeCount <= 1 && form.querySelector('[data-wdc-split-row]')) {
+      mergeShipmentSplitRows(form);
+    }
     form.querySelectorAll('[data-wdc-shipment-item-split]').forEach((button) => {
       const row = button.closest('[data-wdc-shipment-item-row]');
       const qty = parseInt(row && row.getAttribute('data-ordered-quantity') || '1', 10) || 1;

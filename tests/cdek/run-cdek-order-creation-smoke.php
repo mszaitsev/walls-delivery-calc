@@ -1273,8 +1273,11 @@ $missing_pickup_service = array_values( array_filter( $missing_draft['services']
 $missing_options = is_array( $missing_pickup_service['tariffs'] ?? null ) ? $missing_pickup_service['tariffs'] : array();
 $missing_option = array_values( array_filter( $missing_options, static fn ( array $row ): bool => '999' === (string) ( $row['object_code'] ?? '' ) ) )[0] ?? array();
 cdek_order_assert( ! empty( $missing_option['selected_missing'] ) && '999' === (string) ( $missing_draft['request']['meta']['tariff_code'] ?? '' ), 'CDEK modal must keep selected tariff value when it is absent from active managed tariffs.' );
+$manual_override_order = new CdekOrderFakeOrder( 134 );
+$manual_override_order->meta = $draft_order->meta;
+$manual_override_order->items = array( new CdekOrderFakeOrderItem( new CdekOrderFakeProduct( 'DEC-1', '1', '30', '20', '10' ), 'Дробный товар', 1, 1990.0 ) );
 $admin_request = $drafts->create_request_from_admin_data(
-	$draft_order,
+	$manual_override_order,
 	array(
 		'delivery_type' => DeliveryType::PICKUP,
 		'tariff_object' => '136',
@@ -1287,17 +1290,17 @@ $admin_request = $drafts->create_request_from_admin_data(
 		'pickup_point_region' => 'Кемеровская область',
 		'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
 		'shipment_items' => array(
-			array( 'item_key' => 'decimal-item', 'ordered_quantity' => 2, 'place_number' => 1, 'name' => 'Дробный товар', 'ware_key' => 'DEC-1', 'amount' => 2, 'cost' => '800,50', 'weight' => 250, 'length_cm' => '36,5', 'width_cm' => '12.5', 'height_cm' => '3,5' ),
+			array( 'item_key' => 'decimal-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Дробный товар', 'ware_key' => 'DEC-1', 'amount' => 1, 'cost' => '777', 'weight' => 450, 'length_cm' => '36,5', 'width_cm' => '12.5', 'height_cm' => '3,5' ),
 		),
 	)
 );
 cdek_order_assert( 'NEW1' === (string) ( $admin_request->meta['delivery_point'] ?? '' ) && 'NEW1' === (string) ( $admin_request->meta['pickup_point_code'] ?? '' ) && $admin_request->pickup_point instanceof PickupPointSelection && 'NEW1' === $admin_request->pickup_point->point_code, 'Choosing another CDEK pickup point in modal must update delivery_point and point_code.' );
 cdek_order_assert( 'NSK70' === (string) ( $admin_request->meta['shipment_point'] ?? '' ) && 'Новосибирск, новый ПВЗ' === (string) ( $admin_request->meta['shipment_point_address'] ?? '' ), 'Choosing another sender CDEK pickup point in modal must update temporary shipment_point and address.' );
 $decimal_rows = is_array( $admin_request->meta['shipment_item_rows'] ?? null ) ? $admin_request->meta['shipment_item_rows'] : array();
-cdek_order_assert( 80050 === (int) ( $decimal_rows[0]['unit_price_kopecks'] ?? 0 ) && 80050 === (int) ( $decimal_rows[0]['assessed_unit_price_kopecks'] ?? 0 ) && 36.5 === (float) ( $decimal_rows[0]['length_cm'] ?? 0 ) && 12.5 === (float) ( $decimal_rows[0]['width_cm'] ?? 0 ) && 3.5 === (float) ( $decimal_rows[0]['height_cm'] ?? 0 ) && ! array_key_exists( 'cdek_item_rows', $admin_request->meta ), 'Shipment modal item rows must parse canonical shipment_items into canonical kopeck rows only.' );
+cdek_order_assert( 77700 === (int) ( $decimal_rows[0]['unit_price_kopecks'] ?? 0 ) && 77700 === (int) ( $decimal_rows[0]['assessed_unit_price_kopecks'] ?? 0 ) && 36.5 === (float) ( $decimal_rows[0]['length_cm'] ?? 0 ) && 12.5 === (float) ( $decimal_rows[0]['width_cm'] ?? 0 ) && 3.5 === (float) ( $decimal_rows[0]['height_cm'] ?? 0 ) && ! array_key_exists( 'cdek_item_rows', $admin_request->meta ), 'Shipment modal item rows must parse current canonical shipment_items into canonical kopeck rows only.' );
 $manual_payload = $builder->build( $admin_request );
 $manual_payload_item = $manual_payload['packages'][0]['items'][0] ?? array();
-cdek_order_assert( 250 === (int) ( $manual_payload_item['weight'] ?? 0 ) && 800.50 === (float) ( $manual_payload_item['cost'] ?? -1 ) && 0 === (int) ( $manual_payload_item['payment']['value'] ?? -1 ), 'CDEK create payload must use current modal item weight and price for weight and declared cost while preserving the existing zero payment formula.' );
+cdek_order_assert( 450 === (int) ( $manual_payload_item['weight'] ?? 0 ) && 777.0 === (float) ( $manual_payload_item['cost'] ?? -1 ) && 0 === (int) ( $manual_payload_item['payment']['value'] ?? -1 ), 'CDEK create payload must use current modal item weight 450 and draft cost 777 instead of original order cost 1990 while preserving the existing zero payment formula.' );
 cdek_order_assert( ! isset( $manual_payload_item['length'] ) && ! isset( $manual_payload_item['width'] ) && ! isset( $manual_payload_item['height'] ), 'CDEK item dimensions remain draft data because the existing CDEK item API contract uses package dimensions only.' );
 cdek_order_assert( ! array_key_exists( 'cdek_recipient_document', $admin_request->meta ) && ! array_key_exists( 'tin', $admin_request->meta ) && ! array_key_exists( 'passport_number', $admin_request->meta ), 'CDEK recipient document must stay out of ShipmentCreateRequest meta.' );
 $cdek_admin_document_data = array(
