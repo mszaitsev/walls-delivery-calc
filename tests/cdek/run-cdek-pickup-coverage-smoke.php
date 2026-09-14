@@ -183,7 +183,8 @@ $request = new QuoteRequest( 'RU', new Address( country_code: 'RU', region_name:
 $carrier = new CdekCarrier( $settings, $client, new CdekLocationResolver( $client, $settings, $logger ), $logger, $points );
 $primary_quote = $carrier->quote( $request );
 coverage_assert( 1097 === (int) end( $http->tariff_destinations ), 'Unselected pickup quote must use primary CDEK city 1097.' );
-$selection = array( 'carrier_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_code' => 'ZHLD25', 'cdek_city_code' => 391, 'snapshot' => array( 'carrier_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_code' => 'ZHLD25', 'cdek_city_code' => 391, 'city' => 'Железнодорожный микрорайон' ) );
+$destination_fingerprint = 'country=RU|location_id=82077';
+$selection = array( 'carrier_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_code' => 'ZHLD25', 'cdek_city_code' => 391, 'destination_fingerprint' => $destination_fingerprint, 'snapshot' => array( 'carrier_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_code' => 'ZHLD25', 'cdek_city_code' => 391, 'city' => 'Железнодорожный микрорайон', 'destination_fingerprint' => $destination_fingerprint ) );
 $child_request = new QuoteRequest( 'RU', $request->destination, $package, '', Money::from_rubles( 1000 ), '2026-09-14', array_merge( $base_context, array( 'pickup_selections' => array( 'cdek:pickup' => $selection ) ) ) );
 $child_quote = $carrier->quote( $child_request );
 coverage_assert( 391 === (int) end( $http->tariff_destinations ), 'Server-validated child selection must use effective CDEK city 391.' );
@@ -191,6 +192,26 @@ coverage_assert( 390.0 === $primary_quote->rates[0]->price->get_rubles() && 491.
 coverage_assert( '2-4 дня' === (string) ( $primary_quote->rates[0]->meta['api_delivery_days_text'] ?? '' ) && '3-5 дней' === (string) ( $child_quote->rates[0]->meta['api_delivery_days_text'] ?? '' ), 'Child effective destination must update CDEK delivery days.' );
 coverage_assert( (string) $primary_quote->rates[0]->planned_delivery_comment !== (string) $child_quote->rates[0]->planned_delivery_comment, 'Child effective destination must update the planned delivery comment.' );
 coverage_assert( 1097 === (int) ( $child_quote->rates[0]->meta['location']['cdek_primary_city_code'] ?? 0 ) && 391 === (int) ( $child_quote->rates[0]->meta['location']['cdek_effective_city_code'] ?? 0 ), 'Rate metadata must preserve primary 1097 and effective 391.' );
+$stale_selection = array_replace_recursive( $selection, array( 'destination_fingerprint' => 'country=RU|location_id=82078', 'snapshot' => array( 'destination_fingerprint' => 'country=RU|location_id=82078' ) ) );
+$stale_request = new QuoteRequest( 'RU', $request->destination, $package, '', Money::from_rubles( 1000 ), '2026-09-14', array_merge( $base_context, array( 'pickup_selections' => array( 'cdek:pickup' => $stale_selection ) ) ) );
+$carrier->quote( $stale_request );
+coverage_assert( 1097 === (int) end( $http->tariff_destinations ), 'Stale CDEK selection for another canonical destination must fail closed to primary city 1097.' );
+$missing_fingerprint = $selection;
+unset( $missing_fingerprint['destination_fingerprint'], $missing_fingerprint['snapshot']['destination_fingerprint'] );
+$missing_fingerprint_request = new QuoteRequest( 'RU', $request->destination, $package, '', Money::from_rubles( 1000 ), '2026-09-14', array_merge( $base_context, array( 'pickup_selections' => array( 'cdek:pickup' => $missing_fingerprint ) ) ) );
+$carrier->quote( $missing_fingerprint_request );
+coverage_assert( 1097 === (int) end( $http->tariff_destinations ), 'CDEK selection without destination fingerprint must fail closed to primary city 1097.' );
+$courier_request = new QuoteRequest( 'RU', $request->destination, $package, '', Money::from_rubles( 1000 ), '2026-09-14', array_merge( $base_context, array( 'delivery_type' => 'courier', 'pickup_selections' => array( 'cdek:pickup' => $selection ) ) ) );
+$carrier->quote( $courier_request );
+coverage_assert( 1097 === (int) end( $http->tariff_destinations ), 'CDEK courier quote must always keep primary city regardless of pickup selection.' );
+$reload_session = new CheckoutSessionManager();
+$reload_session->clear_pickup_selection( 'test_reset' );
+$reload_session->save_city_context( array( 'location_id' => 82077, 'selected_location_id' => 82077, 'country_code' => 'RU', 'city_name' => 'Балашиха', 'region_name' => 'Московская область', 'fias_id' => '27c5' ) );
+$reload_session->save_pickup_selection( $selection );
+coverage_assert( $destination_fingerprint === (string) ( $reload_session->pickup_selections()['cdek:pickup']['destination_fingerprint'] ?? '' ), 'CheckoutSessionManager must persist the current canonical destination fingerprint with the CDEK selection.' );
+$reload_request = new QuoteRequest( 'RU', $request->destination, $package, '', Money::from_rubles( 1000 ), '2026-09-14', array_merge( $base_context, array( 'pickup_selections' => $reload_session->pickup_selections_for_current_destination() ) ) );
+$carrier->quote( $reload_request );
+coverage_assert( 391 === (int) end( $http->tariff_destinations ), 'Reloaded same-destination child selection must remain valid and use effective city 391.' );
 $quote_cache = new QuoteCache();
 coverage_assert( $quote_cache->cache_key( $request, 'cdek', 'pickup', 'cdek' ) !== $quote_cache->cache_key( $child_request, 'cdek', 'pickup', 'cdek' ), 'Effective CDEK destination must change quote cache identity.' );
 

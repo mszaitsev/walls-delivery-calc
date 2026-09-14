@@ -9,6 +9,7 @@ use WallsShop\WDC\Carriers\Cdek\CdekLocationResolver;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutLocationFingerprint;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
 use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
 use WallsShop\WDC\Domain\Common\DateRange;
@@ -29,6 +30,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	public const KEY = CdekSettings::CARRIER_KEY;
 	public const PICKUP_TITLE = CdekSettings::DEFAULT_PICKUP_METHOD_TITLE;
 	public const COURIER_TITLE = CdekSettings::DEFAULT_COURIER_METHOD_TITLE;
+	private CheckoutLocationFingerprint $location_fingerprint;
 
 	public function __construct(
 		private CdekSettings $settings,
@@ -36,8 +38,10 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		private CdekLocationResolver $locations,
 		private Logger $logger,
 		private CdekDeliveryPointService $delivery_points,
-		private ?CdekTariffRepository $tariffs = null
+		private ?CdekTariffRepository $tariffs = null,
+		?CheckoutLocationFingerprint $location_fingerprint = null
 	) {
+		$this->location_fingerprint = $location_fingerprint ?? new CheckoutLocationFingerprint();
 	}
 
 	public static function checkout_group_id( string $delivery_type ): string {
@@ -1033,11 +1037,28 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		$family = (string) ( $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
 		$city_code = (int) ( $selection['cdek_city_code'] ?? $snapshot['cdek_city_code'] ?? 0 );
 		$point_code = trim( (string) ( $selection['point_code'] ?? $snapshot['point_code'] ?? '' ) );
-		if ( self::KEY !== $carrier || self::checkout_group_id( DeliveryType::PICKUP ) !== $family || $city_code <= 0 || '' === $point_code ) {
+		$selected_fingerprint = trim( (string) ( $selection['provider_destination_fingerprint'] ?? $snapshot['provider_destination_fingerprint'] ?? '' ) );
+		if ( '' === $selected_fingerprint ) {
+			$selected_fingerprint = trim( (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' ) );
+		}
+		$current_fingerprint = $this->current_destination_fingerprint( $request );
+		if ( self::KEY !== $carrier || self::checkout_group_id( DeliveryType::PICKUP ) !== $family || $city_code <= 0 || '' === $point_code || '' === $selected_fingerprint || '' === $current_fingerprint || ! hash_equals( $current_fingerprint, $selected_fingerprint ) ) {
 			return array();
 		}
 
 		return array( 'city_code' => $city_code, 'point_code' => $point_code, 'city_name' => (string) ( $selection['city_name'] ?? $snapshot['city'] ?? '' ) );
+	}
+
+	private function current_destination_fingerprint( QuoteRequest $request ): string {
+		return $this->location_fingerprint->fingerprint( array(
+			'country_code' => (string) ( $request->country_code ?: $request->destination->country_code ),
+			'location_id' => (string) ( $request->customer_context['selected_location_id'] ?? $request->customer_context['location_id'] ?? '' ),
+			'fias_id' => (string) ( $request->destination->fias_id ?: ( $request->customer_context['selected_location_fias_id'] ?? $request->customer_context['location_fias_id'] ?? $request->customer_context['fias_id'] ?? '' ) ),
+			'gar_object_id' => (string) ( $request->destination->gar_id ?: ( $request->customer_context['gar_object_id'] ?? $request->customer_context['gar_id'] ?? '' ) ),
+			'city_name' => (string) ( $request->destination->settlement ?: $request->destination->city ?: ( $request->customer_context['city_name'] ?? '' ) ),
+			'region_name' => (string) ( $request->destination->region_name ?: ( $request->customer_context['region_name'] ?? '' ) ),
+			'postcode' => (string) ( $request->destination->postcode ?: ( $request->customer_context['postcode'] ?? '' ) ),
+		) );
 	}
 
 	private function quote_id( QuoteRequest $request, string $suffix ): string {
