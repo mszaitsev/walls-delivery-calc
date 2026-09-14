@@ -515,6 +515,7 @@ final class OrderShipmentDraftFactory {
 		$expected_country_code = $this->expected_cdek_country_from_order( $order );
 		$pickup_point_found = $this->cdek_pickup_row_valid( $pickup_row, $expected_country_code );
 		$location_context = $this->recipient_location_context( $order, $pickup_row );
+		$shipment_item_rows = $this->shipment_item_rows_from_order( $order, $items );
 
 		return new ShipmentCreateRequest(
 			order_id: $this->order_id( $order ),
@@ -561,7 +562,8 @@ final class OrderShipmentDraftFactory {
 				'order_num' => $this->order_number( $order ),
 				'calculation_data' => $calculation,
 				'rate_meta' => $rate_meta,
-				'shipment_item_rows' => $this->shipment_item_rows_from_order( $order, $items ),
+				'shipment_item_rows' => $shipment_item_rows,
+				'cdek_required_item_quantities' => $this->required_item_quantities( $shipment_item_rows ),
 			)
 		);
 	}
@@ -589,6 +591,7 @@ final class OrderShipmentDraftFactory {
 		$shipment_data = $this->shipment_modal_mapper()->parse( $data );
 		$places = $shipment_data->places;
 		$item_rows = $shipment_data->item_rows;
+		$required_item_quantities = $this->required_item_quantities( (array) ( $base->meta['shipment_item_rows'] ?? array() ) );
 		$recipient_address = DeliveryType::PICKUP === $delivery_type && array() !== $pickup_row ? $this->address_from_admin_data( $base->recipient_address, $data, $delivery_type, $base->meta, array(), '', $pickup_row ) : $this->cdek_courier_address_from_normalized( $base->recipient_address, $normalized_address );
 		$recipient = array(
 			'name' => sanitize_text_field( wp_unslash( $data['recipient_name'] ?? $base->recipient['name'] ?? '' ) ),
@@ -647,6 +650,7 @@ final class OrderShipmentDraftFactory {
 					'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? $pickup_point_found : ! empty( $base->meta['pickup_point_found'] ),
 					'pickup_point_row' => DeliveryType::PICKUP === $delivery_type && array() !== $pickup_row ? $this->safe_pickup_row( $pickup_row ) : (array) ( $base->meta['pickup_point_row'] ?? array() ),
 					'shipment_item_rows' => $item_rows,
+					'cdek_required_item_quantities' => $required_item_quantities,
 				)
 			)
 		);
@@ -1548,6 +1552,26 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return $rows;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<string,int>
+	 */
+	private function required_item_quantities( array $rows ): array {
+		$required = array();
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) || '' !== trim( (string) ( $row['split_parent'] ?? '' ) ) ) {
+				continue;
+			}
+			$key = preg_replace( '/^(?:order-item-|item-)/', '', trim( (string) ( $row['item_key'] ?? '' ) ) ) ?? '';
+			$quantity = (int) ( $row['ordered_quantity'] ?? $row['amount'] ?? 0 );
+			if ( '' !== $key && $quantity > 0 ) {
+				$required[ $key ] = $quantity;
+			}
+		}
+
+		return $required;
 	}
 
 	/** @return array<string,mixed> */

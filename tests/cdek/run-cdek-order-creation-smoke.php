@@ -441,6 +441,7 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 			'cdek_postal_code' => $overrides['cdek_postal_code'] ?? '',
 			'cdek_delivery_address' => $overrides['cdek_delivery_address'] ?? '',
 			'cdek_courier_comment' => $overrides['cdek_courier_comment'] ?? '',
+			'cdek_required_item_quantities' => $overrides['cdek_required_item_quantities'] ?? array(),
 			'shipment_item_rows' => $overrides['shipment_item_rows'] ?? array(
 				cdek_order_item_row( '1', 1, 'Товар', 'SKU-1', 5, (int) round( (float) ( $overrides['unit_cost'] ?? 1000 ) * 100 ), 100 ),
 			),
@@ -720,7 +721,7 @@ cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryT
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'tariff_code' => '' ) ) ), 'Missing tariff_code must fail validation.' );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => '' ) ) ), 'Missing delivery_point for pickup must fail validation.' );
 $overweight_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'place_weight' => 100 ) );
-cdek_order_assert( array() === $builder->validate( $overweight_request ) && array( 'Вес грузоместа 1 меньше суммы весов товаров.' ) === $builder->warnings( $overweight_request ), 'Package weight below item weight must remain a non-blocking warning.' );
+cdek_order_assert( in_array( 'Вес грузоместа 1 меньше суммы весов товаров.', $builder->validate( $overweight_request ), true ) && array() === $builder->warnings( $overweight_request ), 'CDEK package weight below current allocated item weight must be a hard error without a duplicate warning.' );
 $equal_places = array(
 	new ShipmentPlace( 1, 100, 20, 15, 10, Money::from_kopecks( 0 ), array() ),
 	new ShipmentPlace( 2, 150, 20, 15, 10, Money::from_kopecks( 0 ), array() ),
@@ -730,15 +731,41 @@ $equal_rows = array(
 	cdek_order_item_row( 'equal-2', 2, 'Товар 2', 'EQ-2', 1, 10000, 150 ),
 );
 $equal_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $equal_rows ) );
-cdek_order_assert( array() === $builder->warnings( $equal_request ), 'Equal package/item weights 100/100 and 150/150 must produce no warning and must not include packaging weight.' );
+cdek_order_assert( array() === $builder->validate( $equal_request ) && array() === $builder->warnings( $equal_request ), 'Equal package/item weights 100/100 and 150/150 must pass and must not include packaging weight.' );
 $place_one_overweight_rows = $equal_rows;
 $place_one_overweight_rows[0]['weight'] = 101;
 $place_one_overweight_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $place_one_overweight_rows ) );
-cdek_order_assert( array( 'Вес грузоместа 1 меньше суммы весов товаров.' ) === $builder->warnings( $place_one_overweight_request ), 'Only place 1 must warn for entered/item weights 100/101 and 150/150.' );
+cdek_order_assert( in_array( 'Вес грузоместа 1 меньше суммы весов товаров.', $builder->validate( $place_one_overweight_request ), true ) && ! in_array( 'Вес грузоместа 2 меньше суммы весов товаров.', $builder->validate( $place_one_overweight_request ), true ), 'Only place 1 must fail for entered/item weights 100/101 and 150/150.' );
 $place_two_overweight_rows = $equal_rows;
 $place_two_overweight_rows[1]['weight'] = 151;
 $place_two_overweight_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $place_two_overweight_rows ) );
-cdek_order_assert( array( 'Вес грузоместа 2 меньше суммы весов товаров.' ) === $builder->warnings( $place_two_overweight_request ), 'Only place 2 must warn for entered/item weights 100/100 and 150/151.' );
+cdek_order_assert( in_array( 'Вес грузоместа 2 меньше суммы весов товаров.', $builder->validate( $place_two_overweight_request ), true ) && ! in_array( 'Вес грузоместа 1 меньше суммы весов товаров.', $builder->validate( $place_two_overweight_request ), true ), 'Only place 2 must fail for entered/item weights 100/100 and 150/151.' );
+$incomplete_row = cdek_order_item_row( 'order-item-42', 1, 'Товар', 'ALLOC-1', 1, 10000, 50 );
+$incomplete_row['ordered_quantity'] = 1;
+$incomplete_request = cdek_order_request( DeliveryType::COURIER, 1, array(
+	'place_weight' => 100,
+	'shipment_item_rows' => array( $incomplete_row ),
+	'cdek_required_item_quantities' => array( '42' => 2 ),
+) );
+cdek_order_assert( in_array( 'Не все товары распределены по грузоместам.', $builder->validate( $incomplete_request ), true ), 'CDEK ordered quantity 2 with only one allocated unit must fail closed even if submitted ordered_quantity is forged to 1.' );
+$complete_rows = array( $incomplete_row, $incomplete_row );
+$complete_rows[1]['item_key'] = 'order-item-42:split:2';
+$complete_rows[1]['split_parent'] = 'order-item-42';
+$complete_rows[1]['place_number'] = 2;
+$complete_request = cdek_order_request( DeliveryType::COURIER, 1, array(
+	'places' => $equal_places,
+	'shipment_item_rows' => $complete_rows,
+	'cdek_required_item_quantities' => array( '42' => 2 ),
+) );
+cdek_order_assert( array() === $builder->validate( $complete_request ), 'CDEK ordered quantity 2 allocated 1+1 across valid places must pass.' );
+$invalid_place_rows = $complete_rows;
+$invalid_place_rows[1]['place_number'] = 3;
+$invalid_place_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $invalid_place_rows, 'cdek_required_item_quantities' => array( '42' => 2 ) ) );
+cdek_order_assert( in_array( 'Не все товары распределены по грузоместам.', $builder->validate( $invalid_place_request ), true ), 'CDEK allocation row with an unknown place must fail completeness validation.' );
+$manual_row = cdek_order_item_row( 'manual-3', 1, 'Добавленный товар', 'MANUAL', 1, 10000, 10 );
+$manual_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => array_merge( $complete_rows, array( $manual_row ) ), 'cdek_required_item_quantities' => array( '42' => 2 ) ) );
+$manual_errors = $builder->validate( $manual_request );
+cdek_order_assert( ! in_array( 'Не все товары распределены по грузоместам.', $manual_errors, true ), 'Manual-added positive row with a valid place must not invent a required order quantity: ' . implode( ' | ', $manual_errors ) );
 $too_many = array_fill( 0, 127, cdek_order_item_row( 'x', 1, 'T', 'W', 1, 100, 1 ) );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'shipment_item_rows' => $too_many ) ) ), 'More than 126 item rows must fail validation.' );
 
@@ -761,9 +788,9 @@ $overweight_http = new CdekOrderFakeHttp();
 $overweight_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $overweight_http ), $settings, $overweight_http );
 $overweight_creation = cdek_order_creation_service( new OrderShipmentRepository(), new CdekShipmentAdapter( $overweight_client, $builder ) );
 $overweight_result = $overweight_creation->create( new CdekOrderFakeOrder( 101 ), $overweight_create_request );
-cdek_order_assert( array() === ( $overweight_preview['errors'] ?? array() ), 'CDEK overweight condition must not enter preview errors.' );
-cdek_order_assert( array( 'Вес грузоместа 1 меньше суммы весов товаров.' ) === ( $overweight_preview['warnings'] ?? array() ), 'CDEK overweight warning must be visible in preview.' );
-cdek_order_assert( $overweight_result->success, 'CDEK overweight warning must not block create: ' . $overweight_result->error_code . ' ' . $overweight_result->error_message );
+cdek_order_assert( in_array( 'Вес грузоместа 1 меньше суммы весов товаров.', (array) ( $overweight_preview['errors'] ?? array() ), true ), 'CDEK overweight condition must enter preview hard errors.' );
+cdek_order_assert( array() === ( $overweight_preview['warnings'] ?? array() ), 'CDEK overweight hard error must not be duplicated as a warning.' );
+cdek_order_assert( ! $overweight_result->success && array() === $overweight_http->requests, 'CDEK overweight create bypass must be rejected before any remote API request.' );
 $document_order = new CdekOrderFakeOrder( 121 );
 $document_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'order_id' => 121, 'country_code' => 'KZ', 'tin' => 'KZ-SECRET-DOC-999' ) );
 $document_payload = $builder->build( $document_request );
@@ -1309,7 +1336,7 @@ $admin_request = $drafts->create_request_from_admin_data(
 		'pickup_point_region' => 'Кемеровская область',
 		'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
 		'shipment_items' => array(
-			array( 'item_key' => 'decimal-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Дробный товар', 'ware_key' => 'DEC-1', 'amount' => 1, 'cost' => '777', 'weight' => 450, 'length_cm' => '36,5', 'width_cm' => '12.5', 'height_cm' => '3,5' ),
+			array( 'item_key' => 'order-item-1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Дробный товар', 'ware_key' => 'DEC-1', 'amount' => 1, 'cost' => '777', 'weight' => 450, 'length_cm' => '36,5', 'width_cm' => '12.5', 'height_cm' => '3,5' ),
 		),
 	)
 );
@@ -1333,7 +1360,7 @@ $cdek_admin_document_data = array(
 	'pickup_point_cdek_city_code' => '9220',
 	'pickup_point_is_handout' => '1',
 	'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
-	'shipment_items' => array( array( 'item_key' => 'doc-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-DOC', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
+	'shipment_items' => array( array( 'item_key' => 'order-item-1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-DOC', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
 );
 foreach ( array( 'KZ' => 'tin', 'KG' => 'tin', 'AM' => 'passport_number', 'BY' => 'passport_number' ) as $document_country => $document_key ) {
 	$document_base_order = new CdekOrderFakeOrder( 160 + array_search( $document_country, array( 'KZ', 'KG', 'AM', 'BY' ), true ) );

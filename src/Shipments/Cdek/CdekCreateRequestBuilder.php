@@ -142,25 +142,85 @@ final class CdekCreateRequestBuilder {
 		} catch ( \InvalidArgumentException $exception ) {
 			$errors[] = $exception->getMessage();
 		}
+		foreach ( $this->draft_consistency_errors( $request ) as $error ) {
+			$errors[] = $error;
+		}
 		return array_values( array_unique( $errors ) );
 	}
 
 	/** @return array<int,string> */
 	public function warnings( ShipmentCreateRequest $request ): array {
-		$weights = array();
-		foreach ( $this->item_rows( $request ) as $row ) {
-			$place_number = (int) ( $row['place_number'] ?? 0 );
-			$weights[ $place_number ] = ( $weights[ $place_number ] ?? 0 )
-				+ max( 0, (int) ( $row['weight'] ?? 0 ) ) * max( 0, (int) ( $row['amount'] ?? 0 ) );
-		}
-		$warnings = array();
-		foreach ( $request->places as $place ) {
-			if ( $place instanceof ShipmentPlace && ( $weights[ $place->place_number ] ?? 0 ) > $place->weight_g ) {
-				$warnings[] = sprintf( 'Вес грузоместа %d меньше суммы весов товаров.', $place->place_number );
+		return array();
+	}
+
+	/** @return array<int,string> */
+	private function draft_consistency_errors( ShipmentCreateRequest $request ): array {
+		$rows = $this->item_rows( $request );
+		$required = is_array( $request->meta['cdek_required_item_quantities'] ?? null )
+			? $request->meta['cdek_required_item_quantities']
+			: array();
+		if ( array() === $required ) {
+			foreach ( $rows as $row ) {
+				if ( '' !== trim( (string) ( $row['split_parent'] ?? '' ) ) || str_starts_with( (string) ( $row['item_key'] ?? '' ), 'manual-' ) ) {
+					continue;
+				}
+				$key = $this->allocation_group_key( (string) ( $row['item_key'] ?? '' ) );
+				$quantity = (int) ( $row['ordered_quantity'] ?? $row['amount'] ?? 0 );
+				if ( '' !== $key && $quantity > 0 ) {
+					$required[ $key ] = $quantity;
+				}
 			}
 		}
 
-		return $warnings;
+		$allocated = array_fill_keys( array_keys( $required ), 0 );
+		$known_places = array();
+		$weights = array();
+		foreach ( $request->places as $place ) {
+			if ( $place instanceof ShipmentPlace ) {
+				$known_places[ $place->place_number ] = $place;
+			}
+		}
+		$incomplete = false;
+		foreach ( $rows as $row ) {
+			$amount = max( 0, (int) ( $row['amount'] ?? 0 ) );
+			$place_number = (int) ( $row['place_number'] ?? 0 );
+			if ( $amount > 0 && ! isset( $known_places[ $place_number ] ) ) {
+				$incomplete = true;
+				continue;
+			}
+			$weights[ $place_number ] = ( $weights[ $place_number ] ?? 0 )
+				+ max( 0, (int) ( $row['weight'] ?? 0 ) ) * $amount;
+			$item_key = (string) ( $row['item_key'] ?? '' );
+			$parent = trim( (string) ( $row['split_parent'] ?? '' ) );
+			if ( str_starts_with( $item_key, 'manual-' ) && '' === $parent ) {
+				continue;
+			}
+			$group_key = $this->allocation_group_key( '' !== $parent ? $parent : $item_key );
+			if ( ! array_key_exists( $group_key, $allocated ) ) {
+				$incomplete = true;
+				continue;
+			}
+			$allocated[ $group_key ] += $amount;
+		}
+		foreach ( $required as $key => $quantity ) {
+			if ( (int) ( $allocated[ (string) $key ] ?? 0 ) !== (int) $quantity ) {
+				$incomplete = true;
+				break;
+			}
+		}
+
+		$errors = $incomplete ? array( 'Не все товары распределены по грузоместам.' ) : array();
+		foreach ( $known_places as $place_number => $place ) {
+			if ( ( $weights[ $place_number ] ?? 0 ) > $place->weight_g ) {
+				$errors[] = sprintf( 'Вес грузоместа %d меньше суммы весов товаров.', $place_number );
+			}
+		}
+
+		return $errors;
+	}
+
+	private function allocation_group_key( string $key ): string {
+		return preg_replace( '/^(?:order-item-|item-)/', '', trim( $key ) ) ?? '';
 	}
 
 	/**

@@ -42,6 +42,60 @@
     }
     return true;
   }
+
+  function cdekShipmentDraftErrors(form) {
+    if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'cdek') return [];
+    const places = shipmentPlaceOptions(form);
+    const knownPlaces = new Set(places.map((place) => String(place.number)));
+    const weights = {};
+    const groups = {};
+    let incomplete = false;
+    shipmentItemRows(form).forEach((row) => {
+      const place = placeSelect(row);
+      const quantityInput = shipmentQtyInput(row);
+      const weightInput = row.querySelector('input[name$="[weight]"]');
+      const quantity = parseInt(quantityInput && quantityInput.value ? quantityInput.value : '0', 10) || 0;
+      const placeNumber = place && place.value ? String(place.value) : '';
+      if (quantity > 0 && !knownPlaces.has(placeNumber)) incomplete = true;
+      weights[placeNumber] = (weights[placeNumber] || 0)
+        + quantity * (parseInt(weightInput && weightInput.value ? weightInput.value : '0', 10) || 0);
+
+      if (row.hasAttribute('data-wdc-manual-row')) return;
+      const groupKey = row.getAttribute('data-group-key') || '';
+      if (!groupKey) {
+        incomplete = true;
+        return;
+      }
+      if (!groups[groupKey]) groups[groupKey] = { ordered: 0, allocated: 0, hasBase: false };
+      groups[groupKey].allocated += quantity;
+      if (row.hasAttribute('data-wdc-base-row')) {
+        groups[groupKey].hasBase = true;
+        groups[groupKey].ordered = parseInt(row.getAttribute('data-ordered-quantity') || '0', 10) || 0;
+      }
+    });
+    Object.keys(groups).forEach((key) => {
+      const group = groups[key];
+      if (!group.hasBase || group.ordered <= 0 || group.allocated !== group.ordered) incomplete = true;
+    });
+
+    const errors = incomplete ? ['Не все товары распределены по грузоместам.'] : [];
+    places.forEach((place) => {
+      if ((weights[String(place.number)] || 0) > place.weight) {
+        errors.push('Вес грузоместа ' + place.number + ' меньше суммы весов товаров.');
+      }
+    });
+    return errors;
+  }
+
+  function updateCdekShipmentDraftUi(form) {
+    const errors = cdekShipmentDraftErrors(form);
+    const output = form && form.querySelector('[data-wdc-cdek-draft-errors]');
+    if (output) {
+      output.textContent = errors.join(' ');
+      output.hidden = errors.length === 0;
+    }
+    return errors.length === 0;
+  }
   const CDEK_BARCODE_POLL_INTERVAL_MS = 2000;
   const CDEK_BARCODE_TIMEOUT_MS = 300000;
   const CDEK_BARCODE_RESET_MS = 1500;
@@ -255,6 +309,7 @@
     afterFormInitialized: function (form) {
       if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'cdek') return false;
       updateCdekRecipientDocumentUi(form);
+      updateCdekShipmentDraftUi(form);
       return false;
     },
     handleChange: function (event) {
@@ -264,7 +319,12 @@
       return false;
     },
     createAvailability: function (form) {
-      return updateCdekRecipientDocumentUi(form);
+      return updateCdekRecipientDocumentUi(form) && updateCdekShipmentDraftUi(form);
+    },
+    afterPlacesChanged: function (form) {
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'cdek') return false;
+      updateCreateAvailability(form);
+      return false;
     },
     afterAddressNormalized: function (context) {
       const form = context && context.form;

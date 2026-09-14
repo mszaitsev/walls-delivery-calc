@@ -6,7 +6,7 @@ The current Walls Delivery Calc release source is version 1.0.23. It uses one fr
 
 Current production scope includes:
 
-The Shipment package editor now treats its current modal draft as authoritative for summaries, warnings, preview, and create. Package overweight remains non-blocking, and each eligible package has a deterministic **Подогнать вес товаров** action; edits remain ephemeral and do not mutate WooCommerce order/product data.
+The Shipment package editor now treats its current modal draft as authoritative for summaries, warnings, preview, and create. Package overweight remains non-blocking by default; CDEK alone hard-blocks incomplete order-item allocation and any place whose current allocated item weight exceeds its manager-entered weight. Each eligible package has a deterministic **Подогнать вес товаров** action; edits remain ephemeral and do not mutate WooCommerce order/product data.
 
 CDEK destination pickup now supports carrier-specific child-city coverage for eligible canonical RU cities without importing that carrier geography into WDC. Primary versus selected effective CDEK destinations are explicit, and the lazy daily region directory participates in the unified delivery-cache clear.
 

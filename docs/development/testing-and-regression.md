@@ -30,7 +30,7 @@ git diff --check
 
 Run JavaScript smoke programs in `tests/` with `node`. Browser acceptance tests require their explicitly documented browser dependency and are not replaced by syntax checks.
 
-Shipment package-editor changes run `node tests/shipments/run-shipment-package-editor-smoke.js`. It protects live weight/price summaries, warning state, per-place fit eligibility and deterministic quantity-aware fitting, multi-package isolation, incomplete-place gating, and fresh DOM collection for preview/create.
+Shipment package-editor changes run `node tests/shipments/run-shipment-package-editor-smoke.js`. It protects live weight/price summaries, warning state, per-place fit eligibility and deterministic quantity-aware fitting, multi-package isolation, fresh DOM collection for preview/create, and the CDEK-only hard gate for complete order-item allocation plus current item weight not exceeding manager-entered place weight.
 
 Classic checkout releases run `tests/checkout/run-woocommerce-checkout-smoke.php`. Its grouped-tariff regression protects Woo shipping-package cache invalidation after nested selection, server-side recalculation of the selected title/price/crossed price and total, canonical planned-comment payloads, checked-state restoration, and preservation of the chosen top-level method and same-family pickup point.
 

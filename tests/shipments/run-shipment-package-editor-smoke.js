@@ -35,7 +35,10 @@ context.window = context;
 context.setTimeout = () => 1;
 context.clearTimeout = () => {};
 context.fetch = () => Promise.resolve({ text: () => Promise.resolve('{}') });
-context.updateCreateAvailability = () => {};
+context.updateCreateAvailability = (form) => {
+  if (!form || typeof context.carrierCreateAvailability !== 'function') return;
+  form.submit.disabled = !context.carrierCreateAvailability(form, 'courier');
+};
 context.schedulePreviewCalls = 0;
 context.scheduledPreviewPayloads = [];
 context.schedulePreview = (form) => {
@@ -117,6 +120,10 @@ class ItemRow {
       })
     };
     this.attributes[options.split ? 'data-wdc-split-row' : 'data-wdc-base-row'] = '1';
+    if (options.manual) {
+      delete this.attributes['data-wdc-base-row'];
+      this.attributes['data-wdc-manual-row'] = '1';
+    }
     [this.place, this.quantity, this.weight, this.cost, this.length, this.width, this.height].forEach((input) => { input.row = this; });
   }
   querySelector(selector) {
@@ -157,11 +164,14 @@ class PlaceRow {
 }
 
 class Form {
-  constructor(places, items) {
+  constructor(places, items, carrier = 'cdek') {
     this.places = places;
     this.items = items;
     this.summary = { innerHTML: '' };
     this.actions = { innerHTML: '' };
+    this.carrier = new Input('carrier_key', carrier);
+    this.draftErrors = { textContent: '', hidden: true };
+    this.submit = { disabled: false };
     this.tabs = [new Tab(this, 'main'), new Tab(this, 'places')];
     this.panels = [new Panel('main'), new Panel('places')];
     this.items.forEach((item) => {
@@ -169,11 +179,15 @@ class Form {
       [item.place, item.quantity, item.weight, item.cost, item.length, item.width, item.height].forEach((input) => { input.form = this; });
     });
     this.places.forEach((place) => Object.values(place.inputs).forEach((input) => { input.form = this; }));
+    this.carrier.form = this;
   }
   querySelector(selector) {
     if (selector === '[data-wdc-shipment-items-summary]') return this.summary;
     if (selector === '[data-wdc-fit-item-weight-actions]') return this.actions;
     if (selector === '[data-wdc-split-row]') return this.items.find((item) => !item.removed && item.hasAttribute('data-wdc-split-row')) || null;
+    if (selector === 'input[name="carrier_key"]') return this.carrier;
+    if (selector === '[data-wdc-cdek-draft-errors]') return this.draftErrors;
+    if (selector === '[data-wdc-create-shipment]') return this.submit;
     return null;
   }
   querySelectorAll(selector) {
@@ -186,7 +200,8 @@ class Form {
     if (selector === '[data-wdc-pickup-section]' || selector === '[data-wdc-courier-section]' || selector === '[data-wdc-dpd-courier-instructions-row]') return [];
     if (selector === 'input, select, textarea') {
       return this.places.flatMap((place) => Object.values(place.inputs))
-        .concat(this.items.filter((item) => !item.removed).flatMap((item) => [item.place, item.quantity, item.weight, item.cost, item.length, item.width, item.height]));
+        .concat(this.items.filter((item) => !item.removed).flatMap((item) => [item.place, item.quantity, item.weight, item.cost, item.length, item.width, item.height]))
+        .concat([this.carrier]);
     }
     return [];
   }
@@ -370,6 +385,42 @@ assert.match(equalPackages.summary.innerHTML, /Место 1:[\s\S]*вес мес
 assert.match(equalPackages.summary.innerHTML, /Место 2:[\s\S]*вес места 150 г;[\s\S]*вес товаров 150 г/);
 assert.doesNotMatch(equalPackages.summary.innerHTML, /data-error="1"/, 'Equal two-package weights must clear every local warning without a tab switch.');
 const latestEqualPreview = context.scheduledPreviewPayloads[context.scheduledPreviewPayloads.length - 1];
+assert.strictEqual(context.carrierCreateAvailability(equalPackages, 'courier'), true, 'CDEK equality 100/100 and 150/150 must pass the local hard gate.');
+assert.strictEqual(equalPackages.draftErrors.hidden, true, 'CDEK equality must show no local draft error.');
+equalItem2.weight.value = '151';
+dispatch('input', equalItem2.weight);
+assert.strictEqual(equalPackages.submit.disabled, true, 'CDEK Create must disable immediately when place 2 becomes overweight.');
+assert.match(equalPackages.draftErrors.textContent, /Вес грузоместа 2 меньше суммы весов товаров\./, 'CDEK local gate must explain the exact overweight place.');
+equalItem2.weight.value = '150';
+dispatch('input', equalItem2.weight);
+assert.strictEqual(equalPackages.submit.disabled, false, 'CDEK Create must re-enable immediately after place 2 becomes consistent.');
+
+const incompleteAllocationItem = new ItemRow(0, 1, 1, 50, 100, [30, 20, 10], { orderedQuantity: 2, groupKey: 'order-item-42' });
+const incompleteAllocation = new Form([new PlaceRow(0, 100)], [incompleteAllocationItem]);
+context.updateCreateAvailability(incompleteAllocation);
+assert.strictEqual(incompleteAllocation.submit.disabled, true, 'CDEK Create must block when ordered quantity 2 has only one allocated unit.');
+assert.match(incompleteAllocation.draftErrors.textContent, /Не все товары распределены по грузоместам\./);
+incompleteAllocationItem.quantity.value = '2';
+dispatch('input', incompleteAllocationItem.quantity);
+assert.strictEqual(incompleteAllocation.submit.disabled, false, 'Real quantity input must immediately move CDEK allocation from incomplete to complete.');
+assert.strictEqual(incompleteAllocation.draftErrors.hidden, true);
+
+const fitGateItem = new ItemRow(0, 1, 1, 1200, 100);
+const fitGate = new Form([new PlaceRow(0, 1000)], [fitGateItem]);
+context.updateCreateAvailability(fitGate);
+assert.strictEqual(fitGate.submit.disabled, true, 'CDEK Create must start blocked for items 1200 / package 1000.');
+assert.strictEqual(context.fitShipmentItemWeights(fitGate, '1'), true);
+context.refreshShipmentItemsSummary(fitGate);
+context.dispatchShipmentCarrierHook('afterPlacesChanged', fitGate, { reason: 'item_weights_fitted' });
+assert.strictEqual(fitGateItem.weight.value, '950');
+assert.strictEqual(fitGate.submit.disabled, false, 'CDEK fit to 950 must immediately clear the local hard gate.');
+
+const manualItem = new ItemRow(1, 1, 1, 10, 100, [1, 1, 1], { manual: true, orderedQuantity: 999, groupKey: 'manual-1' });
+const manualDraft = new Form([new PlaceRow(0, 100)], [new ItemRow(0, 1, 1, 50, 100), manualItem]);
+assert.strictEqual(context.carrierCreateAvailability(manualDraft, 'courier'), true, 'Manual-added row must require a valid place but not invent ordered quantity 999.');
+
+const nonCdekOverweight = new Form([new PlaceRow(0, 100)], [new ItemRow(0, 1, 1, 101, 100)], 'pek');
+assert.strictEqual(context.carrierCreateAvailability(nonCdekOverweight, 'courier'), true, 'CDEK hard gate must not change another carrier create availability.');
 for (const [name, value] of [
   ['places[0][weight_g]', '100'],
   ['shipment_items[0][weight]', '100'],
