@@ -1,5 +1,10 @@
+  function selectedCdekDeliveryMode(form) {
+    const tariff = selectedTariff(form);
+    return parseInt(tariff && tariff.delivery_mode ? tariff.delivery_mode : '0', 10) || 0;
+  }
+
   function updateCdekDeliveryModeUi(form) {
-    const mode = selectedDeliveryMode(form);
+    const mode = selectedCdekDeliveryMode(form);
     const commentRow = form.querySelector('[data-wdc-cdek-courier-comment-row]');
     if (commentRow) commentRow.hidden = ![1, 3].includes(mode);
     const senderDoor = form.querySelector('[data-wdc-cdek-sender-door]');

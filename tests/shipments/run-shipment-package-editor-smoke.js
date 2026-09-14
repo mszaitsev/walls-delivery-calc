@@ -35,13 +35,17 @@ context.window = context;
 context.setTimeout = () => 1;
 context.clearTimeout = () => {};
 context.fetch = () => Promise.resolve({ text: () => Promise.resolve('{}') });
-context.updateCdekDeliveryModeUi = () => {};
 context.updateCreateAvailability = () => {};
 context.schedulePreviewCalls = 0;
-context.schedulePreview = () => { context.schedulePreviewCalls += 1; };
+context.scheduledPreviewPayloads = [];
+context.schedulePreview = (form) => {
+  context.schedulePreviewCalls += 1;
+  context.scheduledPreviewPayloads.push(context.collectShipmentData(form));
+};
 vm.runInNewContext([
   fs.readFileSync('assets/admin/shipments/shipment-core.js', 'utf8'),
-  fs.readFileSync('assets/admin/shipments/shipment-allocation.js', 'utf8')
+  fs.readFileSync('assets/admin/shipments/shipment-allocation.js', 'utf8'),
+  fs.readFileSync('assets/admin/shipments/extensions/cdek.js', 'utf8')
 ].join('\n'), context);
 
 class Input {
@@ -57,6 +61,7 @@ class Input {
     this.attributes = {};
     if (name.endsWith('[weight]') || name.endsWith('[amount]') || name.endsWith('[weight_g]')) {
       this.attributes['data-wdc-integer-input'] = '';
+      this.type = 'number';
     }
     if (name.endsWith('[cost]')) this.attributes['data-wdc-decimal-input'] = '2';
     if (/\[(length_cm|width_cm|height_cm)\]$/.test(name)) this.attributes['data-wdc-decimal-input'] = '1';
@@ -277,6 +282,8 @@ const onePlaceItem = new ItemRow(0, 1, 1, 1000, 1990, [30, 20, 10]);
 const onePlace = new Form([new PlaceRow(0, 1000)], [onePlaceItem]);
 context.updateShipmentPlaceOptions(onePlace);
 assert.match(onePlace.actions.innerHTML, />Подогнать вес товаров<\/button>/, 'One-place fit label must not include a redundant place number.');
+assert.strictEqual(onePlaceItem.weight.type, 'number', 'Item weight regression must use production type=number semantics.');
+assert.strictEqual(onePlace.places[0].inputs.weight.type, 'number', 'Package weight regression must use production type=number semantics.');
 
 onePlaceItem.weight.value = '450';
 dispatch('input', onePlaceItem.weight);
@@ -328,6 +335,50 @@ const onePlaceCreate = context.collectShipmentData(onePlace);
 assert.ok(onePlaceCreate.values.some(([name, value]) => name === 'shipment_items[0][weight]' && value === '450'), 'Immediate Create collection must preserve manual one-place weight 450.');
 assert.ok(onePlaceCreate.values.some(([name, value]) => name === 'shipment_items[0][cost]' && value === '777'), 'Immediate Create collection must preserve manual one-place cost 777.');
 
+const liveIntegerItem = new ItemRow(0, 1, 1, 1100, 1990);
+const liveInteger = new Form([new PlaceRow(0, 1000)], [liveIntegerItem]);
+context.updateShipmentPlaceOptions(liveInteger);
+assert.match(liveInteger.summary.innerHTML, /вес места 1000 г;[\s\S]*вес товаров 1100 г/);
+liveIntegerItem.weight.value = '900';
+dispatch('input', liveIntegerItem.weight);
+assert.match(liveInteger.summary.innerHTML, /вес товаров 900 г/, 'Actual delegated type=number input must immediately render item weight 900 before blur/change/tab.');
+assert.doesNotMatch(liveInteger.summary.innerHTML, /data-error="1"/, 'Item weight 900 must immediately clear local overweight state.');
+liveIntegerItem.weight.value = '1200';
+dispatch('input', liveIntegerItem.weight);
+assert.match(liveInteger.summary.innerHTML, /вес товаров 1200 г/, 'Second delegated type=number input must immediately render item weight 1200.');
+assert.match(liveInteger.summary.innerHTML, /data-error="1"/, 'Item weight 1200 must immediately restore local overweight state.');
+liveIntegerItem.weight.value = '900';
+dispatch('input', liveIntegerItem.weight);
+liveInteger.places[0].inputs.weight.value = '800';
+dispatch('input', liveInteger.places[0].inputs.weight);
+assert.match(liveInteger.summary.innerHTML, /вес места 800 г;[\s\S]*вес товаров 900 г/, 'Package type=number input must immediately render place weight 800.');
+assert.match(liveInteger.summary.innerHTML, /data-error="1"/, 'Package weight 800 must immediately activate local overweight state.');
+liveInteger.places[0].inputs.weight.value = '1000';
+dispatch('input', liveInteger.places[0].inputs.weight);
+assert.match(liveInteger.summary.innerHTML, /вес места 1000 г;[\s\S]*вес товаров 900 г/, 'Package type=number input must immediately render place weight 1000.');
+assert.doesNotMatch(liveInteger.summary.innerHTML, /data-error="1"/, 'Package weight 1000 must immediately clear local overweight state.');
+
+const equalItem1 = new ItemRow(0, 1, 1, 200, 100);
+const equalItem2 = new ItemRow(1, 2, 1, 200, 100);
+const equalPackages = new Form([new PlaceRow(0, 100), new PlaceRow(1, 150)], [equalItem1, equalItem2]);
+context.updateShipmentPlaceOptions(equalPackages);
+equalItem1.weight.value = '100';
+dispatch('input', equalItem1.weight);
+equalItem2.weight.value = '150';
+dispatch('input', equalItem2.weight);
+assert.match(equalPackages.summary.innerHTML, /Место 1:[\s\S]*вес места 100 г;[\s\S]*вес товаров 100 г/);
+assert.match(equalPackages.summary.innerHTML, /Место 2:[\s\S]*вес места 150 г;[\s\S]*вес товаров 150 г/);
+assert.doesNotMatch(equalPackages.summary.innerHTML, /data-error="1"/, 'Equal two-package weights must clear every local warning without a tab switch.');
+const latestEqualPreview = context.scheduledPreviewPayloads[context.scheduledPreviewPayloads.length - 1];
+for (const [name, value] of [
+  ['places[0][weight_g]', '100'],
+  ['shipment_items[0][weight]', '100'],
+  ['places[1][weight_g]', '150'],
+  ['shipment_items[1][weight]', '150']
+]) {
+  assert.ok(latestEqualPreview.values.some((entry) => entry[0] === name && entry[1] === value), `Fresh scheduled preview must contain ${name}=${value}.`);
+}
+
 assert.match(form.actions.innerHTML, />Подогнать вес товаров 1<\/button>/, 'Multi-place fit label must identify place 1.');
 assert.match(form.actions.innerHTML, />Подогнать вес товаров 2<\/button>/, 'Multi-place fit label must identify place 2.');
 
@@ -348,4 +399,80 @@ assert.strictEqual(collapseBase.quantity.value, '3', 'True split collapse must r
 assert.strictEqual(collapseBase.place.value, '1', 'True split collapse must leave a valid single-place selector.');
 assert.strictEqual(collapseBase.weight.value, '1000', 'True split collapse must retain the existing explicit restore semantics.');
 
-console.log('Shipment package editor JS smoke passed.');
+async function assertPreviewRaceProtection() {
+  const pending = [];
+  class PreviewFormData {
+    constructor() { this.values = []; }
+    append(name, value) { this.values.push([name, String(value)]); }
+  }
+  const previewContext = {
+    console,
+    window: null,
+    document: { body: {} },
+    FormData: PreviewFormData,
+    WeakMap,
+    Array,
+    Object,
+    String,
+    Number,
+    JSON,
+    parseInt,
+    parseFloat,
+    fetch(url, options) {
+      return new Promise((resolve) => pending.push({ resolve, body: options.body }));
+    }
+  };
+  previewContext.window = previewContext;
+  previewContext.window.wdcShipmentsAdmin = { ajaxUrl: '/preview', previewAction: 'preview', nonce: 'nonce' };
+  vm.runInNewContext([
+    fs.readFileSync('assets/admin/shipments/shipment-core.js', 'utf8'),
+    fs.readFileSync('assets/admin/shipments/shipment-preview.js', 'utf8')
+  ].join('\n'), previewContext);
+
+  const previewNode = { textContent: '' };
+  const warningNode = { textContent: '', dataset: {} };
+  const fields = [
+    new Input('places[0][weight_g]', 100),
+    new Input('shipment_items[0][weight]', 200),
+    new Input('places[1][weight_g]', 150),
+    new Input('shipment_items[1][weight]', 200)
+  ];
+  const previewForm = {
+    dataset: {},
+    querySelector(selector) {
+      if (selector === '[data-wdc-shipment-preview]') return previewNode;
+      if (selector === '[data-wdc-shipment-errors]') return warningNode;
+      return null;
+    },
+    querySelectorAll(selector) { return selector === 'input, select, textarea' ? fields : []; }
+  };
+
+  const staleRequest = previewContext.requestPreview(previewForm);
+  fields[1].value = '100';
+  fields[3].value = '150';
+  const freshRequest = previewContext.requestPreview(previewForm);
+  assert.ok(pending[1].body.values.some(([name, value]) => name === 'shipment_items[0][weight]' && value === '100'));
+  assert.ok(pending[1].body.values.some(([name, value]) => name === 'shipment_items[1][weight]' && value === '150'));
+
+  pending[1].resolve({
+    text: () => Promise.resolve(JSON.stringify({ success: true, data: { preview: { errors: [], warnings: [] } } }))
+  });
+  await freshRequest;
+  assert.strictEqual(warningNode.textContent, '', 'Latest equal-weight preview must clear server warnings.');
+
+  pending[0].resolve({
+    text: () => Promise.resolve(JSON.stringify({
+      success: true,
+      data: { preview: { errors: [], warnings: ['Вес грузоместа 1 меньше суммы весов товаров.', 'Вес грузоместа 2 меньше суммы весов товаров.'] } }
+    }))
+  });
+  await staleRequest;
+  assert.strictEqual(warningNode.textContent, '', 'Older out-of-order preview must not restore stale server warnings.');
+}
+
+assertPreviewRaceProtection()
+  .then(() => console.log('Shipment package editor JS smoke passed.'))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

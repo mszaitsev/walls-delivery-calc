@@ -396,6 +396,7 @@ final class CdekOrderFakeOrderItem {
 function cdek_order_request( string $delivery_type, int $mode, array $overrides = array() ): ShipmentCreateRequest {
 	$item = new PackageItem( 'SKU-1', 'Товар', 5, Money::from_rubles( $overrides['unit_cost'] ?? 1000 ), Money::from_rubles( ( $overrides['unit_cost'] ?? 1000 ) * 5 ), 100, 10, 8, 3 );
 	$place = new ShipmentPlace( 1, (int) ( $overrides['place_weight'] ?? 1000 ), 20, 15, 10, Money::from_kopecks( 0 ), array( $item ) );
+	$places = is_array( $overrides['places'] ?? null ) ? $overrides['places'] : array( $place );
 	$pickup = DeliveryType::PICKUP === $delivery_type ? new PickupPointSelection( CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, 'KEM7', 'Kemerovo', '2026-06-13 12:00:00' ) : null;
 	$recipient = array_filter(
 		array(
@@ -421,7 +422,7 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 			raw_address: $overrides['raw_address'] ?? ( DeliveryType::COURIER === $delivery_type ? '650000, Кемерово, Советский 10' : 'KEM7' )
 		),
 		$pickup,
-		array( $place ),
+		$places,
 		Money::from_kopecks( 0 ),
 		false,
 		array(),
@@ -720,6 +721,24 @@ cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryT
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => '' ) ) ), 'Missing delivery_point for pickup must fail validation.' );
 $overweight_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'place_weight' => 100 ) );
 cdek_order_assert( array() === $builder->validate( $overweight_request ) && array( 'Вес грузоместа 1 меньше суммы весов товаров.' ) === $builder->warnings( $overweight_request ), 'Package weight below item weight must remain a non-blocking warning.' );
+$equal_places = array(
+	new ShipmentPlace( 1, 100, 20, 15, 10, Money::from_kopecks( 0 ), array() ),
+	new ShipmentPlace( 2, 150, 20, 15, 10, Money::from_kopecks( 0 ), array() ),
+);
+$equal_rows = array(
+	cdek_order_item_row( 'equal-1', 1, 'Товар 1', 'EQ-1', 1, 10000, 100 ),
+	cdek_order_item_row( 'equal-2', 2, 'Товар 2', 'EQ-2', 1, 10000, 150 ),
+);
+$equal_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $equal_rows ) );
+cdek_order_assert( array() === $builder->warnings( $equal_request ), 'Equal package/item weights 100/100 and 150/150 must produce no warning and must not include packaging weight.' );
+$place_one_overweight_rows = $equal_rows;
+$place_one_overweight_rows[0]['weight'] = 101;
+$place_one_overweight_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $place_one_overweight_rows ) );
+cdek_order_assert( array( 'Вес грузоместа 1 меньше суммы весов товаров.' ) === $builder->warnings( $place_one_overweight_request ), 'Only place 1 must warn for entered/item weights 100/101 and 150/150.' );
+$place_two_overweight_rows = $equal_rows;
+$place_two_overweight_rows[1]['weight'] = 151;
+$place_two_overweight_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $place_two_overweight_rows ) );
+cdek_order_assert( array( 'Вес грузоместа 2 меньше суммы весов товаров.' ) === $builder->warnings( $place_two_overweight_request ), 'Only place 2 must warn for entered/item weights 100/100 and 150/151.' );
 $too_many = array_fill( 0, 127, cdek_order_item_row( 'x', 1, 'T', 'W', 1, 100, 1 ) );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'shipment_item_rows' => $too_many ) ) ), 'More than 126 item rows must fail validation.' );
 

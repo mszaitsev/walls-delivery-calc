@@ -417,6 +417,14 @@ function requestShipmentActualCost(button, operation) {
 }
   });
 
+  function refreshShipmentDraftAfterInput(form, reason) {
+    if (!form) return;
+    updateShipmentPlaceOptions(form);
+    updateScenarioSections(form);
+    dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: reason });
+    schedulePreview(form);
+  }
+
   document.addEventListener('input', function (event) {
     if (event.target.matches('[data-wdc-courier-original-address]')) {
       const form = findShipmentForm(event.target);
@@ -445,22 +453,13 @@ function requestShipmentActualCost(button, operation) {
       if (integerForm && row && event.target.matches('[data-wdc-shipment-item-qty]')) {
         rebalanceShipmentItemGroup(integerForm, row.getAttribute('data-group-key') || '', row);
       }
-      if (integerForm) {
-        updateScenarioSections(integerForm);
-        updateShipmentPlaceOptions(integerForm);
-        dispatchShipmentCarrierHook('afterPlacesChanged', integerForm, { reason: 'integer_input' });
-        schedulePreview(integerForm);
-      }
+      refreshShipmentDraftAfterInput(integerForm, 'integer_input');
       return;
     }
     if (event.target.matches('[data-wdc-decimal-input]')) {
       cleanDecimalInput(event.target, parseInt(event.target.getAttribute('data-wdc-decimal-input') || '2', 10) || 2);
       const decimalForm = findShipmentForm(event.target);
-      if (decimalForm) {
-        updateShipmentPlaceOptions(decimalForm);
-        dispatchShipmentCarrierHook('afterPlacesChanged', decimalForm, { reason: 'decimal_input' });
-        schedulePreview(decimalForm);
-      }
+      refreshShipmentDraftAfterInput(decimalForm, 'decimal_input');
       return;
     }
     if (event.target.matches('[data-wdc-product-search-input]')) {
@@ -471,12 +470,7 @@ function requestShipmentActualCost(button, operation) {
       return;
     }
     const form = findShipmentForm(event.target);
-    if (form) {
-      updateScenarioSections(form);
-      updateShipmentPlaceOptions(form);
-      dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'input' });
-      schedulePreview(form);
-    }
+    refreshShipmentDraftAfterInput(form, 'input');
   });
 
   document.addEventListener('pointerdown', function (event) {
@@ -501,12 +495,7 @@ function requestShipmentActualCost(button, operation) {
     const text = clipboard && clipboard.getData ? clipboard.getData('text') : '';
     event.target.value = String(text || '').replace(/\D+/g, '');
     const form = findShipmentForm(event.target);
-    if (form) {
-      updateScenarioSections(form);
-      updateShipmentPlaceOptions(form);
-      dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'paste' });
-      schedulePreview(form);
-    }
+    refreshShipmentDraftAfterInput(form, 'paste');
   });
 
   document.addEventListener('focusout', function (event) {
