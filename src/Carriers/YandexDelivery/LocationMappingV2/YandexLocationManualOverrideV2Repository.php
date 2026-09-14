@@ -205,6 +205,21 @@ final class YandexLocationManualOverrideV2Repository {
 		return is_array( $rows ) ? $rows : array();
 	}
 
+	/** @return array{total:int,items:array<int,array<string,mixed>>} */
+	public function find_active_page( int $limit = 20, int $offset = 0 ): array {
+		$limit = max( 1, min( 20, $limit ) );
+		$offset = max( 0, $offset );
+		if ( $this->has_test_rows() ) {
+			$rows = array_values( array_filter( $this->wpdb->yandex_location_manual_overrides_v2, static fn( array $row ): bool => 'active' === (string) ( $row['status'] ?? '' ) ) );
+			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $b['updated_at'] ?? '' ), (string) ( $a['updated_at'] ?? '' ) ) ?: (int) ( $b['id'] ?? 0 ) <=> (int) ( $a['id'] ?? 0 ) );
+			return array( 'total' => count( $rows ), 'items' => array_slice( $rows, $offset, $limit ) );
+		}
+		$this->create_schema_if_needed();
+		$total = (int) $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT COUNT(*) FROM ' . $this->table_name() . ' WHERE status = %s', 'active' ) );
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( 'SELECT * FROM ' . $this->table_name() . ' WHERE status = %s ORDER BY updated_at DESC, id DESC LIMIT %d OFFSET %d', 'active', $limit, $offset ), ARRAY_A );
+		return array( 'total' => $total, 'items' => is_array( $rows ) ? $rows : array() );
+	}
+
 	public function normalize_region( string $region ): string {
 		$value = str_replace( array( 'ё', '—', '–' ), array( 'е', '-', '-' ), mb_strtolower( trim( $region ), 'UTF-8' ) );
 		$value = preg_replace( '/[«»"\'`,.()]+/u', ' ', $value ) ?? $value;
