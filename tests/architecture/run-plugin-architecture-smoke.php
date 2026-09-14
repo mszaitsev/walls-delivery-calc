@@ -45,6 +45,16 @@ function plugin_architecture_source( string $relative_path ): string {
 	return (string) file_get_contents( $path );
 }
 
+plugin_architecture_assert( 'manage_options' === WallsShop\WDC\Admin\AdminMenu::CAPABILITY, 'Standalone WDC configuration console must require manage_options.' );
+plugin_architecture_assert( 'manage_woocommerce' === WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox::CAPABILITY, 'Order delivery operations must retain manage_woocommerce.' );
+plugin_architecture_assert( 'manage_woocommerce' === WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService::CAPABILITY, 'Order shipment operations must retain manage_woocommerce.' );
+$order_operational_authorization_source = plugin_architecture_source( 'src/Orders/Admin/OrderDeliveryRecalculationAdminController.php' )
+	. plugin_architecture_source( 'src/Shipments/Documents/ShipmentDocumentDownloadService.php' );
+foreach ( glob( plugin_architecture_path( 'src/Shipments/Admin/Ajax/*.php' ) ) ?: array() as $shipment_ajax_file ) {
+	$order_operational_authorization_source .= (string) file_get_contents( $shipment_ajax_file );
+}
+plugin_architecture_assert( ! str_contains( $order_operational_authorization_source, 'AdminMenu::CAPABILITY' ), 'Order operational controllers must not inherit the administrator-only configuration-console capability.' );
+
 $ozon_plugin_source = plugin_architecture_source( 'src/Core/Plugin.php' );
 $ozon_admin_source = plugin_architecture_source( 'src/Carriers/OzonDelivery/Admin/OzonDeliveryAdminPage.php' );
 $ozon_transport_source = plugin_architecture_source( 'src/Carriers/OzonDelivery/Api/WpOzonDeliveryHttpClient.php' );

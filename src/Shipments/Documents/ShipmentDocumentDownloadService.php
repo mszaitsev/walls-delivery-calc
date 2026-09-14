@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Documents;
 
-use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -37,7 +37,7 @@ final class ShipmentDocumentDownloadService {
 	}
 
 	public function admin_post_download(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+		if ( ! current_user_can( ShipmentAdminAjaxService::CAPABILITY ) ) {
 			$this->die( 'Недостаточно прав.', 403 );
 		}
 

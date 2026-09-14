@@ -164,6 +164,8 @@ function current_user_can( string $capability ): bool {
 	return 'manage_woocommerce' === $capability && (bool) $GLOBALS['wdc_recalc_current_can'];
 }
 
+recalc_smoke_assert( 'manage_woocommerce' === OrderDeliveryMetabox::CAPABILITY, 'Order delivery operational UI must remain available under manage_woocommerce.' );
+
 function check_ajax_referer( string $action, string|false $query_arg = false, bool $stop = true ): bool {
 	return 'wdc_order_delivery_recalculation' === $action && (bool) $GLOBALS['wdc_recalc_nonce_ok'];
 }
@@ -2520,6 +2522,43 @@ recalc_smoke_assert( '8-10 дней' === (string) ( $grouped_dpd_calc['result'][
 recalc_smoke_assert( in_array( 'Итог: 8-10 дней', $grouped_dpd_formula, true ), 'Grouped DPD calculation rules formula must use selected tariff final delivery range.' );
 recalc_smoke_assert( '2026-07-28' === (string) ( $grouped_dpd_calc['result']['planned_delivery_date'] ?? '' ) && 'Доставка планируется* с 28 июля (вторник).' === (string) ( $grouped_dpd_calc['result']['planned_delivery_comment'] ?? '' ), 'Grouped DPD save must use selected tariff planned date/comment.' );
 recalc_smoke_assert( array( 'economy-audit' ) === ( $grouped_dpd_calc['rules']['applied_rules'] ?? null ) && array( 'economy-audit' ) === ( $grouped_dpd_order->meta['_wdc_platform_rate_meta']['rules_audit'] ?? null ), 'Grouped DPD save must use selected tariff rate_meta and rules audit.' );
+
+$legacy_marker_item = new WdcRecalcShippingItem( 'Legacy WDC delivery', 395.0 );
+$legacy_marker_item->meta = array(
+	'wdc_rate' => 1,
+	'wdc_source' => 'platform',
+	'carrier_key' => 'dpd',
+	'rate_id' => 'dpd:courier',
+	'Планируемая* дата доставки' => 'старое значение',
+);
+$legacy_marker_order = new WdcRecalcOrder( 139, array() );
+$legacy_marker_order->shipping_items = array( $legacy_marker_item );
+$legacy_marker_result = $replacement->save(
+	$legacy_marker_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $grouped_dpd_rate,
+		'selected_tariff' => $grouped_dpd_tariff,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $legacy_marker_result['success'], 'Admin recalculation must save over an existing shipping item with legacy WDC markers.' );
+recalc_smoke_assert( ! array_key_exists( 'wdc_rate', $legacy_marker_item->meta ) && ! array_key_exists( 'wdc_source', $legacy_marker_item->meta ), 'Admin recalculation must remove legacy visible WDC ownership markers from an existing shipping item.' );
+recalc_smoke_assert( 'с 28 июля 2026' === (string) ( $legacy_marker_item->meta['Планируемая* дата доставки'] ?? '' ), 'Admin recalculation must preserve the user-facing planned delivery metadata while cleaning technical markers.' );
+
+$new_shipping_item_order = new WdcRecalcOrder( 140, array() );
+$new_shipping_item_order->shipping_items = array();
+$new_shipping_item_result = $replacement->save(
+	$new_shipping_item_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $grouped_dpd_rate,
+		'selected_tariff' => $grouped_dpd_tariff,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+$new_shipping_item_meta = is_array( $new_shipping_item_order->shipping_items['meta'] ?? null ) ? $new_shipping_item_order->shipping_items['meta'] : array();
+recalc_smoke_assert( true === $new_shipping_item_result['success'] && ! array_key_exists( 'wdc_rate', $new_shipping_item_meta ) && ! array_key_exists( 'wdc_source', $new_shipping_item_meta ), 'Admin recalculation must not add WDC ownership markers to a newly created shipping item.' );
 
 $single_cdek_order = new WdcRecalcOrder( 138, array() );
 $single_cdek_save = $replacement->save(

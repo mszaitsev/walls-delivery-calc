@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Admin\Ajax;
 
-use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
@@ -49,7 +48,7 @@ final class ShipmentProductsAjaxController {
 	}
 
 	public function handle_search_products(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( ShipmentAdminAjaxService::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( ShipmentAdminAjaxService::CAPABILITY ) || ! check_ajax_referer( ShipmentAdminAjaxService::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 		if ( ! function_exists( 'wc_get_products' ) || ! function_exists( 'wc_get_product' ) ) {
@@ -100,7 +99,7 @@ final class ShipmentProductsAjaxController {
 	}
 
 	public function handle_dpd_contact_history(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( ShipmentAdminAjaxService::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( ShipmentAdminAjaxService::CAPABILITY ) || ! check_ajax_referer( ShipmentAdminAjaxService::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 		$operation = sanitize_key( wp_unslash( $_POST['operation'] ?? '' ) );

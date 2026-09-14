@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 1.0.18
+Version: 1.0.20
 
 `Plugin.php` is the composition root. It registers infrastructure and activation ownership first, runs the single fresh-install schema migration, and only then registers services whose hooks may access plugin tables. The shared `ActionScheduler` adapter owns readiness coordination; scheduler owners attach callbacks during bootstrap and defer datastore inspection or schedule creation until `action_scheduler_init`.
 
@@ -88,6 +88,8 @@ Storage is owned by repositories and mappers. Shipment carrier data must be pers
 Shipment cost analytics uses a dedicated read-model table, `{$wpdb->prefix}wdc_shipment_cost_analytics`, owned by `ShipmentCostAnalyticsRepository`. The canonical source remains WooCommerce order metadata and `_wdc_shipments`; the indexer rebuilds one order row after canonical mutations. The analytics admin page must query this table only and must not scan WooCommerce orders for filters, sorting, pagination, or totals.
 
 ## Admin And AJAX
+
+`AdminMenu::CAPABILITY` is the canonical boundary for the standalone WDC configuration console and equals `manage_options`; its pages, POST handlers, imports, diagnostics, and administrative AJAX endpoints must use that boundary. WooCommerce order operational UI is a separate boundary: order recalculation and shipment actions use their explicit `manage_woocommerce` constants so Shop Managers can continue normal order work without access to plugin configuration.
 
 Admin controllers live in `src/Shipments/Admin/Ajax`. They must perform capability checks, nonce checks, order resolution, request sanitization, and carrier validation before calling application services. Generic controllers may call registries and payload builders; they must not embed carrier creation or document download behavior.
 

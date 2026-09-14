@@ -544,8 +544,6 @@ function checkout_selection_filter_rates( array $specs ): array {
 			'id' => $id,
 			'cost' => (string) $price_rub,
 			'meta_data' => array(
-				'wdc_rate' => true,
-				'wdc_source' => 'platform',
 				'carrier_key' => explode( ':', $id )[0],
 				'service_key' => explode( ':', $id )[0],
 				'rate_id' => $id,
@@ -568,6 +566,10 @@ $chosen = WC()->session->get( 'chosen_shipping_methods', array() );
 $stored = $session->rates();
 checkout_selection_assert( array( 'selection_demo:courier' ) === $chosen, 'Courier method identity must survive cart recalculation when the fresh rate still exists.' );
 checkout_selection_assert( 450.0 === (float) ( $stored['selection_demo:courier']['cost'] ?? 0 ) && 300.0 !== (float) ( $stored['selection_demo:courier']['cost'] ?? 0 ) && isset( $stored['selection_demo:courier']['rate_meta']['final_price_rub'] ), 'Preserved courier selection must use fresh authoritative price and rate metadata.' );
+checkout_selection_assert( true === ( $stored['selection_demo:courier']['wdc_rate'] ?? false ) && 'platform' === (string) ( $stored['selection_demo:courier']['wdc_source'] ?? '' ), 'Fresh calculated WDC rate must retain ownership markers in the internal session snapshot.' );
+$public_courier_rate_object = $method->rates['selection_demo:courier'] ?? null;
+$public_courier_rate = $public_courier_rate_object instanceof WC_Shipping_Rate ? $public_courier_rate_object->get_meta_data() : array();
+checkout_selection_assert( ! array_key_exists( 'wdc_rate', $public_courier_rate ) && ! array_key_exists( 'wdc_source', $public_courier_rate ), 'Fresh public WC rate must reconcile without exposing internal ownership markers.' );
 $carrier->courier_price = 520;
 $method = checkout_selection_method( $carrier, $session );
 $method->calculate_shipping( checkout_selection_package( 7000 ) );

@@ -11,7 +11,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class AdminMenu {
 	public const MENU_SLUG = 'wdc-platform';
-	public const CAPABILITY = 'manage_woocommerce';
+	public const CAPABILITY = 'manage_options';
 	private const NONCE_ACTION = 'wdc_clear_delivery_quote_cache';
 	private const NONCE_NAME = 'wdc_clear_delivery_quote_cache_nonce';
 	private const POST_ACTION = 'clear_delivery_quote_cache';

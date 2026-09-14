@@ -25,7 +25,7 @@ function update_option( $key, $value, $autoload = false ) { $GLOBALS['options'][
 function delete_option( $key ) { unset( $GLOBALS['options'][$key] ); return true; }
 function current_datetime() { return new DateTimeImmutable( '2026-09-08 22:05:30', new DateTimeZone( 'Asia/Novosibirsk' ) ); }
 function wc_get_logger() { return new class { public function log( ...$args ) {} }; }
-function current_user_can( $cap ) { check( 'manage_woocommerce' === $cap, 'Capability contract' ); return $GLOBALS['allowed']; }
+function current_user_can( $cap ) { check( 'manage_options' === $cap, 'Capability contract' ); return $GLOBALS['allowed']; }
 function check_admin_referer( $action ) { if ( ! $GLOBALS['nonce_valid'] ) { throw new RuntimeException( 'nonce' ); } $GLOBALS['nonce_actions'][] = $action; }
 function check_ajax_referer( ...$args ) { check_admin_referer( $args[0] ); return true; }
 function wp_verify_nonce( ...$args ) { return $GLOBALS['nonce_valid']; }

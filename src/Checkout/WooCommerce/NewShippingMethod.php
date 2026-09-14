@@ -113,6 +113,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				$stored_rate = array_merge(
 					$mapped['meta_data'],
 					array(
+						'wdc_rate'                 => true,
+						'wdc_source'               => 'platform',
 						'rate_id'                  => $rate->rate_id,
 						'label'                    => $mapped['label'],
 						'cost'                     => $mapped['cost'],

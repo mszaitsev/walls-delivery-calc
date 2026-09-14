@@ -286,6 +286,31 @@ foreach ( array( '.wdc-calendar-day.is-working', '.wdc-calendar-day.is-non-worki
 	calendar_smoke_assert( str_contains( $calendar_css, $needle ), 'Calendar CSS must contain centered square day style: ' . $needle );
 }
 
+$render_month = new ReflectionMethod( CalendarAdminPage::class, 'render_month' );
+$month_starts = array(
+	array( 2027, 2, 1 ),
+	array( 2027, 3, 1 ),
+	array( 2028, 5, 1 ),
+	array( 2026, 9, 2 ),
+	array( 2026, 4, 3 ),
+	array( 2026, 2, 7 ),
+);
+foreach ( $month_starts as [ $year, $month, $expected_column ] ) {
+	$first_date = sprintf( '%04d-%02d-01', $year, $month );
+	$first_day  = new CalendarDay( $first_date, 1 === $expected_column, '', CalendarTypes::CARRIER_RU );
+
+	ob_start();
+	$render_month->invoke( $admin_page, CalendarTypes::CARRIER_RU, $year, $month, array( $first_date => $first_day ) );
+	$month_html = (string) ob_get_clean();
+
+	calendar_smoke_assert( str_contains( $month_html, '--wdc-month-start-column: ' . $expected_column ), 'Rendered month must place its first date in ISO weekday column ' . $expected_column . ': ' . $first_date );
+	calendar_smoke_assert( ! str_contains( $month_html, '--wdc-month-offset' ), 'Rendered month must not use a generated spacer offset: ' . $first_date );
+	calendar_smoke_assert( str_contains( $month_html, 'name="days[' . $first_date . '][working]"' ), 'Rendered month must preserve the first date value: ' . $first_date );
+	calendar_smoke_assert( 1 === preg_match( '/<label class="wdc-calendar-day ' . ( 1 === $expected_column ? 'is-working' : 'is-non-working' ) . '">\s*<input type="hidden" name="days\[' . preg_quote( $first_date, '/' ) . '\]\[working\]"/', $month_html ), 'Rendered month must preserve the first date working state: ' . $first_date );
+}
+calendar_smoke_assert( str_contains( $calendar_css, '.wdc-calendar-day:first-child' ) && str_contains( $calendar_css, 'grid-column-start: var(--wdc-month-start-column)' ), 'Calendar CSS must position the first real day directly in its ISO weekday column.' );
+calendar_smoke_assert( ! str_contains( $calendar_css, '.wdc-calendar-days::before' ) && ! str_contains( $calendar_css, 'span var(--wdc-month-offset)' ) && ! str_contains( $calendar_css, 'span 0' ), 'Calendar CSS must not create a phantom spacer grid item.' );
+
 $scheduler = new CalendarScheduler( new WdcActionScheduler( new Logger() ), $calendar, $timezone );
 foreach ( array(
 	array( '2026-09-01 00:00:00', '2026-09-07 09:00' ),
