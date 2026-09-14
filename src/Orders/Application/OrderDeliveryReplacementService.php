@@ -485,16 +485,16 @@ final class OrderDeliveryReplacementService {
 		);
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && $this->requires_pickup_point( $rate ) ) {
 			$values['set_shipping_country'] = $location_values['country'];
-			$values['set_shipping_state'] = (string) ( $pickup['region_name'] ?? $pickup['region'] ?? $location_values['state'] );
-			$values['set_shipping_city'] = (string) ( $pickup['city_name'] ?? $pickup['city'] ?? $location_values['city'] );
+			$values['set_shipping_state'] = $this->first_meaningful( $location_values['state'], $pickup['region_name'] ?? '', $pickup['region'] ?? '' );
+			$values['set_shipping_city'] = $this->first_meaningful( $location_values['city'], $pickup['city_name'] ?? '', $pickup['city'] ?? '' );
 			$values['set_shipping_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? $location_values['postcode'] );
 			$values['set_shipping_address_1'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
 			$values['set_shipping_address_2'] = '';
 		} elseif ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && array() !== $this->fixed_pickup_snapshot_from_rate( $rate ) ) {
 			$fixed_pickup = $this->fixed_pickup_snapshot_from_rate( $rate );
 			$values['set_shipping_country'] = $location_values['country'];
-			$values['set_shipping_state'] = (string) ( $fixed_pickup['region_name'] ?? $fixed_pickup['region'] ?? $location_values['state'] );
-			$values['set_shipping_city'] = (string) ( $fixed_pickup['city_name'] ?? $fixed_pickup['city'] ?? $location_values['city'] );
+			$values['set_shipping_state'] = $this->first_meaningful( $location_values['state'], $fixed_pickup['region_name'] ?? '', $fixed_pickup['region'] ?? '' );
+			$values['set_shipping_city'] = $this->first_meaningful( $location_values['city'], $fixed_pickup['city_name'] ?? '', $fixed_pickup['city'] ?? '' );
 			$values['set_shipping_postcode'] = (string) ( $fixed_pickup['point_postcode'] ?? $fixed_pickup['postcode'] ?? $location_values['postcode'] );
 			$values['set_shipping_address_1'] = (string) ( $fixed_pickup['point_address'] ?? $fixed_pickup['address'] ?? '' );
 			$values['set_shipping_address_2'] = '';

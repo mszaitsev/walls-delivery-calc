@@ -2,7 +2,7 @@
 
 `postal_code` is enrichment-owned and is never a GAR changed field. The retired location alias index is not generated, exported, created by the 1.0 schema, or used by runtime. Search uses `searchable_text` and canonical hierarchy fields; backup/restore and incremental apply swap locations only.
 
-Version: 1.0.20
+Version: 1.0.21
 
 The manual **Пересобрать display_name** job pages every active canonical location across all countries, including rows whose current `display_name` is empty. Its total uses the same active all-country dataset, and an unexpected end of pagination before `processed` reaches `total` fails the job instead of reporting a false success. Rebuild updates only `display_name`, `searchable_text`, and `updated_at` through `LocationRepository::update_display_fields()`.
 
@@ -56,6 +56,8 @@ Manual pickup points use the same textual locality identity as manual geography:
 Manual delivery geography reads active regions and locations from the shared `wp_wdc_locations` table but does not write to it. The region identity is textual `country_code + region_name`. The manual city identity is textual `country_code + resolved_place_name() + region_name`, where `resolved_place_name()` prefers `place_name`, then `settlement_name`, then `city_name` from the existing `Location` value object. Manual geography persistence deliberately avoids `wp_wdc_locations.id` as permanent identity because the location table may be rebuilt.
 
 Locations, delivery codes, FIAS/GAR import, postcode enrichment, pickup repositories, and pickup REST live under `src/Locations`, `src/Pickup`, and carrier pickup namespaces.
+
+Yandex v2 manual location overrides keep source and target geography separate. An absent Yandex region remains empty in the stored source identity, while the selected canonical WDC location supplies `wdc_region_name` and display data. Complete region/locality identities keep logical reuse across geo-id changes; an empty-region identity is exact to `yandex_geo_id + normalized locality`, so same-named rows with another geo id can coexist and cannot inherit or deactivate each other.
 
 Generic location services own normalized lookup. Carrier pickup services own carrier import formats and carrier pickup identifiers. Checkout and admin code should consume normalized search results instead of parsing carrier payloads directly.
 

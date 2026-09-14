@@ -61,7 +61,7 @@ final class YandexLocationManualOverrideV2Repository {
 	public function find_active_for_geo_identity( int $yandex_geo_id, string $yandex_region, string $yandex_locality ): array {
 		$region_norm = $this->normalize_region( $yandex_region );
 		$locality_norm = $this->normalize_locality( $yandex_locality );
-		if ( $yandex_geo_id <= 0 || '' === $region_norm || '' === $locality_norm ) {
+		if ( $yandex_geo_id <= 0 || '' === $locality_norm ) {
 			return array();
 		}
 		return $this->find_active_rows( array( 'yandex_geo_id' => $yandex_geo_id, 'yandex_region_norm' => $region_norm, 'yandex_locality_norm' => $locality_norm ) );
@@ -114,10 +114,13 @@ final class YandexLocationManualOverrideV2Repository {
 		$yandex_locality = trim( $yandex_locality );
 		$region_norm = $this->normalize_region( $yandex_region );
 		$locality_norm = $this->normalize_locality( $yandex_locality );
-		if ( $yandex_geo_id <= 0 || $location_id <= 0 || '' === $region_norm || '' === $locality_norm ) {
+		if ( $yandex_geo_id <= 0 || $location_id <= 0 || '' === $locality_norm ) {
 			return array( 'saved' => 0, 'id' => 0 );
 		}
 		$location = $this->find_location( $location_id );
+		if ( array() === $location ) {
+			return array( 'saved' => 0, 'id' => 0 );
+		}
 		$now = $this->now();
 		$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : null;
 		$row = array(
@@ -136,7 +139,7 @@ final class YandexLocationManualOverrideV2Repository {
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
-		$this->deactivate_active_identity( $region_norm, $locality_norm );
+		$this->deactivate_active_identity( $yandex_geo_id, $region_norm, $locality_norm );
 
 		if ( $this->has_test_rows() ) {
 			$row['id'] = count( $this->wpdb->yandex_location_manual_overrides_v2 ) + 1;
@@ -242,15 +245,20 @@ final class YandexLocationManualOverrideV2Repository {
 		return is_array( $rows ) ? $rows : array();
 	}
 
-	private function deactivate_active_identity( string $region_norm, string $locality_norm ): void {
+	private function deactivate_active_identity( int $yandex_geo_id, string $region_norm, string $locality_norm ): void {
 		$now = $this->now();
+		$exact_geo = '' === $region_norm;
 		if ( $this->has_test_rows() ) {
 			foreach ( $this->wpdb->yandex_location_manual_overrides_v2 as $index => $row ) {
-				if ( 'active' === (string) ( $row['status'] ?? '' ) && (string) ( $row['yandex_region_norm'] ?? '' ) === $region_norm && (string) ( $row['yandex_locality_norm'] ?? '' ) === $locality_norm ) {
+				if ( 'active' === (string) ( $row['status'] ?? '' ) && (string) ( $row['yandex_region_norm'] ?? '' ) === $region_norm && (string) ( $row['yandex_locality_norm'] ?? '' ) === $locality_norm && ( ! $exact_geo || (int) ( $row['yandex_geo_id'] ?? 0 ) === $yandex_geo_id ) ) {
 					$this->wpdb->yandex_location_manual_overrides_v2[ $index ]['status'] = 'inactive';
 					$this->wpdb->yandex_location_manual_overrides_v2[ $index ]['updated_at'] = $now;
 				}
 			}
+			return;
+		}
+		if ( $exact_geo ) {
+			$this->wpdb->query( $this->wpdb->prepare( 'UPDATE ' . $this->table_name() . ' SET status = %s, updated_at = %s WHERE status = %s AND yandex_geo_id = %d AND yandex_region_norm = %s AND yandex_locality_norm = %s', 'inactive', $now, 'active', $yandex_geo_id, $region_norm, $locality_norm ) );
 			return;
 		}
 		$this->wpdb->query( $this->wpdb->prepare( 'UPDATE ' . $this->table_name() . ' SET status = %s, updated_at = %s WHERE status = %s AND yandex_region_norm = %s AND yandex_locality_norm = %s', 'inactive', $now, 'active', $region_norm, $locality_norm ) );

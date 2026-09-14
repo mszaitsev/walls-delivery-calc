@@ -220,6 +220,7 @@ $GLOBALS['wpdb']->wdc_locations = array(
 	$location( 1340, 'Москва', 'Москва', '', 55.7558, 37.6173, '', 'г' ),
 	$location( 1341, 'Москва', 'Щербинка', '', 55.5001, 37.5600, '', 'г' ),
 	$location( 1342, 'Московская область', '', 'Щербинка', 55.5010, 37.5600, 'Щербинка', '', 'д', 'д' ),
+	$location( 1350, 'Краснодарский край', '', 'Красная Поляна', 43.6800, 40.2050, 'Красная Поляна', '', 'с', 'с' ),
 );
 $GLOBALS['wpdb']->yandex_region_mapping_v2 = array();
 $region_repository = new YandexRegionMappingV2Repository( $GLOBALS['wpdb'] );
@@ -446,6 +447,37 @@ yd_location_mapping_v2_assert( 48 === $stats['total'] && 33 === $stats['mapped']
 
 $manual_mapper = new YandexLocationMapperV2Service( $repository, $GLOBALS['wpdb'], null, $region_repository, $manual_override_repository );
 $GLOBALS['wpdb']->yandex_location_manual_overrides_v2 = array();
+
+$missing_region_report = $manual_override_repository->upsert_active_override( 210263, '', 'Красная Поляна х', 1350, 'missing source region' );
+$missing_region_active = $manual_override_repository->find_active_for_geo_identity( 210263, '', 'Красная Поляна х' );
+yd_location_mapping_v2_assert( 1 === (int) ( $missing_region_report['saved'] ?? 0 ) && 1 === count( $missing_region_active ), 'Manual override must allow an empty Yandex source region when geo id, locality, and target WDC location are valid.' );
+yd_location_mapping_v2_assert( '' === (string) ( $missing_region_active[0]['yandex_region'] ?? 'missing' ) && '' === (string) ( $missing_region_active[0]['yandex_region_norm'] ?? 'missing' ) && 'Красная Поляна х' === (string) ( $missing_region_active[0]['yandex_locality'] ?? '' ) && 1350 === (int) ( $missing_region_active[0]['location_id'] ?? 0 ) && 'Краснодарский край' === (string) ( $missing_region_active[0]['wdc_region_name'] ?? '' ) && str_contains( (string) ( $missing_region_active[0]['wdc_display_name'] ?? '' ), 'Красная Поляна' ), 'Missing-region override must keep Yandex source identity truthful and persist canonical target WDC geography.' );
+$missing_region_cache = $manual_override_repository->load_active_overrides_cache();
+yd_location_mapping_v2_assert( isset( $missing_region_cache['by_geo_id'][210263] ) && array() === $missing_region_cache['by_identity'], 'Incomplete source identity must be indexed only by geo id and must not become a reusable logical locality identity.' );
+
+$missing_region_mapper = new YandexLocationMapperV2Service( $repository, $GLOBALS['wpdb'], null, $region_repository, $manual_override_repository );
+$missing_region_rows = $missing_region_mapper->map_geo_row( $geo( 210263, '', 'Красная Поляна х', 43.6800, 40.2050 ) );
+$missing_region_raw = json_decode( (string) $missing_region_rows[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 'mapped' === (string) ( $missing_region_rows[0]['status'] ?? '' ) && 1350 === (int) ( $missing_region_rows[0]['location_id'] ?? 0 ) && true === (bool) ( $missing_region_raw['manual_override'] ?? false ) && 'manual_override' === (string) ( $missing_region_raw['mapping_source'] ?? '' ) && 'geo_identity' === (string) ( $missing_region_raw['manual_override_match'] ?? '' ) && 'Краснодарский край' === (string) ( $missing_region_raw['wdc_region_name'] ?? '' ), 'Mapper must apply an exact missing-region override before automatic region mapping.' );
+
+$same_geo_other_locality_rows = $missing_region_mapper->map_geo_row( $geo( 210263, '', 'Другая Поляна х', 43.6800, 40.2050 ) );
+$same_geo_other_locality_raw = json_decode( (string) $same_geo_other_locality_rows[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 'mapped' !== (string) ( $same_geo_other_locality_rows[0]['status'] ?? '' ) && true === (bool) ( $same_geo_other_locality_raw['manual_override_identity_mismatch'] ?? false ), 'Missing-region override must not apply when the same geo id is reused for another locality.' );
+$other_geo_same_locality_rows = $missing_region_mapper->map_geo_row( $geo( 999999, '', 'Красная Поляна х', 43.6800, 40.2050 ) );
+$other_geo_same_locality_raw = json_decode( (string) $other_geo_same_locality_rows[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 'mapped' !== (string) ( $other_geo_same_locality_rows[0]['status'] ?? '' ) && empty( $other_geo_same_locality_raw['manual_override'] ), 'Missing-region override must not be reused by another geo id with the same locality.' );
+
+$second_missing_region = $manual_override_repository->upsert_active_override( 999999, '', 'Красная Поляна х', 1160, 'second missing source region' );
+$updated_missing_region = $manual_override_repository->upsert_active_override( 210263, '', 'Красная Поляна х', 1350, 'updated missing source region' );
+$active_missing_region_rows = array_values( array_filter( $manual_override_repository->list_active( 100 ), static fn( array $row ): bool => '' === (string) ( $row['yandex_region_norm'] ?? '' ) && (string) ( $row['yandex_locality_norm'] ?? '' ) === $manual_override_repository->normalize_locality( 'Красная Поляна х' ) ) );
+$active_missing_region_geo_ids = array_map( static fn( array $row ): int => (int) ( $row['yandex_geo_id'] ?? 0 ), $active_missing_region_rows );
+sort( $active_missing_region_geo_ids );
+yd_location_mapping_v2_assert( 1 === (int) ( $second_missing_region['saved'] ?? 0 ) && 1 === (int) ( $updated_missing_region['saved'] ?? 0 ) && array( 210263, 999999 ) === $active_missing_region_geo_ids, 'Missing-region overrides with the same locality must coexist by geo id, and updating one must not deactivate the other.' );
+
+yd_location_mapping_v2_assert( 0 === (int) ( $manual_override_repository->upsert_active_override( 210264, '', 'Красная Поляна х', 0 )['saved'] ?? 0 ), 'Manual override must reject location id zero.' );
+yd_location_mapping_v2_assert( 0 === (int) ( $manual_override_repository->upsert_active_override( 210264, '', 'Красная Поляна х', 999999 )['saved'] ?? 0 ), 'Manual override must reject a nonexistent target WDC location.' );
+yd_location_mapping_v2_assert( 0 === (int) ( $manual_override_repository->upsert_active_override( 210264, '', '   ', 1350 )['saved'] ?? 0 ), 'Manual override must reject an empty normalized locality.' );
+
 $manual_override_repository->upsert_active_override( 9000, 'Новосибирская область', 'Ручной город', 10, 'geo identity' );
 $manual_override_cache = $manual_override_repository->load_active_overrides_cache();
 $manual_override_identity_key = $manual_override_repository->normalize_region( 'Новосибирская область' ) . '|' . $manual_override_repository->normalize_locality( 'Ручной город' );
@@ -486,7 +518,9 @@ $manual_rows = $manual_mapper->map_geo_row( $geo( 9006, 'Новосибирск�
 $manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
 yd_location_mapping_v2_assert( 'needs_review' === $manual_rows[0]['status'] && 'manual_override_identity_ambiguous' === $manual_raw['reason'], 'Ambiguous logical manual override identity must not auto-apply.' );
 
-$manual_override_repository->upsert_active_override( 9007, 'Новосибирская область', 'Битый город', 999999, 'missing location' );
+$missing_location_report = $manual_override_repository->upsert_active_override( 9007, 'Новосибирская область', 'Битый город', 999999, 'missing location' );
+yd_location_mapping_v2_assert( 0 === (int) ( $missing_location_report['saved'] ?? 0 ), 'Repository must reject a manual override whose target WDC location does not exist.' );
+$GLOBALS['wpdb']->yandex_location_manual_overrides_v2[] = array( 'id' => 9907, 'yandex_geo_id' => 9007, 'yandex_region' => 'Новосибирская область', 'yandex_region_norm' => $manual_override_repository->normalize_region( 'Новосибирская область' ), 'yandex_locality' => 'Битый город', 'yandex_locality_norm' => $manual_override_repository->normalize_locality( 'Битый город' ), 'location_id' => 999999, 'status' => 'active', 'updated_at' => '2026-06-26 12:00:00' );
 $manual_mapper = new YandexLocationMapperV2Service( $repository, $GLOBALS['wpdb'], null, $region_repository, $manual_override_repository );
 $manual_rows = $manual_mapper->map_geo_row( $geo( 9007, 'Новосибирская область', 'Битый город', 55.0302, 82.9204 ) );
 $manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
