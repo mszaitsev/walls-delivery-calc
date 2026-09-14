@@ -54,9 +54,8 @@
 	text-align: center;
 }
 
-.wdc-calendar-days::before {
-	content: "";
-	grid-column: span var(--wdc-month-offset);
+.wdc-calendar-day:first-child {
+	grid-column-start: var(--wdc-month-start-column);
 }
 
 .wdc-calendar-day {

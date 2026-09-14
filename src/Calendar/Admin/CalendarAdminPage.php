@@ -113,7 +113,7 @@ final class CalendarAdminPage {
 					<span><?php echo esc_html( $weekday ); ?></span>
 				<?php endforeach; ?>
 			</div>
-			<div class="wdc-calendar-days" style="--wdc-month-offset: <?php echo esc_attr( (string) ( (int) $start->format( 'N' ) - 1 ) ); ?>">
+			<div class="wdc-calendar-days" style="--wdc-month-start-column: <?php echo esc_attr( $start->format( 'N' ) ); ?>">
 				<?php foreach ( $period as $date ) : ?>
 					<?php
 					$date_value = $date->format( 'Y-m-d' );
