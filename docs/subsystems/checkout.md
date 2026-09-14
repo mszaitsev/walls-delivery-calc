@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 1.0.21
+Version: 1.0.22
 
 The WooCommerce checkout boundary maps the current package and canonical destination into a `QuoteRequest`, runs enabled carriers, applies rules and delivery-service post-processing, then publishes only fresh WDC rates. Package mapping is read-only: city selection/profile reconciliation own session mutations, and an active canonical location row is authoritative for identity and coordinates.
 
@@ -25,6 +25,12 @@ Carrier adapters return the raw carrier `DateRange`. `DeliveryLeadTimeNormalizer
 The current calculation day is not counted for shop processing, and the handoff day is not counted when carrier working days are converted. Rules run only after the base duration is normalized into calendar days. The planned date is calculated after rules from the final minimum delivery-days boundary, so checkout comments and order metadata stay aligned with rule changes.
 
 ## CDEK EAEU Availability
+
+For an active authoritative RU canonical city whose own `fias_id` equals its non-empty `city_fias_id`, destination pickup discovery may expand the resolved primary CDEK city to CDEK cities with the exact normalized `country_code + region_code + sub_region` coverage key. The primary city still comes only from `CdekLocationResolver`; `sub_region` never identifies it. Descendant, manual, inactive, non-RU, and incomplete canonical locations remain primary-only.
+
+The primary CDEK city anchors coverage and map reopening. A server-validated selected pickup point supplies the effective CDEK city for pickup tariff calculation through its existing `cdek_city_code`; courier delivery always uses the primary destination. Child points display `Стоимость будет рассчитана заново (особенность географии СДЭК)` and selection triggers the normal WooCommerce checkout recalculation, including price, days, planned comment, and totals.
+
+CDEK region directories are loaded lazily only when coverage is needed, paginated in bounded 1000-row pages, indexed by normalized subregion, and cached per environment/country/region until 23:59:59 of the current day. A failed or malformed page is never cached partially and falls back to primary-only behavior. The unified delivery-cache clear removes these transients together with existing quote, city, delivery-point, and WooCommerce package caches.
 
 The `cdek` delivery service owns CDEK availability for `RU`, `AM`, `BY`, `KZ`, and `KG`. Administrators configure those countries with the existing service-country checkboxes, persisted in `wdc_delivery_service_countries`; the global service enabled flag remains independent. Checkout must not create a `cdek_international` service or bypass the delivery-service country selection.
 

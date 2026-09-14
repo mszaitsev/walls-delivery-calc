@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Orders\Application;
 
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
@@ -242,8 +243,27 @@ final class OrderQuoteRequestMapper {
 				OzonDeliverySettings::PICKUP_FAMILY => $ozon_selection,
 			);
 		}
+		$cdek_selection = $this->cdek_pickup_selection( $selected_pickup_point );
+		if ( array() !== $cdek_selection ) {
+			$context['pickup_selection'] = $cdek_selection;
+			$context['pickup_selections'] = array(
+				CdekSettings::CARRIER_KEY . ':pickup' => $cdek_selection,
+			);
+		}
 
 		return $context;
+	}
+
+	/** @param array<string,mixed> $selected_pickup_point */
+	private function cdek_pickup_selection( array $selected_pickup_point ): array {
+		$snapshot = is_array( $selected_pickup_point['snapshot'] ?? null ) ? $selected_pickup_point['snapshot'] : array();
+		$carrier = (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? $snapshot['carrier_key'] ?? '' );
+		$family = (string) ( $selected_pickup_point['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+		if ( CdekSettings::CARRIER_KEY !== $carrier || CdekSettings::CARRIER_KEY . ':pickup' !== $family ) {
+			return array();
+		}
+
+		return $selected_pickup_point;
 	}
 
 	/** @param array<string,mixed>|null $selected_location */

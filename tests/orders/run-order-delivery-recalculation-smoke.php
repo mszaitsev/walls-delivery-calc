@@ -1382,6 +1382,28 @@ $yandex_selection_request = ( new OrderQuoteRequestMapper() )->map(
 recalc_smoke_assert( 'YANDEX-PVZ-1' === (string) ( $yandex_selection_request->customer_context['pickup_selection']['platform_station_id'] ?? '' ), 'Yandex selected pickup must be passed to the checkout-compatible pickup_selection context.' );
 recalc_smoke_assert( 'YANDEX-PVZ-1' === (string) ( $yandex_selection_request->customer_context['pickup_selections']['yandex_delivery:pickup']['platform_station_id'] ?? '' ), 'Yandex selected pickup must be passed in its family pickup_selections bucket.' );
 
+$cdek_admin_fingerprint = 'country=RU|location_id=82077';
+$cdek_admin_mapper = new OrderQuoteRequestMapper(
+	wdc_recalc_location_repository(
+		array( wdc_recalc_location_row( 82077, array( 'city_name' => 'Балашиха', 'place_name' => 'Балашиха', 'display_name' => 'Московская область, г Балашиха', 'region_name' => 'Московская область', 'fias_id' => '27c5', 'city_fias_id' => '27c5' ) ) )
+	)
+);
+$cdek_admin_selection_request = $cdek_admin_mapper->map(
+	$order,
+	array( 'id' => 82077, 'location_id' => 82077, 'country_code' => 'RU', 'city_name' => 'Балашиха', 'place_name' => 'Балашиха', 'region_name' => 'Московская область', 'fias_id' => '27c5' ),
+	array(
+		'carrier_key' => 'cdek',
+		'service_key' => 'cdek',
+		'pickup_family' => 'cdek:pickup',
+		'point_code' => 'ZHLD25',
+		'cdek_city_code' => 391,
+		'provider_destination_fingerprint' => $cdek_admin_fingerprint,
+		'snapshot' => array( 'carrier_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_code' => 'ZHLD25', 'cdek_city_code' => 391, 'provider_destination_fingerprint' => $cdek_admin_fingerprint ),
+	)
+);
+recalc_smoke_assert( 82077 === (int) ( $cdek_admin_selection_request->customer_context['location_id'] ?? 0 ) && 'ZHLD25' === (string) ( $cdek_admin_selection_request->customer_context['pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'CDEK order-admin mapper must preserve canonical destination identity and the valid selected child point for common recalculation.' );
+recalc_smoke_assert( $cdek_admin_fingerprint === (string) ( $cdek_admin_selection_request->customer_context['pickup_selections']['cdek:pickup']['provider_destination_fingerprint'] ?? '' ), 'CDEK order-admin mapper must preserve the provider-owned destination fingerprint used by carrier validation.' );
+
 $location_lookup_repository = wdc_recalc_location_repository(
 	array(
 		wdc_recalc_location_row( 92468, array( 'fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'city_fias_id' => '' ) ),

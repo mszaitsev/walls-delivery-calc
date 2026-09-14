@@ -1192,6 +1192,6 @@ cdek_tariff_assert( array() === $error_cached_first_cdek && array() === $error_c
 $serialized_error_debug = json_encode( array( $details, $error_log ), JSON_UNESCAPED_UNICODE );
 cdek_tariff_assert( is_string( $serialized_error_debug ) && ! str_contains( $serialized_error_debug, 'runtime-token' ) && ! str_contains( $serialized_error_debug, 'secure-password' ) && ! str_contains( $serialized_error_debug, 'account-id' ), 'CDEK tarifflist diagnostics must not expose token, secret, or account.' );
 $cache_manager_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Cache/DeliveryQuoteCacheManager.php' ) ?: '';
-cdek_tariff_assert( str_contains( $cache_manager_source, 'wdc_cdek_city_' ) && str_contains( $cache_manager_source, 'wdc_cdek_deliverypoints_' ) && ! str_contains( $cache_manager_source, 'wdc_cdek_oauth_' ), 'Delivery quote cache reset must include CDEK quote/location point caches without clearing CDEK token cache.' );
+cdek_tariff_assert( str_contains( $cache_manager_source, 'wdc_cdek_city_' ) && str_contains( $cache_manager_source, 'wdc_cdek_deliverypoints_' ) && str_contains( $cache_manager_source, 'wdc_cdek_region_directory_' ) && ! str_contains( $cache_manager_source, 'wdc_cdek_oauth_' ), 'Delivery quote cache reset must include CDEK city/point/region caches without clearing CDEK token cache.' );
 
 echo "CDEK tariff calculation smoke test passed.\n";

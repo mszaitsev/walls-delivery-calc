@@ -632,21 +632,33 @@ final class CheckoutPickupPointRestController {
 		if ( '' === $code ) {
 			return array();
 		}
-		foreach ( $this->cdek_points->pointsByCityCode( $destination['city_code'], array( 'country_code' => $destination['country_code'], 'handout_only' => true ) ) as $candidate ) {
+		$location = array(
+			'location_id' => (int) ( $destination['location_id'] ?? 0 ),
+			'city_code' => $destination['city_code'],
+			'cdek_city_code' => $destination['city_code'],
+			'country_code' => $destination['country_code'],
+			'city_name' => (string) ( $destination['city_name'] ?? '' ),
+			'region_name' => (string) ( $destination['region_name'] ?? '' ),
+			'fias_id' => (string) ( $destination['fias_id'] ?? '' ),
+		);
+		$points = (int) ( $destination['location_id'] ?? 0 ) > 0
+			? $this->cdek_points->pointsForLocation( $location, array( 'country_code' => $destination['country_code'], 'handout_only' => true ) )
+			: $this->cdek_points->pointsByCityCode( $destination['city_code'], array( 'country_code' => $destination['country_code'], 'handout_only' => true ) );
+		foreach ( $points as $candidate ) {
 			if ( $code === (string) ( $candidate['point_code'] ?? '' ) ) {
 				$point_country = strtoupper( trim( (string) ( $candidate['country_code'] ?? '' ) ) );
 				$point_city = (int) ( $candidate['cdek_city_code'] ?? 0 );
 				if ( '' !== $point_country && $point_country !== $destination['country_code'] ) {
 					return array();
 				}
-				if ( $point_city > 0 && $point_city !== $destination['city_code'] ) {
+				if ( $point_city <= 0 ) {
+					return array();
+				}
+				if ( (int) ( $destination['location_id'] ?? 0 ) <= 0 && $point_city !== $destination['city_code'] ) {
 					return array();
 				}
 				if ( '' === $point_country ) {
 					$candidate['country_code'] = $destination['country_code'];
-				}
-				if ( $point_city <= 0 ) {
-					$candidate['cdek_city_code'] = $destination['city_code'];
 				}
 				return $candidate;
 			}
@@ -711,6 +723,8 @@ final class CheckoutPickupPointRestController {
 			'country_code' => (string) ( $point['country_code'] ?? '' ),
 			'cdek_city_code' => (int) ( $point['cdek_city_code'] ?? 0 ),
 			'is_handout' => array_key_exists( 'is_handout', $point ) && filter_var( $point['is_handout'], FILTER_VALIDATE_BOOLEAN ),
+			'requires_destination_requote' => ! empty( $point['requires_destination_requote'] ),
+			'presentation_comment' => (string) ( $point['presentation_comment'] ?? '' ),
 			'raw_sanitized' => is_array( $point['raw_sanitized'] ?? null ) ? $point['raw_sanitized'] : ( is_array( $point['raw'] ?? null ) ? $point['raw'] : array() ),
 		);
 		if ( '' === $snapshot['display_title'] ) {
@@ -750,6 +764,8 @@ final class CheckoutPickupPointRestController {
 			'country_code' => $snapshot['country_code'],
 			'cdek_city_code' => $snapshot['cdek_city_code'],
 			'is_handout' => $snapshot['is_handout'],
+			'requires_destination_requote' => $snapshot['requires_destination_requote'],
+			'presentation_comment' => $snapshot['presentation_comment'],
 			'postcode' => $snapshot['postcode'],
 			'address' => $snapshot['address'],
 			'lat' => $snapshot['lat'],
@@ -1281,7 +1297,7 @@ final class CheckoutPickupPointRestController {
 
 	/**
 	 * @param array<string,mixed> $rate
-	 * @return array{country_code:string,city_code:int}
+	 * @return array<string,mixed>
 	 */
 	private function cdek_expected_destination( array $rate ): array {
 		$meta = $this->rate_meta( $rate );
@@ -1308,6 +1324,8 @@ final class CheckoutPickupPointRestController {
 			$country_code = 'RU';
 		}
 		$city_code = $this->first_positive_int(
+			$location['cdek_primary_city_code'] ?? null,
+			$meta['cdek_primary_city_code'] ?? null,
 			$location['cdek_to_city_code'] ?? null,
 			$api['cdek_to_city_code'] ?? null,
 			$meta['cdek_to_city_code'] ?? null,
@@ -1316,7 +1334,14 @@ final class CheckoutPickupPointRestController {
 			$city_context['city_code'] ?? null
 		);
 
-		return array( 'country_code' => $country_code, 'city_code' => $city_code );
+		return array(
+			'country_code' => $country_code,
+			'city_code' => $city_code,
+			'city_name' => (string) ( $location['cdek_primary_city_name'] ?? $location['cdek_to_city_name'] ?? '' ),
+			'region_name' => (string) ( $city_context['region_name'] ?? '' ),
+			'fias_id' => (string) ( $city_context['fias_id'] ?? $city_context['selected_location_fias_id'] ?? '' ),
+			'location_id' => $this->first_positive_int( $location['wdc_location_id'] ?? null, $meta['location_id'] ?? null, $city_context['location_id'] ?? null, $city_context['selected_location_id'] ?? null ),
+		);
 	}
 
 	/**

@@ -1,5 +1,5 @@
 Repository file tree
-Generated for Walls Delivery Calc 1.0.8
+Generated for Walls Delivery Calc 1.0.22
 
 .
 |-- tree.txt
@@ -522,6 +522,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- src/Packaging/PackagingResult.php
 |-- src/Packaging/PackagingWeightCalculator.php
 |-- src/Pickup/Cdek/CdekDeliveryPointService.php
+|-- src/Pickup/Cdek/CdekPickupCoverageService.php
 |-- src/Pickup/Presentation/PickupPointCardRenderer.php
 |-- src/Pickup/Presentation/PickupPointPresentationResolver.php
 |-- src/Pickup/Providers/CarrierPickupPointProviderInterface.php
@@ -721,6 +722,7 @@ Generated for Walls Delivery Calc 1.0.8
 |-- tests/cdek/run-cdek-foundation-smoke.php
 |-- tests/cdek/run-cdek-order-creation-smoke.php
 |-- tests/cdek/run-cdek-pickup-points-smoke.php
+|-- tests/cdek/run-cdek-pickup-coverage-smoke.php
 |-- tests/cdek/run-cdek-tariff-calculation-smoke.php
 |-- tests/cdek/run-cdek-tariffs-sync-smoke.php
 |-- tests/checkout/run-checkout-address-autocomplete-browser-smoke.js

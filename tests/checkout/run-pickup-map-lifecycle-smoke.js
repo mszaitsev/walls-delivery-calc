@@ -357,6 +357,74 @@ function mapZoomWarning(harness) {
 	return harness.mapPane.children.find((child) => child.className === 'wdc-pickup-map__zoom-warning') || null;
 }
 
+function cdekPoint(code, uuid, cityCode, name) {
+	return {
+		id: 'cdek:' + code,
+		carrier_key: 'cdek',
+		pickup_family: 'cdek:pickup',
+		point_code: code,
+		cdek_code: code,
+		cdek_uuid: uuid,
+		postcode: '143982',
+		cdek_city_code: cityCode,
+		point_name: name,
+		address: 'Адрес ' + code,
+		lat: 55.75,
+		lng: 37.61
+	};
+}
+
+async function cdekPostcodeCollisionKeepsStrongIdentity() {
+	const oldZhld25 = cdekPoint('ZHLD25', 'uuid-zhld25', 391, 'Старое представление ZHLD25');
+	const blsh75 = cdekPoint('BLSH75', 'uuid-blsh75', 1097, 'BLSH75');
+	const refreshedZhld25 = cdekPoint('ZHLD25', 'uuid-zhld25', 391, 'Обновлённое представление ZHLD25');
+	const api = {
+		context: {
+			carrier: 'cdek',
+			pickup_family: 'cdek:pickup',
+			cdek_city_code: 1097,
+			selectedPoint: oldZhld25,
+			reload_on_viewport_change: true
+		},
+		points: () => Promise.resolve([blsh75, refreshedZhld25]),
+		addressSearch: () => Promise.resolve({
+			address: { value: 'Балашиха', lat: 55.75, lng: 37.61 },
+			points: [blsh75, Object.assign({}, refreshedZhld25, { point_name: 'Повторно обновлённый ZHLD25' })]
+		})
+	};
+	const harness = createHarness(api);
+	await wait(120);
+	assert.strictEqual(harness.map.selected().point_code, 'ZHLD25', 'CDEK ZHLD25 must not match earlier BLSH75 solely by shared postcode 143982.');
+	assert.strictEqual(harness.map.selected().point_name, 'Обновлённое представление ZHLD25', 'same CDEK UUID refresh must replace the selected object with the current API object.');
+	let markerRender = harness.calls.filter((call) => call[0] === 'renderMarkers').pop();
+	assert.strictEqual(markerRender[2].activePointId, 'cdek:ZHLD25', 'active marker must remain ZHLD25 after postcode-collision render.');
+	await harness.map.search('Балашиха');
+	await wait(20);
+	assert.strictEqual(harness.map.selected().point_code, 'ZHLD25', 'repeated CDEK points refresh must keep committed ZHLD25.');
+	assert.strictEqual(harness.map.selected().point_name, 'Повторно обновлённый ZHLD25', 'repeated refresh must update the committed object without losing identity.');
+	markerRender = harness.calls.filter((call) => call[0] === 'renderMarkers').pop();
+	assert.strictEqual(markerRender[2].activePointId, 'cdek:ZHLD25', 'preview and active marker must remain ZHLD25 after repeated refresh.');
+	harness.map.destroy();
+
+	const reverseHarness = createHarness({
+		context: { carrier: 'cdek', pickup_family: 'cdek:pickup', cdek_city_code: 1097, selectedPoint: blsh75 },
+		points: () => Promise.resolve([refreshedZhld25, blsh75])
+	});
+	await wait(120);
+	assert.strictEqual(reverseHarness.map.selected().point_code, 'BLSH75', 'selected BLSH75 must not match earlier ZHLD25 solely by shared postcode 143982.');
+	reverseHarness.map.destroy();
+
+	const codeFallbackSelection = Object.assign({}, oldZhld25);
+	delete codeFallbackSelection.cdek_uuid;
+	const codeFallbackHarness = createHarness({
+		context: { carrier: 'cdek', pickup_family: 'cdek:pickup', cdek_city_code: 1097, selectedPoint: codeFallbackSelection },
+		points: () => Promise.resolve([blsh75, Object.assign({}, refreshedZhld25, { cdek_uuid: 'uuid-zhld25-new' })])
+	});
+	await wait(120);
+	assert.strictEqual(codeFallbackHarness.map.selected().point_code, 'ZHLD25', 'CDEK point_code/cdek_code must preserve selection when UUID is absent or changes.');
+	codeFallbackHarness.map.destroy();
+}
+
 function abortableDeferred(signal) {
 	const pending = deferred();
 	if (signal && signal.addEventListener) {
@@ -2463,6 +2531,7 @@ async function run() {
 	await fixedDatasetSearchUsesAddressOriginWithoutReloadingPoints();
 	await dynamicDatasetSearchReloadsByAddressBounds();
 	await presentationCommentStaysSeparateWhenDistinct();
+	await cdekPostcodeCollisionKeepsStrongIdentity();
 	await viewportFilteredFixedDatasetUpdatesListWithoutLoader();
 	await genericFixedDatasetSidebarFollowsViewport();
 	console.log('Pickup map lifecycle smoke OK');

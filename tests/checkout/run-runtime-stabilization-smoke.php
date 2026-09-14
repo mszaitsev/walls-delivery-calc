@@ -1211,6 +1211,8 @@ $GLOBALS['wpdb']->options = array(
 	'_transient_timeout_wdc_rp_domestic_aaa' => 123,
 	'_transient_wdc_rp_tariff_bbb' => 'international',
 	'_transient_timeout_wdc_rp_tariff_bbb' => 456,
+	'_transient_wdc_cdek_region_directory_region9' => array( 'coverage' ),
+	'_transient_timeout_wdc_cdek_region_directory_region9' => 999,
 	'_transient_wdc_pickup_search_ccc' => 'pickup',
 	'_transient_timeout_wdc_pickup_search_ccc' => 789,
 	'_transient_dadata_ddd' => 'dadata',
@@ -1218,8 +1220,9 @@ $GLOBALS['wpdb']->options = array(
 );
 $quote_cache_manager = new DeliveryQuoteCacheManager( $quote_cache, $GLOBALS['wpdb'] );
 $deleted_quote_cache = $quote_cache_manager->clear_all_quote_cache();
-runtime_smoke_assert( 2 === $deleted_quote_cache, 'DeliveryQuoteCacheManager must return the number of deleted quote/tariff transient keys.' );
+runtime_smoke_assert( 3 === $deleted_quote_cache, 'DeliveryQuoteCacheManager must return the number of deleted quote/tariff/geography transient keys.' );
 runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_aaa', $GLOBALS['wpdb']->options ) && ! array_key_exists( '_transient_wdc_rp_tariff_bbb', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must delete WDC Russian Post quote/tariff cache transients.' );
+runtime_smoke_assert( ! array_key_exists( '_transient_wdc_cdek_region_directory_region9', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must delete CDEK region directory transients.' );
 runtime_smoke_assert( array_key_exists( '_transient_wdc_pickup_search_ccc', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_dadata_ddd', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_foreign_quote', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must leave pickup, DaData, and foreign transients untouched.' );
 runtime_smoke_assert( null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'DeliveryQuoteCacheManager must invalidate runtime quote memory namespace.' );
 $GLOBALS['wdc_test_actions'] = array();
