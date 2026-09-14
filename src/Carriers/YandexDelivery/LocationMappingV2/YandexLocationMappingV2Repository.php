@@ -177,6 +177,61 @@ final class YandexLocationMappingV2Repository {
 		return $this->search( array( 'location_id' => $location_id, 'limit' => 500, 'active' => null ) );
 	}
 
+	/** @param array<int,array<string,mixed>> $rows */
+	public function replace_geo_rows( int $geo_id, array $rows ): bool {
+		$geo_id = max( 0, $geo_id );
+		$normalized_rows = array();
+		foreach ( $rows as $row ) {
+			$normalized = is_array( $row ) ? $this->normalize_row( $row ) : null;
+			if ( null === $normalized || (int) $normalized['yandex_geo_id'] !== $geo_id ) {
+				return false;
+			}
+			$normalized_rows[] = $normalized;
+		}
+		if ( $geo_id <= 0 || array() === $normalized_rows ) {
+			return false;
+		}
+
+		$this->use_live_table();
+		if ( $this->has_test_rows() ) {
+			$previous = $this->wpdb->yandex_location_mapping_v2;
+			try {
+				$this->wpdb->yandex_location_mapping_v2 = array_values( array_filter( $previous, static fn( array $row ): bool => (int) ( $row['yandex_geo_id'] ?? 0 ) !== $geo_id ) );
+				foreach ( $normalized_rows as $row ) {
+					if ( ! empty( $this->wpdb->fail_yandex_location_mapping_v2_replace_insert ) || ! $this->upsert_one( $row ) ) {
+						throw new \RuntimeException( 'Yandex location mapping v2 targeted insert failed.' );
+					}
+				}
+				return true;
+			} catch ( \Throwable ) {
+				$this->wpdb->yandex_location_mapping_v2 = $previous;
+				return false;
+			}
+		}
+
+		$this->create_schema_if_needed();
+		if ( false === $this->wpdb->query( 'START TRANSACTION' ) ) {
+			return false;
+		}
+		try {
+			if ( false === $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->live_table_name() . ' WHERE yandex_geo_id = %d', $geo_id ) ) ) {
+				throw new \RuntimeException( 'Yandex location mapping v2 targeted delete failed.' );
+			}
+			foreach ( $normalized_rows as $row ) {
+				if ( ! $this->upsert_one( $row ) ) {
+					throw new \RuntimeException( 'Yandex location mapping v2 targeted insert failed.' );
+				}
+			}
+			if ( false === $this->wpdb->query( 'COMMIT' ) ) {
+				throw new \RuntimeException( 'Yandex location mapping v2 targeted commit failed.' );
+			}
+			return true;
+		} catch ( \Throwable ) {
+			$this->wpdb->query( 'ROLLBACK' );
+			return false;
+		}
+	}
+
 	/** @param array<string,mixed> $args @return array<int,array<string,mixed>> */
 	public function search( array $args = array() ): array {
 		$limit = max( 1, min( 500, (int) ( $args['limit'] ?? 50 ) ) );
@@ -292,7 +347,13 @@ final class YandexLocationMappingV2Repository {
 
 	/** @return array<int,array<string,mixed>> */
 	public function find_recent_review_items( int $limit = 20 ): array {
+		return $this->find_review_items_page( $limit, 0 )['items'];
+	}
+
+	/** @return array{total:int,items:array<int,array<string,mixed>>} */
+	public function find_review_items_page( int $limit = 100, int $offset = 0 ): array {
 		$limit = max( 1, min( 100, $limit ) );
+		$offset = max( 0, $offset );
 		if ( $this->has_test_rows() ) {
 			$geo_rows = property_exists( $this->wpdb, 'yandex_delivery_geo_v2' ) && is_array( $this->wpdb->yandex_delivery_geo_v2 ) ? $this->wpdb->yandex_delivery_geo_v2 : array();
 			$geo_by_id = array();
@@ -302,33 +363,40 @@ final class YandexLocationMappingV2Repository {
 			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, static fn( array $row ): bool => in_array( (string) ( $row['status'] ?? '' ), array( 'needs_review', 'no_match' ), true ) ) );
 			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $b['updated_at'] ?? '' ), (string) ( $a['updated_at'] ?? '' ) ) ?: (int) ( $b['yandex_geo_id'] ?? 0 ) <=> (int) ( $a['yandex_geo_id'] ?? 0 ) ?: (int) ( $b['is_primary'] ?? 0 ) <=> (int) ( $a['is_primary'] ?? 0 ) );
 			$items = array();
+			$seen_geo_ids = array();
+			$override_cache = ( new YandexLocationManualOverrideV2Repository( $this->wpdb ) )->load_active_overrides_cache();
 			foreach ( $rows as $row ) {
-				$geo = $geo_by_id[ (int) ( $row['yandex_geo_id'] ?? 0 ) ] ?? array();
-				if ( $this->has_active_manual_override_for_geo( $row, $geo ) ) {
+				$geo_id = (int) ( $row['yandex_geo_id'] ?? 0 );
+				if ( $geo_id <= 0 || isset( $seen_geo_ids[ $geo_id ] ) ) {
+					continue;
+				}
+				$seen_geo_ids[ $geo_id ] = true;
+				$geo = $geo_by_id[ $geo_id ] ?? array();
+				if ( $this->has_applicable_manual_override_in_cache( $geo_id, $geo, $override_cache ) ) {
 					continue;
 				}
 				$items[] = $this->review_item_row( $row, $geo );
-				if ( count( $items ) >= $limit ) {
-					break;
-				}
 			}
-			return $items;
+			return array( 'total' => count( $items ), 'items' => array_slice( $items, $offset, $limit ) );
 		}
 		$this->create_schema_if_needed();
-		$fetch_limit = $limit * 5;
-		$sql = 'SELECT m.*, g.region, g.locality, g.points_count, g.dropoff_count, g.coverage_radius_safe_km, g.centroid_lat, g.centroid_lon, g.first_full_address, l.latitude AS candidate_latitude, l.longitude AS candidate_longitude FROM ' . $this->table_name() . ' m LEFT JOIN ' . $this->geo_table_name() . ' g ON g.yandex_geo_id = m.yandex_geo_id LEFT JOIN ' . $this->locations_table_name() . ' l ON l.id = m.location_id WHERE m.status IN (%s, %s) ORDER BY m.updated_at DESC, m.yandex_geo_id DESC, m.is_primary DESC LIMIT %d';
-		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, 'needs_review', 'no_match', $fetch_limit ), ARRAY_A );
+		$sql = 'SELECT m.*, g.region, g.locality, g.points_count, g.dropoff_count, g.coverage_radius_safe_km, g.centroid_lat, g.centroid_lon, g.first_full_address, l.latitude AS candidate_latitude, l.longitude AS candidate_longitude FROM ' . $this->table_name() . ' m LEFT JOIN ' . $this->geo_table_name() . ' g ON g.yandex_geo_id = m.yandex_geo_id LEFT JOIN ' . $this->locations_table_name() . ' l ON l.id = m.location_id WHERE m.status IN (%s, %s) ORDER BY m.updated_at DESC, m.yandex_geo_id DESC, m.is_primary DESC, m.id DESC';
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, 'needs_review', 'no_match' ), ARRAY_A );
 		$items = array();
+		$seen_geo_ids = array();
+		$override_cache = ( new YandexLocationManualOverrideV2Repository( $this->wpdb ) )->load_active_overrides_cache();
 		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
-			if ( $this->has_active_manual_override_for_geo( $row, $row ) ) {
+			$geo_id = (int) ( $row['yandex_geo_id'] ?? 0 );
+			if ( $geo_id <= 0 || isset( $seen_geo_ids[ $geo_id ] ) ) {
+				continue;
+			}
+			$seen_geo_ids[ $geo_id ] = true;
+			if ( $this->has_applicable_manual_override_in_cache( $geo_id, $row, $override_cache ) ) {
 				continue;
 			}
 			$items[] = $this->review_item_row( $row, $row );
-			if ( count( $items ) >= $limit ) {
-				break;
-			}
 		}
-		return $items;
+		return array( 'total' => count( $items ), 'items' => array_slice( $items, $offset, $limit ) );
 	}
 	public function truncate(): void {
 		if ( $this->has_test_rows() ) {
@@ -597,11 +665,34 @@ final class YandexLocationMappingV2Repository {
 		$geo_id = (int) ( $mapping['yandex_geo_id'] ?? 0 );
 		$region = (string) ( $geo['region'] ?? '' );
 		$locality = (string) ( $geo['locality'] ?? '' );
-		if ( $geo_id <= 0 || '' === trim( $region ) || '' === trim( $locality ) ) {
+		if ( $geo_id <= 0 || '' === trim( $locality ) ) {
 			return false;
 		}
 		$overrides = new YandexLocationManualOverrideV2Repository( $this->wpdb );
-		return array() !== $overrides->find_active_for_geo_identity( $geo_id, $region, $locality ) || array() !== $overrides->find_active_for_identity( $region, $locality );
+		$exact = $overrides->find_active_for_geo_identity( $geo_id, $region, $locality );
+		if ( 1 === count( $exact ) ) {
+			return true;
+		}
+		return count( $exact ) <= 1 && '' !== trim( $region ) && 1 === count( $overrides->find_active_for_identity( $region, $locality ) );
+	}
+
+	/** @param array<string,mixed> $geo @param array{by_geo_id:array<int,array<int,array<string,mixed>>>,by_identity:array<string,array<int,array<string,mixed>>>,ambiguous_identity_keys:array<string,bool>,rows:array<int,array<string,mixed>>} $cache */
+	private function has_applicable_manual_override_in_cache( int $geo_id, array $geo, array $cache ): bool {
+		$overrides = new YandexLocationManualOverrideV2Repository( $this->wpdb );
+		$region_norm = $overrides->normalize_region( (string) ( $geo['region'] ?? '' ) );
+		$locality_norm = $overrides->normalize_locality( (string) ( $geo['locality'] ?? '' ) );
+		if ( '' === $locality_norm ) {
+			return false;
+		}
+		$exact = array_values( array_filter( $cache['by_geo_id'][ $geo_id ] ?? array(), static fn( array $row ): bool => (string) ( $row['yandex_region_norm'] ?? '' ) === $region_norm && (string) ( $row['yandex_locality_norm'] ?? '' ) === $locality_norm ) );
+		if ( 1 === count( $exact ) ) {
+			return true;
+		}
+		if ( count( $exact ) > 1 || '' === $region_norm ) {
+			return false;
+		}
+		$key = $region_norm . '|' . $locality_norm;
+		return ! isset( $cache['ambiguous_identity_keys'][ $key ] ) && 1 === count( $cache['by_identity'][ $key ] ?? array() );
 	}
 
 	/** @param array<string,mixed> $mapping */

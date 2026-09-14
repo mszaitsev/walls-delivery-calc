@@ -84,6 +84,24 @@ final class YandexLocationManualOverrideV2Repository {
 		}
 		return $this->find_active_rows( array( 'yandex_geo_id' => $yandex_geo_id ) );
 	}
+
+	/** @return array<string,mixed> */
+	public function find_by_id( int $id ): array {
+		if ( $id <= 0 ) {
+			return array();
+		}
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->wpdb->yandex_location_manual_overrides_v2 as $row ) {
+				if ( (int) ( $row['id'] ?? 0 ) === $id ) {
+					return $row;
+				}
+			}
+			return array();
+		}
+		$this->create_schema_if_needed();
+		$row = $this->wpdb->get_row( $this->wpdb->prepare( 'SELECT * FROM ' . $this->table_name() . ' WHERE id = %d LIMIT 1', $id ), ARRAY_A );
+		return is_array( $row ) ? $row : array();
+	}
 	/** @return array{by_geo_id:array<int,array<int,array<string,mixed>>>,by_identity:array<string,array<int,array<string,mixed>>>,ambiguous_identity_keys:array<string,bool>,rows:array<int,array<string,mixed>>} */
 	public function load_active_overrides_cache(): array {
 		$rows = $this->active_rows_for_cache();

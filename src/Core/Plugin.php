@@ -1165,6 +1165,7 @@ final class Plugin {
 				$this->container->get( SelfPickupSettings::class ),
 				$this->container->get( Logger::class ),
 				$this->container->get( RussianPostTrackingStatusMapper::class ),
+				$this->container->get( YandexLocationMapperV2Service::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );

@@ -168,6 +168,7 @@ namespace WallsShop\WDC\Carriers\YandexDelivery\GeoV2 {
 		public function truncate(): void { $this->truncated = true; $this->rows = array(); }
 		public function count_active(): int { return $this->active_count; }
 		public function statistics(): array { return array( 'total' => count( $this->rows ), 'active' => $this->active_count, 'points_total' => 3, 'dropoff_total' => 1, 'no_region' => 0 ); }
+		public function find_by_geo_id( int $geo_id ): ?array { return array( 'yandex_geo_id' => $geo_id, 'region' => '', 'locality' => 'Красная Поляна х' ); }
 	}
 
 	final class YandexDeliveryGeoV2BuilderRunnerService {
@@ -239,9 +240,16 @@ namespace WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2 {
 		/** @var array<int,array<string,mixed>> */
 		public array $staging_rows = array();
 		public bool $promoted = false;
+		public int $targeted_replace_count = 0;
 		public function prepare_staging_table(): void { $this->staging_rows = array(); }
 		public function promote_staging_to_live(): void { $this->rows = $this->staging_rows; $this->staging_rows = array(); $this->promoted = true; }
 		public function statistics(): array { $rows = $this->promoted ? $this->rows : $this->staging_rows; return array( 'mapped' => count( $rows ), 'manual' => 99, 'needs_review' => 0, 'no_match' => 0, 'error' => 0, 'avg_confidence' => 100, 'avg_distance' => 1.5, 'territory_fallback' => 0, 'mapped_by_dominance' => array( 'distance_gap' => 1 ) ); }
+		public function replace_geo_rows( int $geo_id, array $rows ): bool { unset( $geo_id, $rows ); ++$this->targeted_replace_count; return true; }
+	}
+
+	final class YandexLocationMapperV2Service {
+		public function reset_manual_override_cache(): void {}
+		public function map_geo_row( array $geo ): array { return array( array( 'yandex_geo_id' => (int) ( $geo['yandex_geo_id'] ?? 0 ), 'location_id' => 10, 'status' => 'mapped' ) ); }
 	}
 }
 
@@ -292,7 +300,7 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipel
 	 yd_geo_pipeline_v2_assert( str_contains( $admin_source, 'Полное обновление Яндекс ПВЗ/географии' ) && str_contains( $admin_source, 'wdc_yandex_delivery_geo_pipeline_v2_start' ) && str_contains( $admin_source, 'geoPipelineInitialState' ), 'Admin must expose one-button pipeline block and AJAX actions.' );
 	yd_geo_pipeline_v2_assert( str_contains( $js_source, 'data-wdc-yandex-geo-pipeline-v2' ) && str_contains( $js_source, 'wdc_yandex_delivery_geo_pipeline_v2_status' ) && str_contains( $js_source, 'pollOnly: true' ), 'JS must poll pipeline status without driving server steps.' );
 	yd_geo_pipeline_v2_assert( str_contains( $admin_source, 'is_yandex_geo_pipeline_active' ) && substr_count( $admin_source, 'reject_yandex_standalone_mutation_while_geo_pipeline_active()' ) >= 5 && str_contains( $admin_source, "array( 'running', 'paused' )" ) && str_contains( $admin_source, "409" ), 'Every standalone lower AJAX family must use the running/paused full-pipeline conflict guard.' );
-	yd_geo_pipeline_v2_assert( str_contains( $admin_source, "'sync_yandex_region_mapping_v2'" ) && str_contains( $admin_source, "'save_yandex_location_manual_override_v2'" ) && str_contains( $admin_source, 'if ( $this->is_yandex_geo_pipeline_active() )' ), 'Region mapping and manual override POST mutations must share the full-pipeline ownership boundary.' );
+	yd_geo_pipeline_v2_assert( str_contains( $admin_source, "array( 'sync_yandex_region_mapping_v2', 'save_yandex_region_mapping_v2' )" ) && str_contains( $admin_source, 'deferred_active_pipeline' ) && str_contains( $admin_source, 'remap_yandex_location_geo_id_if_safe' ), 'Region mapping mutations must remain blocked while manual override persistence defers only its live remap.' );
 	yd_geo_pipeline_v2_assert( substr_count( $js_source, 'standalone: true' ) === 4 && str_contains( $js_source, 'standaloneMutationBlocked' ) && str_contains( $js_source, "['running', 'paused']" ), 'Browser must suppress all four standalone lower loops while the full pipeline is running or paused.' );
 
 	yd_geo_pipeline_v2_assert( str_contains( $mapper_source, 'load_active_overrides_cache' ) && str_contains( $mapper_source, 'manual_override_decision' ), 'Manual overrides must still be applied inside location mapping.' );
@@ -428,8 +436,11 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 1.0.21' ) && st
 			'yandex_delivery_geo_pipeline_v2_runner' => $bundle['runner'],
 			'yandex_delivery_pickup_v2_runner' => $bundle['pickup'],
 			'yandex_delivery_geo_v2_builder_runner' => $bundle['geo_builder'],
+			'yandex_delivery_geo_v2_repository' => $bundle['geo_repository'],
 			'yandex_geo_v2_region_enrichment_runner' => $bundle['region_enrichment'],
 			'yandex_location_mapping_v2_runner' => $bundle['location_mapping'],
+			'yandex_location_mapping_v2_repository' => $bundle['mapping_repository'],
+			'yandex_location_mapper_v2' => new \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMapperV2Service(),
 		) as $property_name => $value ) {
 			$property = $reflection->getProperty( $property_name );
 			$property->setValue( $page, $value );
@@ -445,6 +456,10 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 1.0.21' ) && st
 	$bundle = $make_runner( static fn(): \WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget => new \WallsShop\WDC\Infrastructure\Background\BackgroundExecutionBudget( 100.0, 3 ) );
 	$started = $bundle['runner']->start();
 	$session = (string) $started['session_id'];
+	$admin_page = $make_admin_page( $bundle );
+	$targeted_remap = ( new \ReflectionClass( $admin_page ) )->getMethod( 'remap_yandex_location_geo_id_if_safe' );
+	$deferred = $targeted_remap->invoke( $admin_page, 210263 );
+	yd_geo_pipeline_v2_assert( 'deferred_active_pipeline' === (string) ( $deferred['status'] ?? '' ) && 0 === $bundle['mapping_repository']->targeted_replace_count, 'Active full pipeline must defer targeted live remap without starting parallel mapping work.' );
 	$run_scheduled( $bundle['runner'], $session );
 	yd_geo_pipeline_v2_assert( 1 === $bundle['pickup']->start_full_api_sync_count && 0 === $bundle['pickup']->import_step_count, 'Heavy JSON download must run once and end its worker slice before local import.' );
 	yd_geo_pipeline_v2_assert( array( $session ) === ( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ]['args'] ?? array() ), 'Heavy download must leave one owner-scoped continuation.' );

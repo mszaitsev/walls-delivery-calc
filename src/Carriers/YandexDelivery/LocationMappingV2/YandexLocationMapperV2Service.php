@@ -83,6 +83,10 @@ final class YandexLocationMapperV2Service {
 		return $rows;
 	}
 
+	public function reset_manual_override_cache(): void {
+		$this->manual_override_cache = null;
+	}
+
 
 	/** @param array<string,mixed> $geo @return array{rows?:array<int,array<string,mixed>>,diagnostics?:array<string,mixed>} */
 	private function manual_override_decision( array $geo ): array {

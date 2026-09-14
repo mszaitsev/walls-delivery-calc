@@ -30,6 +30,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $yandex_location_manual_overrides_v2 = array();
 		public array $yandex_region_mapping_v2 = array();
 		public array $wdc_locations = array();
+		public bool $fail_yandex_location_mapping_v2_replace_insert = false;
 		public function prepare( string $query, mixed ...$args ): string { foreach ( $args as $arg ) { $query = preg_replace( '/%[sdf]/', is_numeric( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'", $query, 1 ) ?? $query; } return $query; }
 		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
 	}
@@ -417,24 +418,15 @@ $no_match_override_report = $manual_override_repository->upsert_active_override(
 yd_location_mapping_v2_assert( 1 === (int) ( $no_match_override_report['saved'] ?? 0 ), 'Manual override for no_match queue fixture must be saved.' );
 $recent_no_match_after_override = $repository->find_recent_no_match( 20 );
 yd_location_mapping_v2_assert( $no_match_override_geo_id > 0 && ! in_array( $no_match_override_geo_id, array_map( static fn( array $row ): int => (int) ( $row['yandex_geo_id'] ?? 0 ), $recent_no_match_after_override ), true ), 'Recent no_match queue must hide rows with active manual override.' );
-$needs_review_counts = array();
-$needs_review_first = array();
+$needs_review_override_item = null;
 foreach ( $review_items_before_override as $review_item ) {
 	if ( 'needs_review' !== (string) ( $review_item['status'] ?? '' ) || (int) ( $review_item['location_id'] ?? 0 ) <= 0 ) {
 		continue;
 	}
-	$geo_id = (int) ( $review_item['yandex_geo_id'] ?? 0 );
-	$needs_review_counts[ $geo_id ] = ( $needs_review_counts[ $geo_id ] ?? 0 ) + 1;
-	$needs_review_first[ $geo_id ] = $needs_review_first[ $geo_id ] ?? $review_item;
+	$needs_review_override_item = $review_item;
+	break;
 }
-$needs_review_override_item = null;
-foreach ( $needs_review_counts as $geo_id => $count ) {
-	if ( $count > 1 ) {
-		$needs_review_override_item = $needs_review_first[ $geo_id ];
-		break;
-	}
-}
-yd_location_mapping_v2_assert( null !== $needs_review_override_item, 'Smoke fixture must include a multi-candidate needs_review row.' );
+yd_location_mapping_v2_assert( null !== $needs_review_override_item, 'Smoke fixture must include a representative needs_review candidate row.' );
 $needs_review_override_geo_id = (int) ( $needs_review_override_item['yandex_geo_id'] ?? 0 );
 $manual_override_repository->upsert_active_override( $needs_review_override_geo_id, (string) ( $needs_review_override_item['region'] ?? '' ), (string) ( $needs_review_override_item['locality'] ?? '' ), (int) ( $needs_review_override_item['location_id'] ?? 0 ) );
 $review_items_after_override = $repository->find_recent_review_items( 50 );
@@ -444,6 +436,36 @@ $active_queue_override_ids = array_map( static fn( array $row ): int => (int) ( 
 yd_location_mapping_v2_assert( in_array( $no_match_override_geo_id, $active_queue_override_ids, true ) && in_array( $needs_review_override_geo_id, $active_queue_override_ids, true ), 'Active manual overrides must remain visible in active override list after queues hide them.' );
 $stats = $repository->statistics();
 yd_location_mapping_v2_assert( 48 === $stats['total'] && 33 === $stats['mapped'] && 8 === $stats['needs_review'] && 7 === $stats['no_match'] && 1 === $stats['no_match_region_not_mapped'] && 6 === $stats['no_match_no_locality_match'] && 4 === $stats['territory_fallback'] && null !== $stats['avg_confidence'] && null !== $stats['avg_distance'] && isset( $stats['mapped_by_dominance']['near_exact_type_dominates'] ) && isset( $stats['mapped_by_dominance']['same_type_nearest_dominates'] ), 'Repository statistics must count statuses and averages.' );
+
+$saved_geo_rows = $GLOBALS['wpdb']->yandex_delivery_geo_v2;
+$saved_mapping_rows = $GLOBALS['wpdb']->yandex_location_mapping_v2;
+$saved_override_rows = $GLOBALS['wpdb']->yandex_location_manual_overrides_v2;
+$GLOBALS['wpdb']->yandex_delivery_geo_v2 = array();
+$GLOBALS['wpdb']->yandex_location_mapping_v2 = array();
+$GLOBALS['wpdb']->yandex_location_manual_overrides_v2 = array();
+for ( $index = 1; $index <= 135; ++$index ) {
+	$geo_id = 200000 + $index;
+	$GLOBALS['wpdb']->yandex_delivery_geo_v2[] = array_merge( $geo( $geo_id, 'Очередь область', 'Очередь ' . $index, 55.0, 82.0 ), array( 'points_count' => $index, 'dropoff_count' => $index % 3, 'first_full_address' => 'Адрес ' . $index ) );
+	$GLOBALS['wpdb']->yandex_location_mapping_v2[] = array( 'id' => count( $GLOBALS['wpdb']->yandex_location_mapping_v2 ) + 1, 'yandex_geo_id' => $geo_id, 'location_id' => 0, 'status' => 0 === $index % 2 ? 'no_match' : 'needs_review', 'confidence' => 0, 'raw_json' => '{}', 'is_primary' => 1, 'updated_at' => '2026-06-26 12:00:00' );
+	if ( 0 === $index % 10 ) {
+		$GLOBALS['wpdb']->yandex_location_mapping_v2[] = array( 'id' => count( $GLOBALS['wpdb']->yandex_location_mapping_v2 ) + 1, 'yandex_geo_id' => $geo_id, 'location_id' => 10, 'status' => 'needs_review', 'confidence' => 50, 'raw_json' => '{}', 'is_primary' => 0, 'updated_at' => '2026-06-26 12:00:00' );
+	}
+}
+$GLOBALS['wpdb']->yandex_delivery_geo_v2[] = $geo( 299999, 'Очередь область', 'Уже mapped', 55.0, 82.0 );
+$GLOBALS['wpdb']->yandex_location_mapping_v2[] = array( 'id' => 9999, 'yandex_geo_id' => 299999, 'location_id' => 10, 'status' => 'mapped', 'confidence' => 100, 'raw_json' => '{}', 'is_primary' => 1, 'updated_at' => '2026-06-26 12:00:00' );
+$applicable_queue_override = $manual_override_repository->upsert_active_override( 200001, 'Очередь область', 'Очередь 1', 10 );
+$stale_queue_override = $manual_override_repository->upsert_active_override( 200002, 'Очередь область', 'Старая locality', 10 );
+$queue_page_1 = $repository->find_review_items_page( 100, 0 );
+$queue_page_2 = $repository->find_review_items_page( 100, 100 );
+$queue_ids_1 = array_map( static fn( array $row ): int => (int) $row['yandex_geo_id'], $queue_page_1['items'] );
+$queue_ids_2 = array_map( static fn( array $row ): int => (int) $row['yandex_geo_id'], $queue_page_2['items'] );
+yd_location_mapping_v2_assert( 1 === (int) $applicable_queue_override['saved'] && 1 === (int) $stale_queue_override['saved'] && 134 === $queue_page_1['total'], 'Review queue total must count unique unresolved geo ids and exclude only an applicable override.' );
+yd_location_mapping_v2_assert( 100 === count( $queue_ids_1 ) && 34 === count( $queue_ids_2 ) && array() === array_intersect( $queue_ids_1, $queue_ids_2 ), 'Review queue must paginate all unique geo ids in deterministic 100-row pages without duplicates.' );
+yd_location_mapping_v2_assert( ! in_array( 200001, array_merge( $queue_ids_1, $queue_ids_2 ), true ) && in_array( 200002, array_merge( $queue_ids_1, $queue_ids_2 ), true ) && ! in_array( 299999, array_merge( $queue_ids_1, $queue_ids_2 ), true ), 'Applicable override must be hidden, stale identity override must remain actionable, and mapped geo ids must be absent.' );
+yd_location_mapping_v2_assert( 20 === count( $repository->find_recent_review_items( 20 ) ), 'Legacy recent preview API may remain bounded without governing the full actionable queue.' );
+$GLOBALS['wpdb']->yandex_delivery_geo_v2 = $saved_geo_rows;
+$GLOBALS['wpdb']->yandex_location_mapping_v2 = $saved_mapping_rows;
+$GLOBALS['wpdb']->yandex_location_manual_overrides_v2 = $saved_override_rows;
 
 $manual_mapper = new YandexLocationMapperV2Service( $repository, $GLOBALS['wpdb'], null, $region_repository, $manual_override_repository );
 $GLOBALS['wpdb']->yandex_location_manual_overrides_v2 = array();
@@ -459,6 +481,50 @@ $missing_region_mapper = new YandexLocationMapperV2Service( $repository, $GLOBAL
 $missing_region_rows = $missing_region_mapper->map_geo_row( $geo( 210263, '', 'Красная Поляна х', 43.6800, 40.2050 ) );
 $missing_region_raw = json_decode( (string) $missing_region_rows[0]['raw_json'], true );
 yd_location_mapping_v2_assert( 'mapped' === (string) ( $missing_region_rows[0]['status'] ?? '' ) && 1350 === (int) ( $missing_region_rows[0]['location_id'] ?? 0 ) && true === (bool) ( $missing_region_raw['manual_override'] ?? false ) && 'manual_override' === (string) ( $missing_region_raw['mapping_source'] ?? '' ) && 'geo_identity' === (string) ( $missing_region_raw['manual_override_match'] ?? '' ) && 'Краснодарский край' === (string) ( $missing_region_raw['wdc_region_name'] ?? '' ), 'Mapper must apply an exact missing-region override before automatic region mapping.' );
+
+$GLOBALS['wpdb']->yandex_delivery_geo_v2[] = array_merge( $geo( 210263, '', 'Красная Поляна х', 43.6800, 40.2050 ), array( 'points_count' => 1, 'first_full_address' => 'Красная Поляна х' ) );
+$GLOBALS['wpdb']->yandex_location_mapping_v2 = array_values( array_filter( $GLOBALS['wpdb']->yandex_location_mapping_v2, static fn( array $row ): bool => (int) ( $row['yandex_geo_id'] ?? 0 ) !== 210263 ) );
+$GLOBALS['wpdb']->yandex_location_mapping_v2[] = array( 'id' => 50000, 'yandex_geo_id' => 210263, 'location_id' => 0, 'status' => 'no_match', 'confidence' => 0, 'raw_json' => '{"reason":"region_not_mapped"}', 'is_primary' => 1, 'updated_at' => '2026-06-26 12:00:00' );
+$targeted_runner = new YandexLocationMappingV2Runner( $missing_region_mapper, $repository );
+$admin_reflection = new ReflectionClass( WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage::class );
+$admin_page = $admin_reflection->newInstanceWithoutConstructor();
+foreach ( array(
+	'yandex_delivery_geo_v2_repository' => new WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository( $GLOBALS['wpdb'] ),
+	'yandex_delivery_geo_pipeline_v2_runner' => null,
+	'yandex_location_mapping_v2_repository' => $repository,
+	'yandex_location_mapping_v2_runner' => $targeted_runner,
+	'yandex_location_mapper_v2' => $missing_region_mapper,
+) as $property_name => $value ) {
+	$admin_reflection->getProperty( $property_name )->setValue( $admin_page, $value );
+}
+$targeted_remap_method = $admin_reflection->getMethod( 'remap_yandex_location_geo_id_if_safe' );
+$targeted_result = $targeted_remap_method->invoke( $admin_page, 210263 );
+yd_location_mapping_v2_assert( 'updated' === (string) ( $targeted_result['status'] ?? '' ), 'Admin override flow must target-remap one geo id immediately when mapping owners are idle.' );
+$targeted_live = $repository->find_by_geo( 210263 );
+$targeted_raw = json_decode( (string) ( $targeted_live[0]['raw_json'] ?? '' ), true );
+yd_location_mapping_v2_assert( 1 === count( $targeted_live ) && 1350 === (int) ( $targeted_live[0]['location_id'] ?? 0 ) && 'mapped' === (string) ( $targeted_live[0]['status'] ?? '' ) && ! empty( $targeted_live[0]['is_primary'] ) && 'manual_override' === (string) ( $targeted_raw['mapping_source'] ?? '' ), 'Targeted replacement must remove stale no_match and materialize the canonical manual mapping immediately.' );
+yd_location_mapping_v2_assert( ! in_array( 210263, array_map( static fn( array $row ): int => (int) $row['yandex_geo_id'], $repository->find_review_items_page( 100, 0 )['items'] ), true ), 'Immediately mapped geo id must leave the manual review queue.' );
+
+$before_failed_replace = $targeted_live;
+$GLOBALS['wpdb']->fail_yandex_location_mapping_v2_replace_insert = true;
+$failed_replace = $repository->replace_geo_rows( 210263, array( array_merge( $targeted_live[0], array( 'location_id' => 1160 ) ) ) );
+$GLOBALS['wpdb']->fail_yandex_location_mapping_v2_replace_insert = false;
+yd_location_mapping_v2_assert( ! $failed_replace && $before_failed_replace === $repository->find_by_geo( 210263 ), 'Insert failure after targeted delete must roll back to the previous live mapping snapshot.' );
+
+$missing_override_id = (int) ( $missing_region_report['id'] ?? 0 );
+yd_location_mapping_v2_assert( 210263 === (int) ( $manual_override_repository->find_by_id( $missing_override_id )['yandex_geo_id'] ?? 0 ) && $manual_override_repository->deactivate_override( $missing_override_id ), 'Deactivate flow must resolve the affected geo id before changing override status.' );
+$deactivate_remap_result = $targeted_remap_method->invoke( $admin_page, 210263 );
+yd_location_mapping_v2_assert( 'updated' === (string) ( $deactivate_remap_result['status'] ?? '' ), 'Deactivate flow must target-remap the same geo id without the override.' );
+$automatic_live = $repository->find_by_geo( 210263 );
+yd_location_mapping_v2_assert( 1 === count( $automatic_live ) && 'no_match' === (string) ( $automatic_live[0]['status'] ?? '' ) && in_array( 210263, array_map( static fn( array $row ): int => (int) $row['yandex_geo_id'], $repository->find_review_items_page( 100, 0 )['items'] ), true ), 'Deactivated override must immediately restore automatic no_match and return the geo id to review queue.' );
+$before_deferred_remap = $repository->find_by_geo( 210263 );
+$targeted_runner->start();
+$deferred_result = $targeted_remap_method->invoke( $admin_page, 210263 );
+$repository->use_live_table();
+yd_location_mapping_v2_assert( 'deferred_active_pipeline' === (string) ( $deferred_result['status'] ?? '' ) && $before_deferred_remap === $repository->find_by_geo( 210263 ), 'Active standalone location mapping owner must defer targeted live replacement without changing live rows.' );
+$targeted_runner->reset();
+$missing_region_report = $manual_override_repository->upsert_active_override( 210263, '', 'Красная Поляна х', 1350, 'restore after deactivate regression' );
+$missing_region_mapper->reset_manual_override_cache();
 
 $same_geo_other_locality_rows = $missing_region_mapper->map_geo_row( $geo( 210263, '', 'Другая Поляна х', 43.6800, 40.2050 ) );
 $same_geo_other_locality_raw = json_decode( (string) $same_geo_other_locality_rows[0]['raw_json'], true );
@@ -525,6 +591,7 @@ $manual_mapper = new YandexLocationMapperV2Service( $repository, $GLOBALS['wpdb'
 $manual_rows = $manual_mapper->map_geo_row( $geo( 9007, 'Новосибирская область', 'Битый город', 55.0302, 82.9204 ) );
 $manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
 yd_location_mapping_v2_assert( 'no_match' === $manual_rows[0]['status'] && 'manual_override_location_missing' === $manual_raw['reason'], 'Manual override with missing WDC location must not apply.' );
+$GLOBALS['wpdb']->yandex_delivery_geo_v2 = array_values( array_filter( $GLOBALS['wpdb']->yandex_delivery_geo_v2, static fn( array $row ): bool => (int) ( $row['yandex_geo_id'] ?? 0 ) !== 210263 ) );
 $runner_repository = new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] );
 $runner = new YandexLocationMappingV2Runner( new YandexLocationMapperV2Service( $runner_repository, $GLOBALS['wpdb'], null, $region_repository ), $runner_repository );
 $live_mapping_count_before_start = count( $GLOBALS['wpdb']->yandex_location_mapping_v2 );
@@ -559,7 +626,9 @@ yd_location_mapping_v2_assert( str_contains( $mapper_source, 'manual_override_de
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( __FILE__ ), 'станица Выселки' ) && str_contains( $normalizer_source, 'поселок при железнодорожной станции' ) && str_contains( $normalizer_source, 'is_territorial_like' ) && str_contains( $normalizer_source, 'городской поселок' ) && str_contains( $normalizer_source, 'железнодорожная станция' ) && str_contains( $normalizer_source, 'without_parentheses' ), 'Normalizer source must contain new locality type and territorial helpers.' );
 yd_location_mapping_v2_assert( str_contains( $admin_source, 'Ручные override маппинга Яндекс v2' ) && str_contains( $admin_source, 'save_yandex_location_manual_override_v2' ) && str_contains( $admin_source, 'deactivate_yandex_location_manual_override_v2' ) && str_contains( $admin_source, 'centroid_lat' ) && str_contains( $admin_source, 'centroid_lon' ) && str_contains( $admin_source, 'candidate_latitude' ) && str_contains( $admin_source, 'candidate_longitude' ) && str_contains( $admin_source, 'yandex_location_mapping_v2_coordinates' ) && ! str_contains( $admin_source, 'name="note"' ), 'Admin UI must render manual override controls with coordinates and without note field.' );
 yd_location_mapping_v2_assert( str_contains( $admin_source, 'Последние no_match' ) && str_contains( $admin_source, 'updated_at' ) && ! str_contains( $admin_source, '<th>sql_search_terms</th>' ), 'Admin UI must render recent no_match diagnostics.' );
-yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_no_match' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_review_items' ), 'Repository must expose recent no_match and review diagnostics.' );
+$mapping_repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' );
+yd_location_mapping_v2_assert( str_contains( $mapping_repository_source, 'find_recent_no_match' ) && str_contains( $mapping_repository_source, 'find_review_items_page' ) && str_contains( $mapping_repository_source, 'replace_geo_rows' ), 'Repository must expose recent no_match diagnostics, paginated review queue, and targeted replacement.' );
+yd_location_mapping_v2_assert( str_contains( $admin_source, 'К ручной проверке:' ) && str_contains( $admin_source, 'yandex_review_page' ) && str_contains( $admin_source, 'YANDEX_LOCATION_REVIEW_PAGE_SIZE = 100' ) && str_contains( $admin_source, 'remap_yandex_location_geo_id_if_safe' ) && str_contains( $plugin_source, '$this->container->get( YandexLocationMapperV2Service::class )' ), 'Admin UI must paginate the complete geo-centric queue and DI the canonical mapper for targeted remap.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'find_active_for_geo_identity' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'load_active_overrides_cache' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'ambiguous_identity_keys' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'deactivate_active_identity' ) && ! str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'deactivate_active_identity_for_geo' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' ), 'YandexLocationManualOverrideV2Repository' ), 'Manual override repository and initial schema registration must exist.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0001_initial_schema.php' ), 'YandexLocationMappingV2Repository' ), 'The initial schema must create mapping v2 via its repository.' );
 
