@@ -470,6 +470,8 @@ final class OrderShippingMetaPersister {
 	 */
 	private function visible_technical_item_meta_keys(): array {
 		return array(
+			'wdc_rate',
+			'wdc_source',
 			'carrier_key',
 			'rate_id',
 			'delivery_type',

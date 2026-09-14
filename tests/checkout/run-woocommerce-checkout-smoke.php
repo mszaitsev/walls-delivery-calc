@@ -1145,6 +1145,8 @@ wc_checkout_smoke_assert( 35000 === $result->rates[0]->crossed_price?->get_kopec
 $rate_mapper = new WooCommerceRateMapper();
 $mapped      = $rate_mapper->map( $result->rates[0] );
 wc_checkout_smoke_assert( isset( $mapped['id'], $mapped['label'], $mapped['cost'], $mapped['meta_data'] ), 'WooCommerceRateMapper output must be valid.' );
+wc_checkout_smoke_assert( ! array_key_exists( 'wdc_rate', $mapped['meta_data'] ) && ! array_key_exists( 'wdc_source', $mapped['meta_data'] ), 'WooCommerceRateMapper must not publish internal WDC ownership markers as WC rate metadata.' );
+wc_checkout_smoke_assert( isset( $mapped['meta_data']['carrier_key'], $mapped['meta_data']['rate_id'], $mapped['meta_data']['delivery_type'] ), 'WooCommerceRateMapper must preserve functional WC rate metadata after internal marker removal.' );
 wc_checkout_smoke_assert( is_array( $mapped['meta_data']['crossed_price'] ), 'WooCommerceRateMapper must expose crossed price rendering data.' );
 $mapped_link = $rate_mapper->map(
 	wc_checkout_label_rate(
@@ -2128,6 +2130,10 @@ $method->calculate_shipping( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( count( $method->rates ) > 0, 'New WC shipping method must add rates.' );
 $method_rates = array_values( $method->rates );
 wc_checkout_smoke_assert( isset( $method_rates[0]['meta_data']['planned_delivery_comment'] ), 'WC rate must contain planned delivery comment metadata.' );
+$stored_rates_after_calculation = $session->rates();
+$stored_rate_after_calculation = $stored_rates_after_calculation[ (string) $method_rates[0]['id'] ] ?? array();
+wc_checkout_smoke_assert( true === ( $stored_rate_after_calculation['wdc_rate'] ?? false ) && 'platform' === (string) ( $stored_rate_after_calculation['wdc_source'] ?? '' ), 'Calculated WDC rate must retain ownership markers in the internal session snapshot.' );
+wc_checkout_smoke_assert( ! array_key_exists( 'wdc_rate', $method_rates[0]['meta_data'] ) && ! array_key_exists( 'wdc_source', $method_rates[0]['meta_data'] ), 'Calculated public WC rate must not expose internal session ownership markers.' );
 
 
 $reflection = new ReflectionMethod( NewShippingMethod::class, 'rates_for_wc' );
@@ -2471,6 +2477,8 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier' ) );
 $cdek_item = new WdcSmokeShippingItem();
 $cdek_item->meta = array(
+	'wdc_rate' => 1,
+	'wdc_source' => 'platform',
 	'carrier_key' => 'cdek',
 	'rate_id' => 'cdek:courier',
 	'delivery_type' => 'courier',
@@ -2489,7 +2497,7 @@ $cdek_persister = new OrderShippingMetaPersister( $session, new DeliveryDateForm
 $cdek_persister->persist_shipping_item_meta( $cdek_item );
 wc_checkout_smoke_assert( 'СДЭК курьер, Посылка склад-дверь - 10-14 дней' === $cdek_item->method_title, 'CDEK checkout shipping item method title must stay user-facing.' );
 	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only planned delivery date.' );
-foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'pickup_family', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
+foreach ( array( 'wdc_rate', 'wdc_source', 'carrier_key', 'rate_id', 'delivery_type', 'pickup_family', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
 	wc_checkout_smoke_assert( ! array_key_exists( $forbidden_meta_key, $cdek_item->meta ), 'CDEK checkout visible meta must not contain technical key: ' . $forbidden_meta_key );
 }
 $cdek_order = new WdcSmokeOrder();
