@@ -3457,6 +3457,83 @@ recalc_smoke_assert( 350.0 === (float) ( $saved_calc['api']['api_base_price_rub'
 recalc_smoke_assert( '3 дня' === (string) ( $saved_calc['api']['api_delivery_text'] ?? '' ) && 3 === ( $saved_calc['api']['api_delivery_min_days'] ?? null ), 'Saved calculation data must preserve checkout-compatible API delivery days.' );
 recalc_smoke_assert( array( 'base' ) === ( $saved_calc['rules']['applied_rules'] ?? null ) && in_array( 'API + 50 руб.', $saved_calc['rules']['formula_visualization'] ?? array(), true ), 'Saved calculation data must preserve applied rules and formula visualization.' );
 recalc_smoke_assert( str_contains( (string) ( $replace_order->shipping_items['method_title'] ?? '' ), ' - 3 дня' ), 'Saved shipping method title must include delivery text.' );
+
+$chuvash_location = array(
+	'id' => 210263,
+	'location_id' => 210263,
+	'country_code' => 'RU',
+	'state_value' => 'Чувашская Республика - Чувашия',
+	'region_name' => 'Чувашская Республика - Чувашия',
+	'city_value' => 'г Чебоксары',
+	'city_name' => 'Чебоксары',
+	'city_type' => 'г',
+	'display_name' => 'Чувашская Республика - Чувашия, г Чебоксары',
+	'postal_code' => '428000',
+);
+$carrier_region_pickup = array_merge(
+	$pickup_point,
+	array(
+		'point_code' => '428032-OPS',
+		'point_address' => 'Чебоксары, проспект Ленина, 1',
+		'point_postcode' => '428032',
+		'region_name' => 'Чувашская-Чувашия',
+		'city_name' => 'Чебоксары (carrier)',
+	)
+);
+$canonical_pickup_order = new WdcRecalcOrder( 141, array() );
+$canonical_pickup_order->shipping_items = array();
+$canonical_pickup_result = $replacement->save(
+	$canonical_pickup_order,
+	array(
+		'selected_location' => $chuvash_location,
+		'selected_rate' => $pickup_rate,
+		'selected_tariff' => $pickup_rate['selected_tariff'],
+		'selected_pickup_point' => $carrier_region_pickup,
+		'normalized_shipping_address' => array(),
+	)
+);
+$canonical_pickup_snapshot = json_decode( (string) ( $canonical_pickup_order->meta['_wdc_pickup_point_snapshot'] ?? '{}' ), true );
+recalc_smoke_assert( true === $canonical_pickup_result['success'] && 'RU' === $canonical_pickup_order->get_shipping_country(), 'Canonical-location pickup save must succeed and preserve selected country.' );
+recalc_smoke_assert( 'Чувашская Республика - Чувашия' === $canonical_pickup_order->get_shipping_state() && 'Чувашская-Чувашия' !== $canonical_pickup_order->get_shipping_state(), 'Selected canonical WDC region must win over carrier-specific pickup region.' );
+recalc_smoke_assert( 'г Чебоксары' === $canonical_pickup_order->get_shipping_city(), 'Selected canonical WDC city must win over carrier-specific pickup city.' );
+recalc_smoke_assert( '428032' === $canonical_pickup_order->get_shipping_postcode() && 'Чебоксары, проспект Ленина, 1' === $canonical_pickup_order->get_shipping_address_1(), 'Exact pickup-point postcode and address must remain pickup-owned.' );
+recalc_smoke_assert( '428032-OPS' === (string) ( $canonical_pickup_order->meta['_wdc_pickup_point_code'] ?? '' ) && '428032-OPS' === (string) ( $canonical_pickup_snapshot['point_code'] ?? '' ), 'Pickup selection and snapshot must remain persisted after canonical geography wins.' );
+recalc_smoke_assert( (float) ( $pickup_rate['selected_tariff']['cost'] ?? 0 ) === (float) ( $canonical_pickup_order->shipping_items['total'] ?? 0 ) && (string) ( $pickup_rate['selected_tariff']['planned_delivery_date'] ?? '' ) === (string) ( $canonical_pickup_order->meta['_wdc_platform_planned_delivery_date'] ?? '' ), 'Canonical geography priority must not change selected shipping cost or planned delivery metadata.' );
+recalc_smoke_assert( 'Чувашская Республика - Чувашия, г Чебоксары' === (string) ( $canonical_pickup_order->meta['_wdc_platform_city_display_name'] ?? '' ), 'Canonical selected-location order metadata must remain independent of carrier pickup region.' );
+
+$fixed_pickup_rate = array(
+	'id' => 'self_pickup:fixed',
+	'rate_id' => 'self_pickup:fixed',
+	'label' => 'Самовывоз',
+	'carrier_key' => 'self_pickup',
+	'service_key' => 'self_pickup',
+	'service_title' => 'Самовывоз',
+	'delivery_type' => DeliveryType::PICKUP,
+	'requires_pickup_point' => false,
+	'cost' => 0.0,
+	'fixed_pickup_point_snapshot' => array(
+		'point_code' => 'FIXED-CHEB',
+		'point_address' => 'Чебоксары, Складская, 2',
+		'point_postcode' => '428099',
+		'region_name' => 'Чувашская-Чувашия',
+		'city_name' => 'Чебоксары (fixed carrier)',
+	),
+);
+$fixed_pickup_order = new WdcRecalcOrder( 142, array() );
+$fixed_pickup_order->shipping_items = array();
+$fixed_pickup_result = $replacement->save(
+	$fixed_pickup_order,
+	array(
+		'selected_location' => $chuvash_location,
+		'selected_rate' => $fixed_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array(),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( true === $fixed_pickup_result['success'] && 'Чувашская Республика - Чувашия' === $fixed_pickup_order->get_shipping_state() && 'г Чебоксары' === $fixed_pickup_order->get_shipping_city(), 'Fixed pickup save must prefer canonical selected WDC state and city over snapshot geography.' );
+recalc_smoke_assert( '428099' === $fixed_pickup_order->get_shipping_postcode() && 'Чебоксары, Складская, 2' === $fixed_pickup_order->get_shipping_address_1() && 'FIXED-CHEB' === (string) ( $fixed_pickup_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Fixed pickup must retain snapshot-specific postcode, address, and point identity.' );
+
 ob_start();
 $metabox->render( $replace_order );
 $replace_metabox_html = (string) ob_get_clean();

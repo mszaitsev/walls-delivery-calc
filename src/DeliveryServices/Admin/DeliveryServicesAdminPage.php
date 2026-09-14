@@ -39,6 +39,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexGeoV2RegionEnr
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationManualOverrideV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMapperV2Service;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Runner;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexRegionMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
@@ -106,6 +107,8 @@ defined( 'ABSPATH' ) || exit;
 final class DeliveryServicesAdminPage {
 	public const MENU_SLUG = 'wdc-delivery-services';
 	private const DPD_GEOGRAPHY_AJAX_STEP_LIMIT = 500;
+	private const YANDEX_LOCATION_REVIEW_PAGE_SIZE = 20;
+	private const YANDEX_LOCATION_OVERRIDE_PAGE_SIZE = 20;
 	/** @var list<string> */
 	private array $create_errors = array();
 	/** @var array<string,mixed> */
@@ -182,6 +185,7 @@ final class DeliveryServicesAdminPage {
 		private ?SelfPickupSettings $self_pickup_settings = null,
 		?Logger $logger = null,
 		private ?RussianPostTrackingStatusMapper $russian_post_status_mapping = null,
+		private ?YandexLocationMapperV2Service $yandex_location_mapper_v2 = null,
 	) {
 		$this->logger = $logger;
 	}
@@ -2735,7 +2739,7 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? YandexDeliverySettings::SERVICE_KEY ) );
-		if ( $this->is_yandex_geo_pipeline_active() ) {
+		if ( in_array( $action, array( 'sync_yandex_region_mapping_v2', 'save_yandex_region_mapping_v2' ), true ) && $this->is_yandex_geo_pipeline_active() ) {
 			$this->save_yandex_region_mapping_v2_result(
 				'error',
 				'Полное обновление Яндекс ПВЗ/географии',
@@ -2767,20 +2771,75 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? YandexDeliverySettings::SERVICE_KEY ) );
+		$review_page = max( 1, (int) ( $_POST['yandex_review_page'] ?? 1 ) );
+		$override_page = max( 1, (int) ( $_POST['yandex_override_page'] ?? 1 ) );
 		if ( 'save_yandex_location_manual_override_v2' === $action ) {
 			$geo_id = isset( $_POST['yandex_geo_id'] ) ? (int) $_POST['yandex_geo_id'] : 0;
 			$region = sanitize_text_field( wp_unslash( $_POST['yandex_region'] ?? '' ) );
 			$locality = sanitize_text_field( wp_unslash( $_POST['yandex_locality'] ?? '' ) );
 			$location_id = isset( $_POST['location_id'] ) ? (int) $_POST['location_id'] : 0;
 			$report = $this->yandex_location_manual_override_v2_repository->upsert_active_override( $geo_id, $region, $locality, $location_id );
-			$this->save_yandex_region_mapping_v2_result( 1 === (int) ( $report['saved'] ?? 0 ) ? 'success' : 'error', 'Ручной override Яндекс mapping v2', 1 === (int) ( $report['saved'] ?? 0 ) ? 'Override сохранен.' : 'Override не сохранен.', array_merge( array( 'yandex_geo_id' => $geo_id, 'location_id' => $location_id ), $report ) );
+			$remap = 1 === (int) ( $report['saved'] ?? 0 ) ? $this->remap_yandex_location_geo_id_if_safe( $geo_id ) : array( 'status' => 'not_started' );
+			$message = 1 === (int) ( $report['saved'] ?? 0 ) ? $this->yandex_location_override_result_message( 'Override сохранен.', $remap ) : 'Override не сохранен.';
+			$this->save_yandex_region_mapping_v2_result( 1 === (int) ( $report['saved'] ?? 0 ) ? 'success' : 'error', 'Ручной override Яндекс mapping v2', $message, array_merge( array( 'yandex_geo_id' => $geo_id, 'location_id' => $location_id, 'targeted_remap' => $remap ), $report ) );
 		} elseif ( 'deactivate_yandex_location_manual_override_v2' === $action ) {
 			$id = isset( $_POST['override_id'] ) ? (int) $_POST['override_id'] : 0;
-			$ok = $this->yandex_location_manual_override_v2_repository->deactivate_override( $id );
-			$this->save_yandex_region_mapping_v2_result( $ok ? 'success' : 'error', 'Ручной override Яндекс mapping v2', $ok ? 'Override отключен.' : 'Override не найден.', array( 'override_id' => $id ) );
+			$override = $this->yandex_location_manual_override_v2_repository->find_by_id( $id );
+			$ok = array() !== $override && $this->yandex_location_manual_override_v2_repository->deactivate_override( $id );
+			$geo_id = (int) ( $override['yandex_geo_id'] ?? 0 );
+			$remap = $ok ? $this->remap_yandex_location_geo_id_if_safe( $geo_id ) : array( 'status' => 'not_started' );
+			$message = $ok ? $this->yandex_location_override_result_message( 'Override отключен.', $remap ) : 'Override не найден.';
+			$this->save_yandex_region_mapping_v2_result( $ok ? 'success' : 'error', 'Ручной override Яндекс mapping v2', $message, array( 'override_id' => $id, 'yandex_geo_id' => $geo_id, 'targeted_remap' => $remap ) );
 		}
-		wp_safe_redirect( add_query_arg( array( 'page' => self::MENU_SLUG, 'service' => $service_key, 'tab' => 'yandex_delivery_pickup' ), admin_url( 'admin.php' ) ) );
+		$review_total = $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository ? (int) $this->yandex_location_mapping_v2_repository->find_review_items_page( 1, 0 )['total'] : 0;
+		$override_total = (int) $this->yandex_location_manual_override_v2_repository->find_active_page( 1, 0 )['total'];
+		$review_page = $this->clamp_yandex_pagination_page( $review_page, $review_total, self::YANDEX_LOCATION_REVIEW_PAGE_SIZE );
+		$override_page = $this->clamp_yandex_pagination_page( $override_page, $override_total, self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE );
+		wp_safe_redirect( add_query_arg( array( 'page' => self::MENU_SLUG, 'service' => $service_key, 'tab' => 'yandex_delivery_pickup', 'yandex_review_page' => $review_page, 'yandex_override_page' => $override_page ), admin_url( 'admin.php' ) ) );
 		exit;
+	}
+
+	private function clamp_yandex_pagination_page( int $page, int $total, int $page_size ): int {
+		$max_page = max( 1, (int) ceil( max( 0, $total ) / max( 1, $page_size ) ) );
+		return min( max( 1, $page ), $max_page );
+	}
+
+	/** @return array<string,mixed> */
+	private function remap_yandex_location_geo_id_if_safe( int $geo_id ): array {
+		if ( $geo_id <= 0 || ! $this->yandex_delivery_geo_v2_repository instanceof YandexDeliveryGeoV2Repository || ! $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository || ! $this->yandex_location_mapper_v2 instanceof YandexLocationMapperV2Service ) {
+			return array( 'status' => 'unavailable' );
+		}
+		if ( $this->is_yandex_geo_pipeline_active() || $this->is_yandex_location_mapping_v2_active() ) {
+			return array( 'status' => 'deferred_active_pipeline' );
+		}
+		$geo = $this->yandex_delivery_geo_v2_repository->find_by_geo_id( $geo_id );
+		if ( ! is_array( $geo ) ) {
+			return array( 'status' => 'source_missing' );
+		}
+		$this->yandex_location_mapper_v2->reset_manual_override_cache();
+		$rows = $this->yandex_location_mapper_v2->map_geo_row( $geo );
+		if ( array() === $rows || ! $this->yandex_location_mapping_v2_repository->replace_geo_rows( $geo_id, $rows ) ) {
+			return array( 'status' => 'replace_failed' );
+		}
+		return array( 'status' => 'updated', 'mapping_status' => (string) ( $rows[0]['status'] ?? '' ), 'rows' => count( $rows ) );
+	}
+
+	private function is_yandex_location_mapping_v2_active(): bool {
+		if ( ! $this->yandex_location_mapping_v2_runner instanceof YandexLocationMappingV2Runner ) {
+			return false;
+		}
+		return in_array( (string) ( $this->yandex_location_mapping_v2_runner->current_state()['status'] ?? '' ), array( 'mapping', 'paused' ), true );
+	}
+
+	/** @param array<string,mixed> $remap */
+	private function yandex_location_override_result_message( string $prefix, array $remap ): string {
+		return match ( (string) ( $remap['status'] ?? '' ) ) {
+			'updated' => $prefix . ' Live mapping для geoId обновлен.',
+			'deferred_active_pipeline' => $prefix . ' Будет применен текущим или следующим запуском mapping, поскольку pipeline сейчас активен.',
+			'source_missing' => $prefix . ' Immediate mapping не выполнен: canonical geo_v2 row не найден.',
+			'replace_failed' => $prefix . ' Immediate mapping не выполнен: live mapping не удалось атомарно заменить.',
+			default => $prefix . ' Immediate mapping недоступен; override будет применен следующим запуском mapping.',
+		};
 	}
 	private function save_yandex_region_mapping_v2_result( string $type, string $title, string $message, array $details ): void {
 		if ( $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
@@ -2852,8 +2911,20 @@ final class DeliveryServicesAdminPage {
 		$geo_v2_region_enrichment_state = $this->yandex_geo_v2_region_enrichment_runner instanceof YandexGeoV2RegionEnrichmentRunner ? $this->yandex_geo_v2_region_enrichment_runner->current_state() : array();
 		$location_mapping_v2_stats = $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository ? $this->yandex_location_mapping_v2_repository->statistics() : array();
 		$location_mapping_v2_no_match = $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository ? $this->yandex_location_mapping_v2_repository->find_recent_no_match( 20 ) : array();
-		$location_mapping_v2_review_items = $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository ? $this->yandex_location_mapping_v2_repository->find_recent_review_items( 20 ) : array();
-		$location_manual_overrides_v2 = $this->yandex_location_manual_override_v2_repository instanceof YandexLocationManualOverrideV2Repository ? $this->yandex_location_manual_override_v2_repository->list_active( 20 ) : array();
+		$location_mapping_v2_review_page = max( 1, (int) ( $_GET['yandex_review_page'] ?? 1 ) );
+		$location_mapping_v2_review_queue = $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository ? $this->yandex_location_mapping_v2_repository->find_review_items_page( self::YANDEX_LOCATION_REVIEW_PAGE_SIZE, ( $location_mapping_v2_review_page - 1 ) * self::YANDEX_LOCATION_REVIEW_PAGE_SIZE ) : array( 'total' => 0, 'items' => array() );
+		$location_mapping_v2_review_page = $this->clamp_yandex_pagination_page( $location_mapping_v2_review_page, (int) ( $location_mapping_v2_review_queue['total'] ?? 0 ), self::YANDEX_LOCATION_REVIEW_PAGE_SIZE );
+		if ( array() === ( $location_mapping_v2_review_queue['items'] ?? array() ) && (int) ( $location_mapping_v2_review_queue['total'] ?? 0 ) > 0 ) {
+			$location_mapping_v2_review_queue = $this->yandex_location_mapping_v2_repository->find_review_items_page( self::YANDEX_LOCATION_REVIEW_PAGE_SIZE, ( $location_mapping_v2_review_page - 1 ) * self::YANDEX_LOCATION_REVIEW_PAGE_SIZE );
+		}
+		$location_mapping_v2_review_items = is_array( $location_mapping_v2_review_queue['items'] ?? null ) ? $location_mapping_v2_review_queue['items'] : array();
+		$location_manual_override_page = max( 1, (int) ( $_GET['yandex_override_page'] ?? 1 ) );
+		$location_manual_override_queue = $this->yandex_location_manual_override_v2_repository instanceof YandexLocationManualOverrideV2Repository ? $this->yandex_location_manual_override_v2_repository->find_active_page( self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE, ( $location_manual_override_page - 1 ) * self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE ) : array( 'total' => 0, 'items' => array() );
+		$location_manual_override_page = $this->clamp_yandex_pagination_page( $location_manual_override_page, (int) ( $location_manual_override_queue['total'] ?? 0 ), self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE );
+		if ( array() === ( $location_manual_override_queue['items'] ?? array() ) && (int) ( $location_manual_override_queue['total'] ?? 0 ) > 0 ) {
+			$location_manual_override_queue = $this->yandex_location_manual_override_v2_repository->find_active_page( self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE, ( $location_manual_override_page - 1 ) * self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE );
+		}
+		$location_manual_overrides_v2 = is_array( $location_manual_override_queue['items'] ?? null ) ? $location_manual_override_queue['items'] : array();
 		$region_mapping_v2_rows = $this->yandex_region_mapping_v2_repository instanceof YandexRegionMappingV2Repository ? $this->yandex_region_mapping_v2_repository->list_rows() : array();
 		$region_mapping_v2_wdc_regions = $this->yandex_region_mapping_v2_repository instanceof YandexRegionMappingV2Repository ? $this->yandex_region_mapping_v2_repository->list_wdc_regions() : array();
 		$geo_pipeline_v2_state = $this->yandex_delivery_geo_pipeline_v2_runner instanceof YandexDeliveryGeoPipelineV2Runner ? $this->yandex_delivery_geo_pipeline_v2_runner->current_state() : array();
@@ -3014,17 +3085,20 @@ final class DeliveryServicesAdminPage {
 			</tbody>
 		</table>
 		</details>
-		<?php $this->render_yandex_location_manual_overrides_v2_section( $service, $location_mapping_v2_review_items, $location_mapping_v2_no_match, $location_manual_overrides_v2 ); ?>
+		<?php $this->render_yandex_location_manual_overrides_v2_section( $service, $location_mapping_v2_review_items, $location_mapping_v2_no_match, $location_manual_overrides_v2, (int) ( $location_mapping_v2_review_queue['total'] ?? 0 ), $location_mapping_v2_review_page, (int) ( $location_manual_override_queue['total'] ?? 0 ), $location_manual_override_page ); ?>
 		<?php
 	}
 
 
 	/** @param array<int,array<string,mixed>> $review_items @param array<int,array<string,mixed>> $no_match_items @param array<int,array<string,mixed>> $overrides */
-	private function render_yandex_location_manual_overrides_v2_section( DeliveryService $service, array $review_items, array $no_match_items, array $overrides ): void {
+	private function render_yandex_location_manual_overrides_v2_section( DeliveryService $service, array $review_items, array $no_match_items, array $overrides, int $review_total, int $review_page, int $override_total, int $override_page ): void {
 		?>
 		<details class="wdc-yandex-stage"><summary><?php echo esc_html__( 'Ручная проверка', 'walls-delivery-calc' ); ?></summary>
 		<h3><?php echo esc_html__( 'Ручные override маппинга Яндекс v2', 'walls-delivery-calc' ); ?></h3>
-		<p class="description" style="max-width: 960px;"><?php echo esc_html__( 'Админ может сохранить правильный WDC location для needs_review/no_match. Следующие прогоны применят override только если совпадает нормализованная пара регион + населённый пункт; при переиспользовании geoId под другой НП override не применяется.', 'walls-delivery-calc' ); ?></p>
+		<p class="description" style="max-width: 960px;"><?php echo esc_html__( 'Админ может сохранить правильный WDC location для needs_review/no_match. Когда pipeline свободен, один geoId пересчитывается сразу; при активном pipeline override применяется его текущим или следующим запуском.', 'walls-delivery-calc' ); ?></p>
+		<?php $review_from = 0 === $review_total ? 0 : ( ( $review_page - 1 ) * self::YANDEX_LOCATION_REVIEW_PAGE_SIZE ) + 1; ?>
+		<?php $review_to = min( $review_total, $review_page * self::YANDEX_LOCATION_REVIEW_PAGE_SIZE ); ?>
+		<p><strong><?php echo esc_html( sprintf( __( 'К ручной проверке: %1$d geoId. Показано %2$d–%3$d из %1$d.', 'walls-delivery-calc' ), $review_total, $review_from, $review_to ) ); ?></strong></p>
 		<table class="widefat striped" style="max-width: 1180px;">
 			<thead><tr><th>geo_id</th><th>Yandex</th><th>ПВЗ</th><th>Кандидат</th><th>Сохранить override</th></tr></thead>
 			<tbody>
@@ -3043,6 +3117,8 @@ final class DeliveryServicesAdminPage {
 								<input type="hidden" name="yandex_geo_id" value="<?php echo esc_attr( (string) ( $item['yandex_geo_id'] ?? '' ) ); ?>" />
 								<input type="hidden" name="yandex_region" value="<?php echo esc_attr( (string) ( $item['region'] ?? '' ) ); ?>" />
 								<input type="hidden" name="yandex_locality" value="<?php echo esc_attr( (string) ( $item['locality'] ?? '' ) ); ?>" />
+								<input type="hidden" name="yandex_review_page" value="<?php echo esc_attr( (string) $review_page ); ?>" />
+								<input type="hidden" name="yandex_override_page" value="<?php echo esc_attr( (string) $override_page ); ?>" />
 								<input type="number" name="location_id" value="<?php echo esc_attr( (string) max( 0, (int) ( $item['location_id'] ?? 0 ) ) ); ?>" min="1" style="width: 120px;" />
 								<button type="submit" class="button"><?php echo esc_html__( 'Сохранить override', 'walls-delivery-calc' ); ?></button>
 							</form>
@@ -3054,6 +3130,9 @@ final class DeliveryServicesAdminPage {
 				<?php endif; ?>
 			</tbody>
 		</table>
+		<?php if ( $review_total > self::YANDEX_LOCATION_REVIEW_PAGE_SIZE && function_exists( 'paginate_links' ) ) : ?>
+			<div class="tablenav"><div class="tablenav-pages"><?php echo wp_kses_post( (string) paginate_links( array( 'base' => str_replace( '999999999', '%#%', add_query_arg( array( 'page' => self::MENU_SLUG, 'service' => $service->service_key, 'tab' => 'yandex_delivery_pickup', 'yandex_review_page' => 999999999, 'yandex_override_page' => $override_page ), admin_url( 'admin.php' ) ) ), 'current' => $review_page, 'total' => (int) ceil( $review_total / self::YANDEX_LOCATION_REVIEW_PAGE_SIZE ) ) ) ); ?></div></div>
+		<?php endif; ?>
 		<h3><?php echo esc_html__( 'Последние no_match', 'walls-delivery-calc' ); ?></h3>
 		<table class="widefat striped" style="max-width: 1120px;">
 			<thead><tr><th>geo_id</th><th>region</th><th>locality</th><th>coordinates</th><th>first_full_address</th><th>updated_at</th></tr></thead>
@@ -3074,6 +3153,9 @@ final class DeliveryServicesAdminPage {
 			</tbody>
 		</table>
 		<h4><?php echo esc_html__( 'Активные override', 'walls-delivery-calc' ); ?></h4>
+		<?php $override_from = 0 === $override_total ? 0 : ( ( $override_page - 1 ) * self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE ) + 1; ?>
+		<?php $override_to = min( $override_total, $override_page * self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE ); ?>
+		<p><strong><?php echo esc_html( sprintf( __( 'Активных override: %1$d. Показано %2$d–%3$d из %1$d.', 'walls-delivery-calc' ), $override_total, $override_from, $override_to ) ); ?></strong></p>
 		<table class="widefat striped" style="max-width: 1180px;">
 			<thead><tr><th>ID</th><th>Yandex</th><th>WDC</th><th></th></tr></thead>
 			<tbody>
@@ -3082,7 +3164,7 @@ final class DeliveryServicesAdminPage {
 						<td><?php echo esc_html( (string) ( $override['id'] ?? '' ) ); ?></td>
 						<td><?php echo esc_html( (string) ( $override['yandex_geo_id'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $override['yandex_region'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $override['yandex_locality'] ?? '' ) ); ?></td>
 						<td><?php echo esc_html( (string) ( $override['location_id'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $override['wdc_region_name'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $override['wdc_display_name'] ?? '' ) ); ?></td>
-						<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="deactivate_yandex_location_manual_override_v2" /><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>" /><input type="hidden" name="override_id" value="<?php echo esc_attr( (string) ( $override['id'] ?? '' ) ); ?>" /><button type="submit" class="button button-secondary"><?php echo esc_html__( 'Отключить', 'walls-delivery-calc' ); ?></button></form></td>
+						<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="deactivate_yandex_location_manual_override_v2" /><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>" /><input type="hidden" name="override_id" value="<?php echo esc_attr( (string) ( $override['id'] ?? '' ) ); ?>" /><input type="hidden" name="yandex_review_page" value="<?php echo esc_attr( (string) $review_page ); ?>" /><input type="hidden" name="yandex_override_page" value="<?php echo esc_attr( (string) $override_page ); ?>" /><button type="submit" class="button button-secondary"><?php echo esc_html__( 'Отключить', 'walls-delivery-calc' ); ?></button></form></td>
 					</tr>
 				<?php endforeach; ?>
 				<?php if ( array() === $overrides ) : ?>
@@ -3090,6 +3172,9 @@ final class DeliveryServicesAdminPage {
 				<?php endif; ?>
 			</tbody>
 		</table>
+		<?php if ( $override_total > self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE && function_exists( 'paginate_links' ) ) : ?>
+			<div class="tablenav"><div class="tablenav-pages"><?php echo wp_kses_post( (string) paginate_links( array( 'base' => str_replace( '999999999', '%#%', add_query_arg( array( 'page' => self::MENU_SLUG, 'service' => $service->service_key, 'tab' => 'yandex_delivery_pickup', 'yandex_review_page' => $review_page, 'yandex_override_page' => 999999999 ), admin_url( 'admin.php' ) ) ), 'current' => $override_page, 'total' => (int) ceil( $override_total / self::YANDEX_LOCATION_OVERRIDE_PAGE_SIZE ) ) ) ); ?></div></div>
+		<?php endif; ?>
 		</details>
 		<?php
 	}
