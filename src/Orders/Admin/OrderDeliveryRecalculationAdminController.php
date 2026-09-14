@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Orders\Admin;
 
-use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
@@ -119,7 +118,7 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	public function ajax_preview(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( OrderDeliveryMetabox::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 
@@ -150,7 +149,7 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	public function ajax_location_search(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( OrderDeliveryMetabox::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 		$query = $this->request_string( 'query' );
@@ -160,7 +159,7 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	public function ajax_pickup_search(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( OrderDeliveryMetabox::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 
@@ -237,7 +236,7 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	public function ajax_normalize_address(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( OrderDeliveryMetabox::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 
@@ -283,7 +282,7 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	public function ajax_geocode_address(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( OrderDeliveryMetabox::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 
@@ -306,7 +305,7 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	public function ajax_address_suggest(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( OrderDeliveryMetabox::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 
@@ -341,7 +340,7 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	public function ajax_save(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( OrderDeliveryMetabox::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 

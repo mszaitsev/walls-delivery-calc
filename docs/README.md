@@ -1,8 +1,10 @@
 # Walls Delivery Calc Documentation
 
-Version: 1.0.18
+Version: 1.0.19
 
 These documents describe the current production contract. Historical investigations and superseded decisions live under `docs/research` and `docs/research/history`.
+
+The standalone WDC configuration console requires the WordPress `manage_options` capability. Operational tools embedded in WooCommerce order screens retain their explicit `manage_woocommerce` capability contract.
 
 ## Architecture
 

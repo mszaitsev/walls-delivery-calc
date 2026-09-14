@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Admin\Ajax;
 
-use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
@@ -51,7 +50,7 @@ final class ShipmentRemovalAjaxController {
 	}
 
 	public function handle_cancel(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( ShipmentAdminAjaxService::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( ShipmentAdminAjaxService::CAPABILITY ) || ! check_ajax_referer( ShipmentAdminAjaxService::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 		$order_id = (int) ( $_POST['order_id'] ?? 0 );
@@ -91,7 +90,7 @@ final class ShipmentRemovalAjaxController {
 	}
 
 	public function handle_remove(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( ShipmentAdminAjaxService::NONCE_ACTION, 'nonce', false ) ) {
+		if ( ! current_user_can( ShipmentAdminAjaxService::CAPABILITY ) || ! check_ajax_referer( ShipmentAdminAjaxService::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
 		$order_id = (int) ( $_POST['order_id'] ?? 0 );

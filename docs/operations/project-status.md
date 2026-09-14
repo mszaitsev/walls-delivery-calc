@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.18
+Version: 1.0.19
 
-The current Walls Delivery Calc release source is version 1.0.18. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Order-admin delivery recalculation preserves the canonical method and grouped-tariff order produced by checkout `RateSorter`; presentation normalization does not apply a second sorting policy. Ozon pickup background synchronization, Yandex and DPD bounded workers, Russian Post imports, and Shipment Framework remain unchanged.
+The current Walls Delivery Calc release source is version 1.0.19. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. The standalone WDC configuration console requires `manage_options`; WooCommerce order operational tools retain their explicit `manage_woocommerce` contract. Order-admin delivery recalculation preserves the canonical method and grouped-tariff order produced by checkout `RateSorter`; presentation normalization does not apply a second sorting policy. Ozon pickup background synchronization, Yandex and DPD bounded workers, Russian Post imports, and Shipment Framework remain unchanged.
 
 Current production scope includes:
 

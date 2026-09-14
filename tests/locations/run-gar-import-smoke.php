@@ -319,7 +319,7 @@ function esc_js( mixed $text ): string {
 }
 
 function current_user_can( string $capability ): bool {
-	return 'manage_woocommerce' === $capability;
+	return 'manage_options' === $capability;
 }
 
 function sanitize_text_field( string $value ): string {

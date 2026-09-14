@@ -164,6 +164,8 @@ function current_user_can( string $capability ): bool {
 	return 'manage_woocommerce' === $capability && (bool) $GLOBALS['wdc_recalc_current_can'];
 }
 
+recalc_smoke_assert( 'manage_woocommerce' === OrderDeliveryMetabox::CAPABILITY, 'Order delivery operational UI must remain available under manage_woocommerce.' );
+
 function check_ajax_referer( string $action, string|false $query_arg = false, bool $stop = true ): bool {
 	return 'wdc_order_delivery_recalculation' === $action && (bool) $GLOBALS['wdc_recalc_nonce_ok'];
 }

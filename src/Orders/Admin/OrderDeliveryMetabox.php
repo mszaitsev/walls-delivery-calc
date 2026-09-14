@@ -12,6 +12,8 @@ use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 defined( 'ABSPATH' ) || exit;
 
 final class OrderDeliveryMetabox {
+	public const CAPABILITY = 'manage_woocommerce';
+
 	private const META_KEYS = array(
 		OrderShippingMetaPersister::CALCULATION_META_KEY,
 		'_wdc_platform_carrier_key',
@@ -44,7 +46,7 @@ final class OrderDeliveryMetabox {
 	}
 
 	public function render( mixed $post_or_order ): void {
-		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
 			return;
 		}
 
@@ -157,7 +159,7 @@ final class OrderDeliveryMetabox {
 	}
 
 	private function render_recalculation_preview_block( object $order ): void {
-		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
 			return;
 		}
 

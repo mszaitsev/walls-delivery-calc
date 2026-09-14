@@ -127,7 +127,7 @@ function wp_unslash( mixed $value ): mixed {
 }
 
 function current_user_can( string $capability ): bool {
-	return 'manage_woocommerce' === $capability;
+	return 'manage_options' === $capability;
 }
 
 function wp_verify_nonce( string $nonce, string $action ): bool {

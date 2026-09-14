@@ -19,7 +19,24 @@ function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return j
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
 function is_admin(): bool { return true; }
-function current_user_can( string $capability ): bool { return (bool) ( $GLOBALS['wdc_ds_current_user_can'] ?? true ); }
+function current_user_can( string $capability ): bool {
+	$GLOBALS['wdc_ds_requested_capabilities'][] = $capability;
+	if ( isset( $GLOBALS['wdc_ds_capabilities'] ) && is_array( $GLOBALS['wdc_ds_capabilities'] ) ) {
+		return (bool) ( $GLOBALS['wdc_ds_capabilities'][ $capability ] ?? false );
+	}
+	return (bool) ( $GLOBALS['wdc_ds_current_user_can'] ?? true );
+}
+function add_menu_page( string $page_title, string $menu_title, string $capability, string $menu_slug, mixed $callback = null, string $icon_url = '', ?int $position = null ): string {
+	$GLOBALS['wdc_ds_admin_menus'][] = compact( 'capability', 'menu_slug' );
+	return 'toplevel_page_' . $menu_slug;
+}
+function add_submenu_page( string $parent_slug, string $page_title, string $menu_title, string $capability, string $menu_slug, mixed $callback = null, ?int $position = null ): string {
+	$GLOBALS['wdc_ds_admin_submenus'][] = compact( 'parent_slug', 'capability', 'menu_slug' );
+	return $parent_slug . '_page_' . $menu_slug;
+}
+function check_ajax_referer( string $action, string|false $query_arg = false, bool $stop = true ): int|false { return false === ( $GLOBALS['wdc_ds_ajax_nonce_valid'] ?? true ) ? false : 1; }
+function wp_send_json_success( mixed $data = null, ?int $status_code = null, int $flags = 0 ): never { throw new WdcDsJsonResponse( true, $data, $status_code ?? 200 ); }
+function wp_send_json_error( mixed $data = null, ?int $status_code = null, int $flags = 0 ): never { throw new WdcDsJsonResponse( false, $data, $status_code ?? 200 ); }
 function check_admin_referer( string $action ): bool {
 	if ( false === ( $GLOBALS['wdc_ds_nonce_valid'] ?? true ) ) {
 		throw new WdcDsNonceException( 'invalid_nonce' );
@@ -74,6 +91,12 @@ final class WdcDsRedirectException extends RuntimeException {
 }
 
 final class WdcDsNonceException extends RuntimeException {}
+
+final class WdcDsJsonResponse extends RuntimeException {
+	public function __construct( public readonly bool $success, public readonly mixed $data, public readonly int $status ) {
+		parent::__construct( 'json_response' );
+	}
+}
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -457,6 +480,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 
+use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Admin\SettingsAdminPage;
+use WallsShop\WDC\Calendar\Admin\CalendarAdminPage;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
@@ -487,9 +513,12 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter;
+use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Shipments\Admin\ShipmentStatusesAdminPage;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
+use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Rules\ValueObjects\RuleConditionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperators;
@@ -522,6 +551,8 @@ function wdc_ds_admin_page( DeliveryServiceRepository $services, DeliveryService
 		'settings' => $settings,
 		'delivery_quote_cache_manager' => null,
 		'locations' => null,
+		'dpd_geography_importer' => null,
+		'ozon_delivery_admin' => null,
 	);
 	foreach ( $values as $property => $value ) {
 		$reflection_property = $reflection->getProperty( $property );
@@ -1024,6 +1055,65 @@ $soft_deleted_admin = wdc_ds_admin_page( $services, $countries, $settings, new R
 wdc_ds_assert( null === wdc_ds_post_create( $soft_deleted_admin, array( 'service_key' => 'manual_soft_deleted', 'title' => 'Reuse Soft Deleted' ) ), 'Soft-deleted service key must be rejected on create.' );
 
 $capability_admin = wdc_ds_admin_page( $services, $countries, $settings, new RuleRepository( $GLOBALS['wpdb'] ) );
+$GLOBALS['wdc_ds_admin_menus'] = array();
+$GLOBALS['wdc_ds_admin_submenus'] = array();
+foreach ( array( AdminMenu::class, SettingsAdminPage::class, DeliveryServicesAdminPage::class, CalendarAdminPage::class, RulesAdminPage::class, LocationsAdminPage::class, ShipmentStatusesAdminPage::class ) as $admin_page_class ) {
+	$admin_page = ( new ReflectionClass( $admin_page_class ) )->newInstanceWithoutConstructor();
+	$admin_page->add_menu_page();
+}
+wdc_ds_assert( 'manage_options' === AdminMenu::CAPABILITY, 'WDC configuration console must use manage_options.' );
+wdc_ds_assert( 1 === count( $GLOBALS['wdc_ds_admin_menus'] ), 'WDC must register one top-level admin menu.' );
+foreach ( array_merge( $GLOBALS['wdc_ds_admin_menus'], $GLOBALS['wdc_ds_admin_submenus'] ) as $registered_menu ) {
+	wdc_ds_assert( 'manage_options' === $registered_menu['capability'], 'Every WDC configuration menu and submenu must require manage_options.' );
+}
+
+$GLOBALS['wdc_ds_capabilities'] = array( 'manage_options' => false, 'manage_woocommerce' => true );
+$GLOBALS['wdc_ds_requested_capabilities'] = array();
+foreach ( array( AdminMenu::class, SettingsAdminPage::class, DeliveryServicesAdminPage::class ) as $direct_page_class ) {
+	$direct_page = ( new ReflectionClass( $direct_page_class ) )->newInstanceWithoutConstructor();
+	ob_start();
+	$direct_page->render_page();
+	$direct_page_output = (string) ob_get_clean();
+	wdc_ds_assert( '' === $direct_page_output, 'Shop Manager direct WDC configuration URL must render no page content.' );
+}
+$before_denied = count( $GLOBALS['wpdb']->services );
+wdc_ds_assert( null === wdc_ds_post_create( $capability_admin, array( 'service_key' => 'manual_denied', 'title' => 'Denied' ) ), 'Shop Manager configuration POST must not create or redirect.' );
+wdc_ds_assert( $before_denied === count( $GLOBALS['wpdb']->services ), 'Shop Manager configuration POST must leave services unchanged.' );
+
+try {
+	$capability_admin->ajax_ozon_delivery_pickup_status();
+	$shop_status_response = null;
+} catch ( WdcDsJsonResponse $response ) {
+	$shop_status_response = $response;
+}
+wdc_ds_assert( $shop_status_response instanceof WdcDsJsonResponse && ! $shop_status_response->success && 403 === $shop_status_response->status, 'Shop Manager must be denied a configuration status AJAX endpoint.' );
+try {
+	$capability_admin->ajax_dpd_geography_import_step();
+	$shop_mutation_response = null;
+} catch ( WdcDsJsonResponse $response ) {
+	$shop_mutation_response = $response;
+}
+wdc_ds_assert( $shop_mutation_response instanceof WdcDsJsonResponse && ! $shop_mutation_response->success && 403 === $shop_mutation_response->status, 'Shop Manager must be denied a configuration mutation AJAX endpoint.' );
+wdc_ds_assert( in_array( 'manage_options', $GLOBALS['wdc_ds_requested_capabilities'], true ), 'Direct pages, POST and AJAX must check the canonical manage_options capability.' );
+
+$GLOBALS['wdc_ds_capabilities'] = array( 'manage_options' => true, 'manage_woocommerce' => true );
+try {
+	$capability_admin->ajax_ozon_delivery_pickup_status();
+	$admin_status_response = null;
+} catch ( WdcDsJsonResponse $response ) {
+	$admin_status_response = $response;
+}
+wdc_ds_assert( $admin_status_response instanceof WdcDsJsonResponse && $admin_status_response->success && 'idle' === ( $admin_status_response->data['state'] ?? '' ), 'Administrator must pass the configuration status AJAX capability guard.' );
+$_POST = array( 'job_id' => 'admin-test', 'expected_byte_offset' => '0' );
+try {
+	$capability_admin->ajax_dpd_geography_import_step();
+	$admin_mutation_response = null;
+} catch ( WdcDsJsonResponse $response ) {
+	$admin_mutation_response = $response;
+}
+wdc_ds_assert( $admin_mutation_response instanceof WdcDsJsonResponse && $admin_mutation_response->success, 'Administrator must pass the configuration mutation AJAX capability guard.' );
+
+$GLOBALS['wdc_ds_capabilities'] = null;
 $GLOBALS['wdc_ds_current_user_can'] = false;
 $before_denied = count( $GLOBALS['wpdb']->services );
 wdc_ds_assert( null === wdc_ds_post_create( $capability_admin, array( 'service_key' => 'manual_denied', 'title' => 'Denied' ) ), 'Denied capability must not create or redirect.' );
