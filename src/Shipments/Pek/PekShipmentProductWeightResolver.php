@@ -14,6 +14,18 @@ final class PekShipmentProductWeightResolver {
 	}
 
 	public function product_weight_g( ShipmentCreateRequest $request ): int {
+		$draft_rows = is_array( $request->meta['shipment_item_rows'] ?? null ) ? $request->meta['shipment_item_rows'] : array();
+		if ( array() !== $draft_rows ) {
+			$weight = 0;
+			foreach ( $draft_rows as $row ) {
+				if ( is_array( $row ) ) {
+					$weight += max( 0, (int) ( $row['weight'] ?? 0 ) ) * max( 0, (int) ( $row['amount'] ?? 0 ) );
+				}
+			}
+			if ( $weight > 0 ) {
+				return $weight;
+			}
+		}
 		$calculation = is_array( $request->meta['calculation_data'] ?? null ) ? $request->meta['calculation_data'] : array();
 		$weight = (int) ( $calculation['package']['products_weight_g'] ?? 0 );
 		if ( $weight > 0 ) {

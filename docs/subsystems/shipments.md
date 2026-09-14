@@ -1,8 +1,16 @@
 # Shipments
 
-Version: 1.0.22
+Version: 1.0.23
 
 Shipment code lives under `src/Shipments` and carrier-owned shipment modules. Implementations exist for CDEK, DPD, Russian Post, Yandex Delivery, Jet Logistic, PEK, and Ozon Delivery; shared behavior is defined by the Shipment Framework.
+
+## Shipment package editor
+
+The open shipment modal owns an ephemeral preparation draft. Current item quantity, unit price, unit weight, item dimensions, place assignment, and current place weight/dimensions are collected directly for every preview and create request; they do not update WooCommerce order items, products, prices, dimensions, or totals and are reset from order/product data after a full admin-page reload.
+
+Package summaries and overweight presentation are calculated from those same current rows. By default, a package whose weight is below the allocated item-weight sum produces a warning only. CDEK is the carrier-owned exception: Create requires every original order quantity to be fully assigned to valid places and requires `sum(current unit item weight × allocated quantity) <= manager-entered place weight` for every place. Equality is valid, and calculated API/packaging weight is not part of this gate. The per-package **Подогнать вес товаров** action is available only when every place has a positive weight, the selected place is heavier than 50 g, contains items, and its current item total exceeds its place weight. It proportionally reduces integer per-unit item weights toward `place weight - 50 g`, distributing rounding deterministically; quantity granularity may produce the nearest reachable total below that target.
+
+Carrier adapters consume the resulting draft through their existing contracts. CDEK, Russian Post, and Yandex use current item weight/value where their item payload supports it; Ozon uses current allocation prices for declared value; PEK uses current draft item price for insurance and current draft item weight for its product-weight policy. DPD and all current carrier payloads use current place dimensions. Editable item dimensions remain sanitized draft data but are not mapped into invented carrier fields because the supported create APIs currently use package/place dimensions rather than item dimensions.
 
 PEK supports the verified RU create/preview/persist/manual-attach/status/document/cancellation flow with generic creation-attempt identity and fail-closed validation. Foreign PEK destinations use manual attachment plus read-only status and actual-cost behavior. Carrier raw status remains distinct from configurable universal WDC status mapping.
 

@@ -365,6 +365,7 @@ final class OrderShipmentDraftFactory {
 		$tariff_object = sanitize_text_field( wp_unslash( $data['tariff_object'] ?? $base->meta['tariff_object'] ?? '' ) );
 		$tariff = $this->tariff_for_service_object( $service, $tariff_object, $delivery_type );
 		$tariff_has_declared_value = ! empty( $tariff['has_declared_value'] );
+		$prepared = ! empty( $data['places'] ) && ! empty( $data['shipment_items'] ) ? $this->shipment_modal_mapper()->parse( $data ) : null;
 		$places = array();
 		$place_rows = is_array( $data['places'] ?? null ) ? $data['places'] : array();
 		foreach ( $place_rows as $index => $row ) {
@@ -427,6 +428,7 @@ final class OrderShipmentDraftFactory {
 					'pickup_point_postcode' => DeliveryType::PICKUP === $delivery_type ? (string) ( $admin_pickup_row['postcode'] ?? $base->meta['pickup_point_postcode'] ?? '' ) : (string) ( $base->meta['pickup_point_postcode'] ?? '' ),
 					'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? array() !== $admin_pickup_row : ! empty( $base->meta['pickup_point_found'] ),
 					'pickup_point_row' => DeliveryType::PICKUP === $delivery_type ? $this->safe_pickup_row( $admin_pickup_row ) : (array) ( $base->meta['pickup_point_row'] ?? array() ),
+					'shipment_item_rows' => $prepared instanceof ShipmentPreparationData ? $prepared->item_rows : (array) ( $base->meta['shipment_item_rows'] ?? array() ),
 				)
 			)
 		);
@@ -513,6 +515,7 @@ final class OrderShipmentDraftFactory {
 		$expected_country_code = $this->expected_cdek_country_from_order( $order );
 		$pickup_point_found = $this->cdek_pickup_row_valid( $pickup_row, $expected_country_code );
 		$location_context = $this->recipient_location_context( $order, $pickup_row );
+		$shipment_item_rows = $this->shipment_item_rows_from_order( $order, $items );
 
 		return new ShipmentCreateRequest(
 			order_id: $this->order_id( $order ),
@@ -559,7 +562,8 @@ final class OrderShipmentDraftFactory {
 				'order_num' => $this->order_number( $order ),
 				'calculation_data' => $calculation,
 				'rate_meta' => $rate_meta,
-				'shipment_item_rows' => $this->shipment_item_rows_from_order( $order, $items ),
+				'shipment_item_rows' => $shipment_item_rows,
+				'cdek_required_item_quantities' => $this->required_item_quantities( $shipment_item_rows ),
 			)
 		);
 	}
@@ -587,6 +591,7 @@ final class OrderShipmentDraftFactory {
 		$shipment_data = $this->shipment_modal_mapper()->parse( $data );
 		$places = $shipment_data->places;
 		$item_rows = $shipment_data->item_rows;
+		$required_item_quantities = $this->required_item_quantities( (array) ( $base->meta['shipment_item_rows'] ?? array() ) );
 		$recipient_address = DeliveryType::PICKUP === $delivery_type && array() !== $pickup_row ? $this->address_from_admin_data( $base->recipient_address, $data, $delivery_type, $base->meta, array(), '', $pickup_row ) : $this->cdek_courier_address_from_normalized( $base->recipient_address, $normalized_address );
 		$recipient = array(
 			'name' => sanitize_text_field( wp_unslash( $data['recipient_name'] ?? $base->recipient['name'] ?? '' ) ),
@@ -645,6 +650,7 @@ final class OrderShipmentDraftFactory {
 					'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? $pickup_point_found : ! empty( $base->meta['pickup_point_found'] ),
 					'pickup_point_row' => DeliveryType::PICKUP === $delivery_type && array() !== $pickup_row ? $this->safe_pickup_row( $pickup_row ) : (array) ( $base->meta['pickup_point_row'] ?? array() ),
 					'shipment_item_rows' => $item_rows,
+					'cdek_required_item_quantities' => $required_item_quantities,
 				)
 			)
 		);
@@ -914,21 +920,23 @@ final class OrderShipmentDraftFactory {
 		if ( '' !== $posted_delivery_type && $posted_delivery_type !== $base->delivery_type ) {
 			throw new \RuntimeException( 'Сценарий доставки ПЭК изменился. Обновите страницу заказа.' );
 		}
-		$places = array();
-		$place_rows = is_array( $data['places'] ?? null ) ? $data['places'] : array();
-		foreach ( $place_rows as $index => $row ) {
-			if ( ! is_array( $row ) ) {
-				continue;
+		$prepared = ! empty( $data['places'] ) && ! empty( $data['shipment_items'] ) ? $this->shipment_modal_mapper()->parse( $data ) : null;
+		$places = $prepared instanceof ShipmentPreparationData ? $prepared->places : array();
+		if ( array() === $places ) {
+			foreach ( is_array( $data['places'] ?? null ) ? $data['places'] : array() as $index => $row ) {
+				if ( ! is_array( $row ) ) {
+					continue;
+				}
+				$places[] = new ShipmentPlace(
+					(int) ( $row['place_number'] ?? $row['number'] ?? ( $index + 1 ) ),
+					$this->whole_number_from_place_row( $row, 'weight_g' ),
+					$this->whole_number_from_place_row( $row, 'length_cm' ),
+					$this->whole_number_from_place_row( $row, 'width_cm' ),
+					$this->whole_number_from_place_row( $row, 'height_cm' ),
+					Money::from_kopecks( 0 ),
+					0 === $index ? ( $base->places[0]->items ?? array() ) : array()
+				);
 			}
-			$places[] = new ShipmentPlace(
-				(int) ( $row['place_number'] ?? $row['number'] ?? ( $index + 1 ) ),
-				$this->whole_number_from_place_row( $row, 'weight_g' ),
-				$this->whole_number_from_place_row( $row, 'length_cm' ),
-				$this->whole_number_from_place_row( $row, 'width_cm' ),
-				$this->whole_number_from_place_row( $row, 'height_cm' ),
-				Money::from_kopecks( 0 ),
-				0 === $index ? ( $base->places[0]->items ?? array() ) : array()
-			);
 		}
 		$recipient_type = sanitize_key( wp_unslash( $data['recipient_type'] ?? 'physical' ) );
 		$override_source = sanitize_key( wp_unslash( $data['pek_sender_warehouse_override_source'] ?? '' ) );
@@ -947,6 +955,7 @@ final class OrderShipmentDraftFactory {
 			$base->meta,
 			array(
 				'recipient_type' => 'physical' === $recipient_type ? 'physical' : 'unsupported',
+				'shipment_item_rows' => $prepared instanceof ShipmentPreparationData ? $prepared->item_rows : (array) ( $base->meta['shipment_item_rows'] ?? array() ),
 			)
 		);
 		if ( '' !== $sender_warehouse_id ) {
@@ -1352,20 +1361,23 @@ final class OrderShipmentDraftFactory {
 
 	private function create_dpd_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
 		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $data['delivery_type'] ?? $base->delivery_type ) ) );
-		$places = array();
-		foreach ( is_array( $data['places'] ?? null ) ? $data['places'] : array() as $index => $row ) {
-			if ( ! is_array( $row ) ) {
-				continue;
+		$prepared = ! empty( $data['places'] ) && ! empty( $data['shipment_items'] ) ? $this->shipment_modal_mapper()->parse( $data ) : null;
+		$places = $prepared instanceof ShipmentPreparationData ? $prepared->places : array();
+		if ( array() === $places ) {
+			foreach ( is_array( $data['places'] ?? null ) ? $data['places'] : array() as $index => $row ) {
+				if ( ! is_array( $row ) ) {
+					continue;
+				}
+				$places[] = new ShipmentPlace(
+					$index + 1,
+					$this->whole_number_from_place_row( $row, 'weight_g' ),
+					$this->whole_number_from_place_row( $row, 'length_cm' ),
+					$this->whole_number_from_place_row( $row, 'width_cm' ),
+					$this->whole_number_from_place_row( $row, 'height_cm' ),
+					Money::from_kopecks( 0 ),
+					array()
+				);
 			}
-			$places[] = new ShipmentPlace(
-				$index + 1,
-				$this->whole_number_from_place_row( $row, 'weight_g' ),
-				$this->whole_number_from_place_row( $row, 'length_cm' ),
-				$this->whole_number_from_place_row( $row, 'width_cm' ),
-				$this->whole_number_from_place_row( $row, 'height_cm' ),
-				Money::from_kopecks( 0 ),
-				array()
-			);
 		}
 		$service_code = $this->terminal_code( (string) wp_unslash( $data['tariff_object'] ?? $data['service_code'] ?? $base->meta['service_code'] ?? '' ) );
 		$tariff_title = $this->dpd_tariff_title( $service_code, (string) ( $base->meta['tariff_title'] ?? '' ) );
@@ -1425,6 +1437,7 @@ final class OrderShipmentDraftFactory {
 					'date_pickup_errors' => $this->dpd_date_errors( $date_pickup ),
 					'sender_contact_fio' => $sender_contact_fio,
 					'courier_instructions' => $courier_instructions,
+					'shipment_item_rows' => $prepared instanceof ShipmentPreparationData ? $prepared->item_rows : (array) ( $base->meta['shipment_item_rows'] ?? array() ),
 				)
 			)
 		);
@@ -1539,6 +1552,26 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return $rows;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<string,int>
+	 */
+	private function required_item_quantities( array $rows ): array {
+		$required = array();
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) || '' !== trim( (string) ( $row['split_parent'] ?? '' ) ) ) {
+				continue;
+			}
+			$key = preg_replace( '/^(?:order-item-|item-)/', '', trim( (string) ( $row['item_key'] ?? '' ) ) ) ?? '';
+			$quantity = (int) ( $row['ordered_quantity'] ?? $row['amount'] ?? 0 );
+			if ( '' !== $key && $quantity > 0 ) {
+				$required[ $key ] = $quantity;
+			}
+		}
+
+		return $required;
 	}
 
 	/** @return array<string,mixed> */

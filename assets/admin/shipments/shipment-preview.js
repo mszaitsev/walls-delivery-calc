@@ -7,6 +7,8 @@
 
   function requestPreview(form) {
     markPreviewPending(form);
+    const requestToken = (previewRequestTokens.get(form) || 0) + 1;
+    previewRequestTokens.set(form, requestToken);
     const preview = form.querySelector('[data-wdc-shipment-preview]');
     const errors = form.querySelector('[data-wdc-shipment-errors]');
     const data = collectShipmentData(form);
@@ -19,6 +21,7 @@
     })
       .then(parseShipmentJsonResponse)
       .then((payload) => {
+        if (previewRequestTokens.get(form) !== requestToken) return;
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось обновить предпросмотр.');
         }
@@ -56,6 +59,7 @@
         updateCreateAvailability(form);
       })
       .catch((error) => {
+        if (previewRequestTokens.get(form) !== requestToken) return;
         form.dataset.wdcPreviewLoaded = '';
         form.dataset.wdcPreviewHasErrors = '1';
         if (errors) {
@@ -97,6 +101,7 @@
   }
   function schedulePreview(form) {
     markPreviewPending(form);
+    previewRequestTokens.set(form, (previewRequestTokens.get(form) || 0) + 1);
     const previous = timers.get(form);
     if (previous) {
       window.clearTimeout(previous);

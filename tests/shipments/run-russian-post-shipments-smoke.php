@@ -911,6 +911,9 @@ $selected_pickup_data = array(
 	'places' => array(
 		array( 'weight_g' => '1000', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ),
 	),
+	'shipment_items' => array(
+		array( 'item_key' => 'order-item-1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-NEW', 'amount' => 1, 'cost' => '600', 'weight' => '450', 'length_cm' => '9', 'width_cm' => '8', 'height_cm' => '7' ),
+	),
 );
 $selected_request = $draft_factory->create_request_from_admin_data( $shipment_order, $selected_pickup_data );
 shipments_smoke_assert( $draft_factory->supports_order( $shipment_order ), 'Domestic Russian Post order must be supported by shipment draft factory.' );
@@ -920,6 +923,7 @@ shipments_smoke_assert( RussianPostDomesticSettings::CARRIER_KEY === (string) ( 
 shipments_smoke_assert( '630099-new' === $selected_request->pickup_point?->point_code, 'Admin pickup selection must update shipment draft pickup code.' );
 shipments_smoke_assert( '630099' === $selected_request->recipient_address->postcode && 'Красный проспект, 1' === $selected_request->recipient_address->raw_address, 'Admin pickup selection must update draft recipient address.' );
 shipments_smoke_assert( '630099' === (string) ( $selected_request->meta['pickup_point_postcode'] ?? '' ) && ! empty( $selected_request->meta['pickup_point_found'] ), 'Admin pickup selection must update draft pickup meta only.' );
+shipments_smoke_assert( 450 === (int) ( $selected_request->meta['shipment_item_rows'][0]['weight'] ?? 0 ) && 60000 === (int) ( $selected_request->meta['shipment_item_rows'][0]['unit_price_kopecks'] ?? 0 ), 'Russian Post admin draft must retain current modal item weight and price without mutating the order.' );
 shipments_smoke_assert( 55.03 === (float) ( $selected_request->meta['pickup_point_row']['lat'] ?? 0.0 ) && 82.93 === (float) ( $selected_request->meta['pickup_point_row']['lng'] ?? 0.0 ), 'Admin pickup selection must keep pickup coordinates in draft row.' );
 
 $selected_payload = $builder->build( $selected_request );

@@ -396,6 +396,7 @@ final class CdekOrderFakeOrderItem {
 function cdek_order_request( string $delivery_type, int $mode, array $overrides = array() ): ShipmentCreateRequest {
 	$item = new PackageItem( 'SKU-1', 'Товар', 5, Money::from_rubles( $overrides['unit_cost'] ?? 1000 ), Money::from_rubles( ( $overrides['unit_cost'] ?? 1000 ) * 5 ), 100, 10, 8, 3 );
 	$place = new ShipmentPlace( 1, (int) ( $overrides['place_weight'] ?? 1000 ), 20, 15, 10, Money::from_kopecks( 0 ), array( $item ) );
+	$places = is_array( $overrides['places'] ?? null ) ? $overrides['places'] : array( $place );
 	$pickup = DeliveryType::PICKUP === $delivery_type ? new PickupPointSelection( CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, 'KEM7', 'Kemerovo', '2026-06-13 12:00:00' ) : null;
 	$recipient = array_filter(
 		array(
@@ -421,7 +422,7 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 			raw_address: $overrides['raw_address'] ?? ( DeliveryType::COURIER === $delivery_type ? '650000, Кемерово, Советский 10' : 'KEM7' )
 		),
 		$pickup,
-		array( $place ),
+		$places,
 		Money::from_kopecks( 0 ),
 		false,
 		array(),
@@ -440,6 +441,7 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 			'cdek_postal_code' => $overrides['cdek_postal_code'] ?? '',
 			'cdek_delivery_address' => $overrides['cdek_delivery_address'] ?? '',
 			'cdek_courier_comment' => $overrides['cdek_courier_comment'] ?? '',
+			'cdek_required_item_quantities' => $overrides['cdek_required_item_quantities'] ?? array(),
 			'shipment_item_rows' => $overrides['shipment_item_rows'] ?? array(
 				cdek_order_item_row( '1', 1, 'Товар', 'SKU-1', 5, (int) round( (float) ( $overrides['unit_cost'] ?? 1000 ) * 100 ), 100 ),
 			),
@@ -718,7 +720,52 @@ cdek_order_assert( empty( $disabled_prepared['success'] ) && 'Подсказки
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'phone' => '' ) ) ), 'Missing phone must fail validation.' );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'tariff_code' => '' ) ) ), 'Missing tariff_code must fail validation.' );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => '' ) ) ), 'Missing delivery_point for pickup must fail validation.' );
-cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::COURIER, 1, array( 'place_weight' => 100 ) ) ), 'Package weight below item weight must fail validation.' );
+$overweight_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'place_weight' => 100 ) );
+cdek_order_assert( in_array( 'Вес грузоместа 1 меньше суммы весов товаров.', $builder->validate( $overweight_request ), true ) && array() === $builder->warnings( $overweight_request ), 'CDEK package weight below current allocated item weight must be a hard error without a duplicate warning.' );
+$equal_places = array(
+	new ShipmentPlace( 1, 100, 20, 15, 10, Money::from_kopecks( 0 ), array() ),
+	new ShipmentPlace( 2, 150, 20, 15, 10, Money::from_kopecks( 0 ), array() ),
+);
+$equal_rows = array(
+	cdek_order_item_row( 'equal-1', 1, 'Товар 1', 'EQ-1', 1, 10000, 100 ),
+	cdek_order_item_row( 'equal-2', 2, 'Товар 2', 'EQ-2', 1, 10000, 150 ),
+);
+$equal_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $equal_rows ) );
+cdek_order_assert( array() === $builder->validate( $equal_request ) && array() === $builder->warnings( $equal_request ), 'Equal package/item weights 100/100 and 150/150 must pass and must not include packaging weight.' );
+$place_one_overweight_rows = $equal_rows;
+$place_one_overweight_rows[0]['weight'] = 101;
+$place_one_overweight_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $place_one_overweight_rows ) );
+cdek_order_assert( in_array( 'Вес грузоместа 1 меньше суммы весов товаров.', $builder->validate( $place_one_overweight_request ), true ) && ! in_array( 'Вес грузоместа 2 меньше суммы весов товаров.', $builder->validate( $place_one_overweight_request ), true ), 'Only place 1 must fail for entered/item weights 100/101 and 150/150.' );
+$place_two_overweight_rows = $equal_rows;
+$place_two_overweight_rows[1]['weight'] = 151;
+$place_two_overweight_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $place_two_overweight_rows ) );
+cdek_order_assert( in_array( 'Вес грузоместа 2 меньше суммы весов товаров.', $builder->validate( $place_two_overweight_request ), true ) && ! in_array( 'Вес грузоместа 1 меньше суммы весов товаров.', $builder->validate( $place_two_overweight_request ), true ), 'Only place 2 must fail for entered/item weights 100/100 and 150/151.' );
+$incomplete_row = cdek_order_item_row( 'order-item-42', 1, 'Товар', 'ALLOC-1', 1, 10000, 50 );
+$incomplete_row['ordered_quantity'] = 1;
+$incomplete_request = cdek_order_request( DeliveryType::COURIER, 1, array(
+	'place_weight' => 100,
+	'shipment_item_rows' => array( $incomplete_row ),
+	'cdek_required_item_quantities' => array( '42' => 2 ),
+) );
+cdek_order_assert( in_array( 'Не все товары распределены по грузоместам.', $builder->validate( $incomplete_request ), true ), 'CDEK ordered quantity 2 with only one allocated unit must fail closed even if submitted ordered_quantity is forged to 1.' );
+$complete_rows = array( $incomplete_row, $incomplete_row );
+$complete_rows[1]['item_key'] = 'order-item-42:split:2';
+$complete_rows[1]['split_parent'] = 'order-item-42';
+$complete_rows[1]['place_number'] = 2;
+$complete_request = cdek_order_request( DeliveryType::COURIER, 1, array(
+	'places' => $equal_places,
+	'shipment_item_rows' => $complete_rows,
+	'cdek_required_item_quantities' => array( '42' => 2 ),
+) );
+cdek_order_assert( array() === $builder->validate( $complete_request ), 'CDEK ordered quantity 2 allocated 1+1 across valid places must pass.' );
+$invalid_place_rows = $complete_rows;
+$invalid_place_rows[1]['place_number'] = 3;
+$invalid_place_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => $invalid_place_rows, 'cdek_required_item_quantities' => array( '42' => 2 ) ) );
+cdek_order_assert( in_array( 'Не все товары распределены по грузоместам.', $builder->validate( $invalid_place_request ), true ), 'CDEK allocation row with an unknown place must fail completeness validation.' );
+$manual_row = cdek_order_item_row( 'manual-3', 1, 'Добавленный товар', 'MANUAL', 1, 10000, 10 );
+$manual_request = cdek_order_request( DeliveryType::COURIER, 1, array( 'places' => $equal_places, 'shipment_item_rows' => array_merge( $complete_rows, array( $manual_row ) ), 'cdek_required_item_quantities' => array( '42' => 2 ) ) );
+$manual_errors = $builder->validate( $manual_request );
+cdek_order_assert( ! in_array( 'Не все товары распределены по грузоместам.', $manual_errors, true ), 'Manual-added positive row with a valid place must not invent a required order quantity: ' . implode( ' | ', $manual_errors ) );
 $too_many = array_fill( 0, 127, cdek_order_item_row( 'x', 1, 'T', 'W', 1, 100, 1 ) );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'shipment_item_rows' => $too_many ) ) ), 'More than 126 item rows must fail validation.' );
 
@@ -735,6 +782,15 @@ $creation = cdek_order_creation_service( $repository, new CdekShipmentAdapter( $
 $order = new CdekOrderFakeOrder();
 $result = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( $result->success, 'CDEK POST /v2/orders must be accepted.' );
+$overweight_create_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'place_weight' => 100 ) );
+$overweight_preview = ( new CdekShipmentAdapter( $client, $builder ) )->build_safe_payload_preview( $overweight_create_request );
+$overweight_http = new CdekOrderFakeHttp();
+$overweight_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $overweight_http ), $settings, $overweight_http );
+$overweight_creation = cdek_order_creation_service( new OrderShipmentRepository(), new CdekShipmentAdapter( $overweight_client, $builder ) );
+$overweight_result = $overweight_creation->create( new CdekOrderFakeOrder( 101 ), $overweight_create_request );
+cdek_order_assert( in_array( 'Вес грузоместа 1 меньше суммы весов товаров.', (array) ( $overweight_preview['errors'] ?? array() ), true ), 'CDEK overweight condition must enter preview hard errors.' );
+cdek_order_assert( array() === ( $overweight_preview['warnings'] ?? array() ), 'CDEK overweight hard error must not be duplicated as a warning.' );
+cdek_order_assert( ! $overweight_result->success && array() === $overweight_http->requests, 'CDEK overweight create bypass must be rejected before any remote API request.' );
 $document_order = new CdekOrderFakeOrder( 121 );
 $document_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'order_id' => 121, 'country_code' => 'KZ', 'tin' => 'KZ-SECRET-DOC-999' ) );
 $document_payload = $builder->build( $document_request );
@@ -1263,8 +1319,11 @@ $missing_pickup_service = array_values( array_filter( $missing_draft['services']
 $missing_options = is_array( $missing_pickup_service['tariffs'] ?? null ) ? $missing_pickup_service['tariffs'] : array();
 $missing_option = array_values( array_filter( $missing_options, static fn ( array $row ): bool => '999' === (string) ( $row['object_code'] ?? '' ) ) )[0] ?? array();
 cdek_order_assert( ! empty( $missing_option['selected_missing'] ) && '999' === (string) ( $missing_draft['request']['meta']['tariff_code'] ?? '' ), 'CDEK modal must keep selected tariff value when it is absent from active managed tariffs.' );
+$manual_override_order = new CdekOrderFakeOrder( 134 );
+$manual_override_order->meta = $draft_order->meta;
+$manual_override_order->items = array( new CdekOrderFakeOrderItem( new CdekOrderFakeProduct( 'DEC-1', '1', '30', '20', '10' ), 'Дробный товар', 1, 1990.0 ) );
 $admin_request = $drafts->create_request_from_admin_data(
-	$draft_order,
+	$manual_override_order,
 	array(
 		'delivery_type' => DeliveryType::PICKUP,
 		'tariff_object' => '136',
@@ -1277,14 +1336,18 @@ $admin_request = $drafts->create_request_from_admin_data(
 		'pickup_point_region' => 'Кемеровская область',
 		'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
 		'shipment_items' => array(
-			array( 'item_key' => 'decimal-item', 'ordered_quantity' => 2, 'place_number' => 1, 'name' => 'Дробный товар', 'ware_key' => 'DEC-1', 'amount' => 2, 'cost' => '800,50', 'weight' => 250, 'length_cm' => '36,5', 'width_cm' => '12.5', 'height_cm' => '3,5' ),
+			array( 'item_key' => 'order-item-1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Дробный товар', 'ware_key' => 'DEC-1', 'amount' => 1, 'cost' => '777', 'weight' => 450, 'length_cm' => '36,5', 'width_cm' => '12.5', 'height_cm' => '3,5' ),
 		),
 	)
 );
 cdek_order_assert( 'NEW1' === (string) ( $admin_request->meta['delivery_point'] ?? '' ) && 'NEW1' === (string) ( $admin_request->meta['pickup_point_code'] ?? '' ) && $admin_request->pickup_point instanceof PickupPointSelection && 'NEW1' === $admin_request->pickup_point->point_code, 'Choosing another CDEK pickup point in modal must update delivery_point and point_code.' );
 cdek_order_assert( 'NSK70' === (string) ( $admin_request->meta['shipment_point'] ?? '' ) && 'Новосибирск, новый ПВЗ' === (string) ( $admin_request->meta['shipment_point_address'] ?? '' ), 'Choosing another sender CDEK pickup point in modal must update temporary shipment_point and address.' );
 $decimal_rows = is_array( $admin_request->meta['shipment_item_rows'] ?? null ) ? $admin_request->meta['shipment_item_rows'] : array();
-cdek_order_assert( 80050 === (int) ( $decimal_rows[0]['unit_price_kopecks'] ?? 0 ) && 80050 === (int) ( $decimal_rows[0]['assessed_unit_price_kopecks'] ?? 0 ) && 36.5 === (float) ( $decimal_rows[0]['length_cm'] ?? 0 ) && 12.5 === (float) ( $decimal_rows[0]['width_cm'] ?? 0 ) && 3.5 === (float) ( $decimal_rows[0]['height_cm'] ?? 0 ) && ! array_key_exists( 'cdek_item_rows', $admin_request->meta ), 'Shipment modal item rows must parse canonical shipment_items into canonical kopeck rows only.' );
+cdek_order_assert( 77700 === (int) ( $decimal_rows[0]['unit_price_kopecks'] ?? 0 ) && 77700 === (int) ( $decimal_rows[0]['assessed_unit_price_kopecks'] ?? 0 ) && 36.5 === (float) ( $decimal_rows[0]['length_cm'] ?? 0 ) && 12.5 === (float) ( $decimal_rows[0]['width_cm'] ?? 0 ) && 3.5 === (float) ( $decimal_rows[0]['height_cm'] ?? 0 ) && ! array_key_exists( 'cdek_item_rows', $admin_request->meta ), 'Shipment modal item rows must parse current canonical shipment_items into canonical kopeck rows only.' );
+$manual_payload = $builder->build( $admin_request );
+$manual_payload_item = $manual_payload['packages'][0]['items'][0] ?? array();
+cdek_order_assert( 450 === (int) ( $manual_payload_item['weight'] ?? 0 ) && 777.0 === (float) ( $manual_payload_item['cost'] ?? -1 ) && 0 === (int) ( $manual_payload_item['payment']['value'] ?? -1 ), 'CDEK create payload must use current modal item weight 450 and draft cost 777 instead of original order cost 1990 while preserving the existing zero payment formula.' );
+cdek_order_assert( ! isset( $manual_payload_item['length'] ) && ! isset( $manual_payload_item['width'] ) && ! isset( $manual_payload_item['height'] ), 'CDEK item dimensions remain draft data because the existing CDEK item API contract uses package dimensions only.' );
 cdek_order_assert( ! array_key_exists( 'cdek_recipient_document', $admin_request->meta ) && ! array_key_exists( 'tin', $admin_request->meta ) && ! array_key_exists( 'passport_number', $admin_request->meta ), 'CDEK recipient document must stay out of ShipmentCreateRequest meta.' );
 $cdek_admin_document_data = array(
 	'delivery_type' => DeliveryType::PICKUP,
@@ -1297,7 +1360,7 @@ $cdek_admin_document_data = array(
 	'pickup_point_cdek_city_code' => '9220',
 	'pickup_point_is_handout' => '1',
 	'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
-	'shipment_items' => array( array( 'item_key' => 'doc-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-DOC', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
+	'shipment_items' => array( array( 'item_key' => 'order-item-1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-DOC', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
 );
 foreach ( array( 'KZ' => 'tin', 'KG' => 'tin', 'AM' => 'passport_number', 'BY' => 'passport_number' ) as $document_country => $document_key ) {
 	$document_base_order = new CdekOrderFakeOrder( 160 + array_search( $document_country, array( 'KZ', 'KG', 'AM', 'BY' ), true ) );

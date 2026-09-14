@@ -83,30 +83,109 @@
     updateShipmentItemsSummary(form, shipmentPlaceOptions(form));
   }
 
-  function updateShipmentItemsSummary(form, places) {
-    const summary = form && form.querySelector('[data-wdc-shipment-items-summary]');
-    if (!summary) return;
-    const totals = {};
-    (places || []).forEach((place) => {
-      totals[place.number] = { weight: 0, cost: 0, quantity: 0, place };
-    });
-    shipmentItemRows(form).forEach((row) => {
+  function collectShipmentItems(form) {
+    return shipmentItemRows(form).map((row, index) => {
       const place = placeSelect(row);
       const qty = shipmentQtyInput(row);
       const weight = row.querySelector('input[name$="[weight]"]');
       const cost = row.querySelector('input[name$="[cost]"]');
-      const placeNumber = place && place.value ? place.value : '1';
-      if (!totals[placeNumber]) totals[placeNumber] = { weight: 0, cost: 0, quantity: 0, place: { number: placeNumber, weight: 0 } };
-      const amount = parseInt(qty && qty.value ? qty.value : '0', 10) || 0;
-      totals[placeNumber].quantity += amount;
-      totals[placeNumber].weight += amount * (parseInt(weight && weight.value ? weight.value : '0', 10) || 0);
-      totals[placeNumber].cost += amount * parseDecimalValue(cost && cost.value ? cost.value : '0');
+      return {
+        row,
+        index,
+        placeNumber: place && place.value ? String(place.value) : '1',
+        quantity: parseInt(qty && qty.value ? qty.value : '0', 10) || 0,
+        weight: parseInt(weight && weight.value ? weight.value : '0', 10) || 0,
+        cost: parseDecimalValue(cost && cost.value ? cost.value : '0')
+      };
     });
-    summary.innerHTML = Object.keys(totals).sort().map((number) => {
-      const row = totals[number];
+  }
+
+  function packageSummary(place, items) {
+    return (items || []).reduce((summary, item) => {
+      if (String(item.placeNumber) !== String(place.number)) return summary;
+      summary.quantity += item.quantity;
+      summary.weight += item.quantity * item.weight;
+      summary.cost += item.quantity * item.cost;
+      summary.items.push(item);
+      return summary;
+    }, { quantity: 0, weight: 0, cost: 0, items: [], place });
+  }
+
+  function updateShipmentItemsSummary(form, places) {
+    const summary = form && form.querySelector('[data-wdc-shipment-items-summary]');
+    if (!summary) return;
+    const items = collectShipmentItems(form);
+    const totals = (places || []).map((place) => packageSummary(place, items));
+    summary.innerHTML = totals.map((row) => {
+      const number = row.place.number;
       const error = row.place.weight > 0 && row.weight > row.place.weight ? ' data-error="1"' : '';
       return '<p' + error + '><strong>Место ' + number + ':</strong> вес места ' + row.place.weight + ' г; заполнено: товары ' + row.quantity + ' шт, вес товаров ' + row.weight + ' г, стоимость ' + row.cost.toFixed(2) + ' руб.</p>';
     }).join('');
+    updateFitShipmentItemWeightButtons(form, totals, places || []);
+  }
+
+  function updateFitShipmentItemWeightButtons(form, summaries, places) {
+    const actions = form && form.querySelector('[data-wdc-fit-item-weight-actions]');
+    if (!actions) return;
+    const allPlaceWeightsReady = (places || []).length > 0 && (places || []).every((place) => place.weight > 0);
+    const showPlaceNumber = (places || []).length > 1;
+    actions.innerHTML = (summaries || []).map((summary) => {
+      const enabled = allPlaceWeightsReady
+        && summary.place.weight > 50
+        && summary.items.length > 0
+        && summary.weight > summary.place.weight;
+      return '<button type="button" class="button" data-wdc-fit-shipment-item-weight data-place-number="'
+        + escapeHtml(summary.place.number) + '" title="Место ' + escapeHtml(summary.place.number) + '"'
+        + (enabled ? '' : ' disabled') + '>Подогнать вес товаров'
+        + (showPlaceNumber ? ' ' + escapeHtml(summary.place.number) : '') + '</button>';
+    }).join(' ');
+  }
+
+  function fitShipmentItemWeights(form, placeNumber) {
+    const place = shipmentPlaceOptions(form).find((candidate) => String(candidate.number) === String(placeNumber));
+    const items = collectShipmentItems(form).filter((item) => item.placeNumber === String(placeNumber) && item.quantity > 0 && item.weight > 0);
+    if (!place || place.weight <= 50 || !items.length) return false;
+    const target = place.weight - 50;
+    const currentTotal = items.reduce((total, item) => total + item.quantity * item.weight, 0);
+    if (currentTotal <= place.weight) return false;
+
+    const fitted = items.map((item) => {
+      const raw = item.weight * target / currentTotal;
+      const weight = Math.max(1, Math.floor(raw));
+      return Object.assign({}, item, { fittedWeight: weight, remainder: raw - Math.floor(raw) });
+    });
+    const baseTotal = fitted.reduce((total, item) => total + item.quantity * item.fittedWeight, 0);
+    if (baseTotal > target) return false;
+
+    const remaining = target - baseTotal;
+    const priority = fitted.slice().sort((left, right) => {
+      if (right.remainder !== left.remainder) return right.remainder - left.remainder;
+      return left.index - right.index;
+    });
+    const choices = new Array(remaining + 1).fill(-2);
+    choices[0] = -1;
+    for (let amount = 1; amount <= remaining; amount += 1) {
+      for (let index = 0; index < priority.length; index += 1) {
+        const step = priority[index].quantity;
+        if (step <= amount && choices[amount - step] !== -2) {
+          choices[amount] = index;
+          break;
+        }
+      }
+    }
+    let reachable = remaining;
+    while (reachable > 0 && choices[reachable] === -2) reachable -= 1;
+    while (reachable > 0) {
+      const index = choices[reachable];
+      priority[index].fittedWeight += 1;
+      reachable -= priority[index].quantity;
+    }
+    fitted.forEach((item) => {
+      const source = priority.find((candidate) => candidate.index === item.index);
+      const input = item.row.querySelector('input[name$="[weight]"]');
+      if (input && source) input.value = String(source.fittedWeight);
+    });
+    return true;
   }
 
   function normalizeQtyRows(rows, targetTotal, lockedRow) {
@@ -236,7 +315,9 @@
 
   function updateShipmentSplitAvailability(form, placeCount) {
     if (!form) return;
-    if (placeCount <= 1) mergeShipmentSplitRows(form);
+    if (placeCount <= 1 && form.querySelector('[data-wdc-split-row]')) {
+      mergeShipmentSplitRows(form);
+    }
     form.querySelectorAll('[data-wdc-shipment-item-split]').forEach((button) => {
       const row = button.closest('[data-wdc-shipment-item-row]');
       const qty = parseInt(row && row.getAttribute('data-ordered-quantity') || '1', 10) || 1;

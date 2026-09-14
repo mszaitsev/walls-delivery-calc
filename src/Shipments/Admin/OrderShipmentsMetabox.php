@@ -571,6 +571,7 @@ final class OrderShipmentsMetabox {
 	private function render_shipment_item_rows( array $request ): void {
 		$places = is_array( $request['places'] ?? null ) ? $request['places'] : array();
 		$items = is_array( $places[0]['items'] ?? null ) ? $places[0]['items'] : array();
+		$draft_rows = is_array( $request['meta']['shipment_item_rows'] ?? null ) ? array_values( $request['meta']['shipment_item_rows'] ) : array();
 		if ( array() === $items ) {
 			echo '<p class="description">' . esc_html__( 'В заказе нет товарных строк. Добавьте товар вручную, если он должен попасть в грузоместо.', 'walls-delivery-calc' ) . '</p>';
 		}
@@ -580,8 +581,12 @@ final class OrderShipmentsMetabox {
 			<tbody>
 			<?php foreach ( $items as $index => $item ) : ?>
 				<?php
-				$row_key = (string) ( $item['order_item_id'] ?? $item['item_id'] ?? '' );
-				$row_key = '' !== $row_key ? 'order-item-' . $row_key : 'item-' . (string) ( $index + 1 );
+				$row_key = trim( (string) ( $draft_rows[ $index ]['item_key'] ?? $item['order_item_id'] ?? $item['item_id'] ?? '' ) );
+				if ( '' === $row_key ) {
+					$row_key = 'item-' . (string) ( $index + 1 );
+				} elseif ( ! str_starts_with( $row_key, 'order-item-' ) ) {
+					$row_key = 'order-item-' . $row_key;
+				}
 				$quantity = max( 1, (int) ( $item['quantity'] ?? 1 ) );
 				$sku = (string) ( $item['sku'] ?? '' );
 				if ( '' === $sku ) {
@@ -617,7 +622,8 @@ final class OrderShipmentsMetabox {
 			<?php endforeach; ?>
 			</tbody>
 		</table>
-		<p><button type="button" class="button" data-wdc-add-manual-shipment-item data-wdc-add-manual-cdek-item><?php echo esc_html__( 'Добавить товар', 'walls-delivery-calc' ); ?></button></p>
+		<div class="wdc-shipment-errors" data-wdc-cdek-draft-errors hidden></div>
+		<p><button type="button" class="button" data-wdc-add-manual-shipment-item data-wdc-add-manual-cdek-item><?php echo esc_html__( 'Добавить товар', 'walls-delivery-calc' ); ?></button> <span data-wdc-fit-item-weight-actions></span></p>
 		<?php
 	}
 

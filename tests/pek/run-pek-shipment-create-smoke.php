@@ -32,6 +32,7 @@ use WallsShop\WDC\Shipments\Pek\PekShipmentCargoBuilder;
 use WallsShop\WDC\Shipments\Pek\PekShipmentCourierAddressResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentCreateResponseParser;
 use WallsShop\WDC\Shipments\Pek\PekShipmentProductWeightResolver;
+use WallsShop\WDC\Shipments\Pek\PekShipmentDeclaredValueResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentRecipientBuilder;
 use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -201,6 +202,9 @@ $light_request = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, Deliver
 $heavy_request = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, DeliveryType::PICKUP, 'pek:pickup', new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ), null, array( new ShipmentPlace( 1, 5000, 20, 20, 20, Money::from_kopecks( 0 ), $items_heavy ) ), Money::from_kopecks( 0 ) );
 pek_shipment_create_assert( 2500 === $weight_resolver->product_weight_g( $light_request ) && $weight_resolver->sealing_required( $light_request ), 'Product weight fallback must sum all items and enable sealing below threshold.' );
 pek_shipment_create_assert( 3200 === $weight_resolver->product_weight_g( $heavy_request ) && ! $weight_resolver->sealing_required( $heavy_request ), 'Product weight fallback must sum all items and disable sealing at/above threshold.' );
+$manual_draft_request = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, DeliveryType::PICKUP, 'pek:pickup', new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ), null, array( new ShipmentPlace( 1, 500, 20, 20, 20, Money::from_kopecks( 0 ), $items_heavy ) ), Money::from_kopecks( 0 ), meta: array( 'calculation_data' => array( 'package' => array( 'products_weight_g' => 9999 ) ), 'shipment_item_rows' => array( array( 'amount' => 1, 'weight' => 450, 'unit_price_kopecks' => 99000 ) ) ) );
+pek_shipment_create_assert( 450 === $weight_resolver->product_weight_g( $manual_draft_request ), 'PEK product weight must prefer the current modal draft over stale calculation/order values.' );
+pek_shipment_create_assert( 99000 === ( new PekShipmentDeclaredValueResolver() )->resolve( $manual_draft_request )->get_kopecks(), 'PEK insurance declared value must use the current modal draft item price.' );
 $surcharge_policy = new PekLightCargoSurchargePolicy( $settings );
 $money_zero = Money::from_kopecks( 0 );
 $package_2999 = new Package( array(), $money_zero, $money_zero, 2999, 999, 3998, 20, 20, 20, 8000, 'cart' );
