@@ -1237,6 +1237,24 @@
 
 	function pointMatchKeys(point) {
 		var snapshot = pointSnapshot(point);
+		var carrier = String(point && (point.carrier_key || point.carrier) || snapshot.carrier_key || snapshot.carrier || '').trim().toLowerCase();
+		var family = String(point && point.pickup_family || snapshot.pickup_family || '').trim().toLowerCase();
+		if (carrier === 'cdek' || family === 'cdek:pickup') {
+			return uniquePointMatchKeys([
+				['uuid:', point && point.cdek_uuid],
+				['uuid:', snapshot.cdek_uuid],
+				['id:', point && point.id],
+				['id:', point && point.point_id],
+				['id:', snapshot.id],
+				['id:', snapshot.point_id],
+				['code:', point && point.point_code],
+				['code:', point && point.cdek_code],
+				['code:', point && point.delivery_point],
+				['code:', snapshot.point_code],
+				['code:', snapshot.cdek_code],
+				['code:', snapshot.delivery_point]
+			]);
+		}
 		var values = [
 			point && point.id,
 			point && point.point_id,
@@ -1257,9 +1275,16 @@
 			snapshot.point_postcode,
 			snapshot.display_code
 		];
+		return uniquePointMatchKeys(values.map(function (value) { return ['', value]; }));
+	}
+
+	function uniquePointMatchKeys(values) {
 		var keys = [];
-		values.forEach(function (value) {
-			var key = String(value || '').trim();
+		values.forEach(function (entry) {
+			var key = String(entry[1] || '').trim();
+			if (key) {
+				key = String(entry[0] || '') + key;
+			}
 			if (key && keys.indexOf(key) === -1) {
 				keys.push(key);
 			}
