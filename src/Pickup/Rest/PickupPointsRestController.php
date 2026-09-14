@@ -269,6 +269,10 @@ final class PickupPointsRestController {
 			'handout_only' => 'sender_dropoff' !== $purpose,
 			'refresh' => in_array( strtolower( $this->param( $request, 'refresh' ) ), array( '1', 'true', 'yes' ), true ),
 		);
+		$location_context = $this->location_context( $request );
+		if ( 'sender_dropoff' !== $purpose && (int) ( $location_context['location_id'] ?? 0 ) > 0 ) {
+			return array_map( array( $this, 'cdek_summary' ), $this->cdek_points->pointsForLocation( $location_context, $options ) );
+		}
 		if ( $city_code > 0 ) {
 			return array_map( array( $this, 'cdek_summary' ), $this->cdek_points->pointsByCityCode( $city_code, $options ) );
 		}
@@ -567,6 +571,8 @@ final class PickupPointsRestController {
 			'country_code' => (string) ( $point['country_code'] ?? '' ),
 			'cdek_city_code' => (int) ( $point['cdek_city_code'] ?? 0 ),
 			'is_handout' => ! empty( $point['is_handout'] ),
+			'requires_destination_requote' => ! empty( $point['requires_destination_requote'] ),
+			'presentation_comment' => (string) ( $point['presentation_comment'] ?? '' ),
 		);
 		$snapshot['display_code'] = (string) ( $point['display_code'] ?? $snapshot['cdek_code'] );
 		$snapshot['display_title'] = (string) ( $point['display_title'] ?? trim( $snapshot['point_title'] . ' ' . $snapshot['display_code'] ) );
@@ -611,6 +617,8 @@ final class PickupPointsRestController {
 			'country_code' => $snapshot['country_code'],
 			'cdek_city_code' => $snapshot['cdek_city_code'],
 			'is_handout' => $snapshot['is_handout'],
+			'requires_destination_requote' => $snapshot['requires_destination_requote'],
+			'presentation_comment' => $snapshot['presentation_comment'],
 			'snapshot' => $snapshot,
 		);
 	}

@@ -24,7 +24,8 @@ final class CdekDeliveryPointService {
 		private CdekApiClient $client,
 		private CdekSettings $settings,
 		private CdekLocationResolver $locations,
-		private Logger $logger
+		private Logger $logger,
+		private ?CdekPickupCoverageService $coverage = null
 	) {
 	}
 
@@ -34,16 +35,48 @@ final class CdekDeliveryPointService {
 	 * @return array<int,array<string,mixed>>
 	 */
 	public function pointsForLocation( array $location, array $options = array() ): array {
-		$city_code = $this->city_code_from_location( $location );
+		$location_id = (int) ( $location['location_id'] ?? 0 );
+		$known_city_code = $this->city_code_from_location( $location );
+		if ( $location_id <= 0 && $known_city_code > 0 ) {
+			return $this->pointsByCityCode( $known_city_code, array_merge( $options, array( 'country_code' => $this->country_code_from_location( $location ) ) ) );
+		}
+		if ( $this->coverage instanceof CdekPickupCoverageService && $location_id > 0 ) {
+			$canonical = $this->coverage->canonical_location_context( $location_id );
+			if ( array() !== $canonical ) {
+				$location = $canonical;
+			}
+		}
+		$resolved = $this->resolve_location( $location );
+		$city_code = (int) ( $resolved['city_code'] ?? 0 );
 		if ( $city_code <= 0 ) {
-			$resolved = $this->resolve_location( $location );
-			$city_code = (int) ( $resolved['city_code'] ?? 0 );
+			$city_code = $this->city_code_from_location( $location );
+			$resolved = array( 'success' => $city_code > 0, 'city_code' => $city_code, 'city_name' => (string) ( $location['city_name'] ?? '' ), 'country_code' => $this->country_code_from_location( $location ) );
 		}
 		if ( $city_code <= 0 ) {
 			return array();
 		}
 
-		return $this->pointsByCityCode( $city_code, array_merge( $options, array( 'country_code' => $this->country_code_from_location( $location ) ) ) );
+		$cities = $this->coverage instanceof CdekPickupCoverageService
+			? $this->coverage->cities_for_location( $location, $resolved )
+			: array( array( 'code' => $city_code ) );
+		$points = array();
+		$primary_code = $city_code;
+		foreach ( $cities as $city ) {
+			$code = (int) ( $city['code'] ?? 0 );
+			foreach ( $this->pointsByCityCode( $code, array_merge( $options, array( 'country_code' => $this->country_code_from_location( $location ) ) ) ) as $point ) {
+				if ( (int) ( $point['cdek_city_code'] ?? 0 ) !== $primary_code ) {
+					$point['requires_destination_requote'] = true;
+					$point['presentation_comment'] = 'Стоимость будет рассчитана заново (особенность географии СДЭК)';
+				}
+				$key = '' !== trim( (string) ( $point['cdek_uuid'] ?? '' ) ) ? 'u:' . strtolower( (string) $point['cdek_uuid'] ) : 'c:' . strtolower( (string) ( $point['cdek_code'] ?? $point['point_code'] ?? '' ) );
+				if ( ! isset( $points[ $key ] ) ) {
+					$points[ $key ] = $point;
+				}
+			}
+		}
+		ksort( $points );
+
+		return array_values( $points );
 	}
 
 	/**

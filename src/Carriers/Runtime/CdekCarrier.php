@@ -71,13 +71,14 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			return $this->empty_quote( $request, 'sender_city_code_required' );
 		}
 
-		$to = $this->locations->resolve( $request );
-		if ( empty( $to['success'] ) ) {
-			return $this->empty_quote( $request, 'destination_city_not_resolved', $to );
+		$primary = $this->locations->resolve( $request );
+		if ( empty( $primary['success'] ) ) {
+			return $this->empty_quote( $request, 'destination_city_not_resolved', $primary );
 		}
-		if ( DeliveryType::PICKUP === $delivery_type && ! $this->has_handout_delivery_point( $request, $to ) ) {
-			return $this->empty_quote( $request, 'pickup_handout_point_not_found', $to );
+		if ( DeliveryType::PICKUP === $delivery_type && ! $this->has_handout_delivery_point( $request, $primary ) ) {
+			return $this->empty_quote( $request, 'pickup_handout_point_not_found', $primary );
 		}
+		$to = $this->effective_destination( $request, $primary, $delivery_type );
 
 		$payload = $this->tariff_payload( $request, $to );
 		try {
@@ -124,7 +125,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				++$skipped_other_type;
 				continue;
 			}
-			$rate = $this->rate_from_tariff( $request, $type, $tariff, $candidate_payload, $candidate_result, $to, $managed_tariff, $insurance );
+			$rate = $this->rate_from_tariff( $request, $type, $tariff, $candidate_payload, $candidate_result, $to, $managed_tariff, $insurance, $primary );
 			if ( $rate instanceof DeliveryRate ) {
 				$rates[] = $rate;
 			}
@@ -148,7 +149,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'',
 			false,
 			'api',
-			array( 'delivery_type' => $delivery_type, 'location' => $to )
+			array( 'delivery_type' => $delivery_type, 'location' => $primary, 'effective_location' => $to )
 		);
 	}
 
@@ -640,7 +641,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	 * @param array<string,mixed> $result
 	 * @param array<string,mixed> $to
 	 */
-	private function rate_from_tariff( QuoteRequest $request, string $delivery_type, array $tariff, array $payload, array $result, array $to, ?array $managed_tariff = null, array $insurance = array() ): ?DeliveryRate {
+	private function rate_from_tariff( QuoteRequest $request, string $delivery_type, array $tariff, array $payload, array $result, array $to, ?array $managed_tariff = null, array $insurance = array(), array $primary = array() ): ?DeliveryRate {
 		$details = is_array( $tariff['result'] ?? null ) ? array_merge( $tariff, $tariff['result'] ) : $tariff;
 		$delivery_price = is_numeric( $details['delivery_sum'] ?? null ) ? (float) $details['delivery_sum'] : 0.0;
 		$insurance_amount = is_numeric( $insurance['amount_rub'] ?? null ) ? (float) $insurance['amount_rub'] : 0.0;
@@ -697,6 +698,11 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				'cdek_from_city_name' => $this->settings->sender_city_name(),
 				'cdek_to_city_code' => (int) $to['city_code'],
 				'cdek_to_city_name' => (string) $to['city_name'],
+				'cdek_primary_city_code' => (int) ( $primary['city_code'] ?? $to['city_code'] ),
+				'cdek_primary_city_name' => (string) ( $primary['city_name'] ?? $to['city_name'] ),
+				'cdek_effective_city_code' => (int) $to['city_code'],
+				'cdek_effective_city_name' => (string) $to['city_name'],
+				'wdc_location_id' => (int) ( $request->customer_context['selected_location_id'] ?? $request->customer_context['location_id'] ?? 0 ),
 				'cdek_to_country_code' => (string) ( $to['country_code'] ?? strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ) ),
 				'cdek_location_source' => (string) $to['source'],
 				'cdek_location_confidence' => (float) $to['confidence'],
@@ -876,6 +882,9 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'city_name' => (string) ( $result['city_name'] ?? '' ),
 			'country_code' => (string) ( $result['country_code'] ?? '' ),
 			'region' => (string) ( $result['region'] ?? '' ),
+			'region_code' => (int) ( $result['region_code'] ?? 0 ),
+			'sub_region' => (string) ( $result['sub_region'] ?? '' ),
+			'fias_guid' => (string) ( $result['fias_guid'] ?? '' ),
 			'source' => (string) ( $result['source'] ?? '' ),
 			'confidence' => isset( $result['confidence'] ) ? (float) $result['confidence'] : null,
 			'reason' => (string) ( $result['reason'] ?? '' ),
@@ -953,6 +962,16 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	 */
 	private function has_handout_delivery_point( QuoteRequest $request, array $to ): bool {
 		$country = strtoupper( trim( (string) ( $to['country_code'] ?? ( $request->country_code ?: $request->destination->country_code ) ) ) );
+		$selected = $this->selected_pickup( $request );
+		if ( array() !== $selected ) {
+			$location = $this->pickup_location_context( $request, $to, $country );
+			foreach ( $this->delivery_points->pointsForLocation( $location, array( 'country_code' => $country, 'handout_only' => true ) ) as $point ) {
+				if ( (string) ( $point['point_code'] ?? '' ) === (string) $selected['point_code'] && (int) ( $point['cdek_city_code'] ?? 0 ) === (int) $selected['city_code'] && ! empty( $point['is_handout'] ) ) {
+					return true;
+				}
+			}
+			return false;
+		}
 		$points = $this->delivery_points->pointsByCityCode( (int) ( $to['city_code'] ?? 0 ), array( 'country_code' => $country ) );
 		foreach ( $points as $point ) {
 			if ( empty( $point['is_handout'] ) ) {
@@ -964,8 +983,61 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				return true;
 			}
 		}
+		$location = $this->pickup_location_context( $request, $to, $country );
+		foreach ( $this->delivery_points->pointsForLocation( $location, array( 'country_code' => $country, 'handout_only' => true ) ) as $point ) {
+			if ( ! empty( $point['is_handout'] ) ) {
+				return true;
+			}
+		}
 
 		return false;
+	}
+
+	/** @param array<string,mixed> $to @return array<string,mixed> */
+	private function pickup_location_context( QuoteRequest $request, array $to, string $country ): array {
+		return array(
+			'location_id' => (int) ( $request->customer_context['selected_location_id'] ?? $request->customer_context['location_id'] ?? 0 ),
+			'cdek_city_code' => (int) ( $to['city_code'] ?? 0 ),
+			'country_code' => $country,
+			'city_name' => (string) ( $request->destination->settlement ?: $request->destination->city ),
+			'region_name' => $request->destination->region_name,
+			'postal_code' => $request->destination->postcode,
+			'fias_id' => $request->destination->fias_id,
+		);
+	}
+
+	/** @param array<string,mixed> $primary @return array<string,mixed> */
+	private function effective_destination( QuoteRequest $request, array $primary, string $delivery_type ): array {
+		if ( DeliveryType::PICKUP !== $delivery_type ) {
+			return $primary;
+		}
+		$selected = $this->selected_pickup( $request );
+		if ( array() === $selected ) {
+			return $primary;
+		}
+
+		$effective = $primary;
+		$effective['city_code'] = (int) $selected['city_code'];
+		$effective['city_name'] = (string) ( $selected['city_name'] ?: ( $primary['city_name'] ?? '' ) );
+		$effective['source'] = 'pickup_selection';
+
+		return $effective;
+	}
+
+	/** @return array<string,mixed> */
+	private function selected_pickup( QuoteRequest $request ): array {
+		$selections = is_array( $request->customer_context['pickup_selections'] ?? null ) ? $request->customer_context['pickup_selections'] : array();
+		$selection = is_array( $selections[ self::checkout_group_id( DeliveryType::PICKUP ) ] ?? null ) ? $selections[ self::checkout_group_id( DeliveryType::PICKUP ) ] : array();
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$carrier = sanitize_key( (string) ( $selection['carrier_key'] ?? $snapshot['carrier_key'] ?? '' ) );
+		$family = (string) ( $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+		$city_code = (int) ( $selection['cdek_city_code'] ?? $snapshot['cdek_city_code'] ?? 0 );
+		$point_code = trim( (string) ( $selection['point_code'] ?? $snapshot['point_code'] ?? '' ) );
+		if ( self::KEY !== $carrier || self::checkout_group_id( DeliveryType::PICKUP ) !== $family || $city_code <= 0 || '' === $point_code ) {
+			return array();
+		}
+
+		return array( 'city_code' => $city_code, 'point_code' => $point_code, 'city_name' => (string) ( $selection['city_name'] ?? $snapshot['city'] ?? '' ) );
 	}
 
 	private function quote_id( QuoteRequest $request, string $suffix ): string {

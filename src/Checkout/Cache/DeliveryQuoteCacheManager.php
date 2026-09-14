@@ -14,6 +14,7 @@ final class DeliveryQuoteCacheManager {
 		'wdc_rp_tariff_',
 		'wdc_cdek_city_',
 		'wdc_cdek_deliverypoints_',
+		'wdc_cdek_region_directory_',
 	);
 
 	/** @var array<int,string> */

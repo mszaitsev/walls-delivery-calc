@@ -320,6 +320,7 @@ use WallsShop\WDC\Packaging\PackagingBuilder;
 use WallsShop\WDC\Packaging\PackagingBuilderConfig;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
+use WallsShop\WDC\Pickup\Cdek\CdekPickupCoverageService;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\Presentation\PickupPointPresentationResolver;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
@@ -525,7 +526,8 @@ final class Plugin {
 		$this->container->register( CdekOAuthTokenService::class, fn(): CdekOAuthTokenService => new CdekOAuthTokenService( $this->container->get( CdekSettings::class ), $this->container->get( WpCdekHttpClient::class ) ) );
 		$this->container->register( CdekApiClient::class, fn(): CdekApiClient => new CdekApiClient( $this->container->get( CdekOAuthTokenService::class ), $this->container->get( CdekSettings::class ), $this->container->get( WpCdekHttpClient::class ) ) );
 		$this->container->register( CdekLocationResolver::class, fn(): CdekLocationResolver => new CdekLocationResolver( $this->container->get( CdekApiClient::class ), $this->container->get( CdekSettings::class ), $this->container->get( Logger::class ) ) );
-		$this->container->register( CdekDeliveryPointService::class, fn(): CdekDeliveryPointService => new CdekDeliveryPointService( $this->container->get( CdekApiClient::class ), $this->container->get( CdekSettings::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( CdekPickupCoverageService::class, fn(): CdekPickupCoverageService => new CdekPickupCoverageService( $this->container->get( CdekApiClient::class ), $this->container->get( CdekSettings::class ), $this->container->get( LocationRepository::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( CdekDeliveryPointService::class, fn(): CdekDeliveryPointService => new CdekDeliveryPointService( $this->container->get( CdekApiClient::class ), $this->container->get( CdekSettings::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ), $this->container->get( CdekPickupCoverageService::class ) ) );
 		$this->container->register( CdekTariffRepository::class, fn(): CdekTariffRepository => new CdekTariffRepository() );
 		$this->container->register( CdekTariffSyncService::class, fn(): CdekTariffSyncService => new CdekTariffSyncService( $this->container->get( CdekApiClient::class ), $this->container->get( CdekTariffRepository::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( DpdSettings::class, fn(): DpdSettings => new DpdSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );

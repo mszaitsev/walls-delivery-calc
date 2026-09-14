@@ -1,6 +1,6 @@
 # Shipments
 
-Version: 1.0.21
+Version: 1.0.22
 
 Shipment code lives under `src/Shipments` and carrier-owned shipment modules. Implementations exist for CDEK, DPD, Russian Post, Yandex Delivery, Jet Logistic, PEK, and Ozon Delivery; shared behavior is defined by the Shipment Framework.
 
@@ -23,6 +23,8 @@ Before mutation the Ozon service resolves the selected pickup point from the act
 Persistence is mapper-owned: the saved shipment keeps the Ozon order number, all posting numbers, posting-to-place indexes, idempotency key, approval state, safe request/response snapshots, actual-cost candidate from pre-create `/v1/order/checkout`, and lifecycle continuation token when approval is partial. Retry resumes approval of existing postings and does not create a second Ozon order or repeat the checkout preflight. Status sync uses `POST /v1/posting/info` for all postings and maps documented Ozon statuses; a multi-posting shipment is not delivered until all required postings are delivered. Cancellation uses `POST /v1/posting/cancel` for each persisted posting and treats partial accepted cancellation as a controlled reconciliation state driven by status polling, without automatic second cancel mutation. Labels use `POST /v1/posting/label` per posting through the existing document provider UI.
 
 ## CDEK EAEU Shipments
+
+CDEK pickup coverage does not change Shipment Framework production code. A selected child point keeps its actual `cdek_city_code` in the generic pickup snapshot, while pickup creation continues to send the selected `delivery_point` code; courier `to_location` semantics remain unchanged.
 
 CDEK domestic and EAEU shipments share the existing `CdekShipmentAdapter`, request builder, persistence mapper, status service, barcode print service, document provider, and modal extension. Shipment Framework contracts, registries, lifecycle endpoints, status polling, manual attach, cancel, local remove, actual cost, and barcode PDF behavior remain shared.
 

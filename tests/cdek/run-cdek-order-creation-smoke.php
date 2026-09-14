@@ -1172,6 +1172,44 @@ $saved_pickup_request = $drafts->create_request_from_admin_data(
 	)
 );
 cdek_order_assert( 'MSK575' === (string) ( $saved_pickup_request->meta['delivery_point'] ?? '' ) && $saved_pickup_request->pickup_point instanceof PickupPointSelection && 'MSK575' === $saved_pickup_request->pickup_point->point_code, 'CDEK shipment admin request must fall back to canonical saved pickup code when modal sends only address.' );
+$child_pickup_order = new CdekOrderFakeOrder( 138 );
+$child_pickup_order->meta = $draft_order->meta;
+$child_pickup_order->meta['_wdc_pickup_point_code'] = 'ZHLD25';
+$child_pickup_order->meta['_wdc_platform_pickup_code'] = 'ZHLD25';
+$child_pickup_order->meta['_wdc_delivery_calculation_data']['pickup'] = array(
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'service_key' => CdekSettings::SERVICE_KEY,
+	'pickup_family' => 'cdek:pickup',
+	'point_code' => 'ZHLD25',
+	'cdek_code' => 'ZHLD25',
+	'delivery_point' => 'ZHLD25',
+	'point_address' => 'Железнодорожный микрорайон, ПВЗ СДЭК',
+	'city_name' => 'Железнодорожный микрорайон',
+	'region_name' => 'Московская область',
+	'country_code' => 'RU',
+	'cdek_city_code' => 391,
+	'is_handout' => true,
+);
+$child_pickup_request = $drafts->create_request_from_admin_data(
+	$child_pickup_order,
+	array(
+		'delivery_type' => DeliveryType::PICKUP,
+		'tariff_object' => '136',
+		'delivery_point' => 'ZHLD25',
+		'pickup_point_code' => 'ZHLD25',
+		'pickup_point_address' => 'Железнодорожный микрорайон, ПВЗ СДЭК',
+		'pickup_point_city' => 'Железнодорожный микрорайон',
+		'pickup_point_region' => 'Московская область',
+		'pickup_point_country' => 'RU',
+		'pickup_point_cdek_city_code' => '391',
+		'pickup_point_is_handout' => '1',
+		'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
+		'shipment_items' => array( array( 'item_key' => 'zhld25-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-ZHLD25', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
+	)
+);
+$child_pickup_payload = $builder->build( $child_pickup_request );
+cdek_order_assert( 'ZHLD25' === (string) ( $child_pickup_payload['delivery_point'] ?? '' ) && ! array_key_exists( 'to_location', $child_pickup_payload ), 'CDEK child-city pickup shipment must use delivery_point=ZHLD25 and must not require primary/effective to_location.' );
+cdek_order_assert( 391 === (int) ( $child_pickup_request->meta['pickup_point_row']['cdek_city_code'] ?? 0 ), 'CDEK shipment draft must preserve the selected child point actual city code 391.' );
 $address_only_order = new CdekOrderFakeOrder( 135 );
 $address_only_order->meta = $draft_order->meta;
 $address_only_order->meta['_wdc_delivery_calculation_data']['pickup'] = array(

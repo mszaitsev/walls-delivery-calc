@@ -42,6 +42,7 @@ return array(
 	'russian-post.wp-file-api' => array( 'path' => 'tests/pickup/run-russian-post-wp-file-api-smoke.php', 'groups' => array( 'russian-post' ) ),
 
 	'cdek.foundation' => array( 'path' => 'tests/cdek/run-cdek-foundation-smoke.php', 'groups' => array( 'cdek' ) ),
+	'cdek.pickup-coverage' => array( 'path' => 'tests/cdek/run-cdek-pickup-coverage-smoke.php', 'groups' => array( 'cdek' ) ),
 	'cdek.order-creation' => array( 'path' => 'tests/cdek/run-cdek-order-creation-smoke.php', 'groups' => array( 'cdek' ), 'timeout' => 120 ),
 	'cdek.eaeu' => array( 'path' => 'tests/cdek/run-cdek-eaeu-smoke.php', 'groups' => array( 'cdek' ) ),
 	'cdek.tariff-calculation' => array( 'path' => 'tests/cdek/run-cdek-tariff-calculation-smoke.php', 'groups' => array( 'cdek' ), 'timeout' => 120 ),

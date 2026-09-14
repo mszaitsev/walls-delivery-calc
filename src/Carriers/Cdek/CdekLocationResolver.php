@@ -36,7 +36,7 @@ final class CdekLocationResolver {
 
 		$cache_key = $this->cache_key( $country, $fias, $city, $region, $postcode, $request );
 		$cached = $this->cached( $cache_key );
-		if ( array() !== $cached ) {
+		if ( array() !== $cached && array_key_exists( 'region_code', $cached ) && array_key_exists( 'sub_region', $cached ) && array_key_exists( 'fias_guid', $cached ) ) {
 			$cached['source'] = 'cache:' . (string) ( $cached['source'] ?? 'cdek_location_cities' );
 			return $cached;
 		}
@@ -180,8 +180,11 @@ final class CdekLocationResolver {
 				'success' => true,
 				'city_code' => $code,
 				'city_name' => $item_city,
-				'country_code' => $country,
+				'country_code' => '' !== $item_country_code ? $item_country_code : $country,
 				'region' => $item_region,
+				'region_code' => (int) ( $item['region_code'] ?? 0 ),
+				'sub_region' => trim( (string) ( $item['sub_region'] ?? '' ) ),
+				'fias_guid' => $item_fias,
 				'source' => 'cdek_location_cities',
 				'confidence' => $confidence,
 				'reason' => '',
@@ -235,6 +238,9 @@ final class CdekLocationResolver {
 			'city_name' => '',
 			'country_code' => '',
 			'region' => '',
+			'region_code' => 0,
+			'sub_region' => '',
+			'fias_guid' => '',
 			'source' => '',
 			'confidence' => 0.0,
 			'reason' => $reason,
