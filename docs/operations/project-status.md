@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.23
+Version: 1.0.24
 
-The current Walls Delivery Calc release source is version 1.0.23. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. The standalone WDC configuration console requires `manage_options`; WooCommerce order operational tools retain their explicit `manage_woocommerce` contract. Order-admin delivery recalculation preserves canonical selected-location state/city values when saving pickup delivery, while pickup address and point postcode remain carrier-owned. Yandex manual location overrides may retain a truthful empty source region and bind that incomplete identity to the exact geo id and locality. Calendar admin alignment, background workers, imports, and Shipment Framework remain unchanged.
+The current Walls Delivery Calc release source is version 1.0.24. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Checkout order creation now fails closed when the current persisted WDC rate requires a customer-selected pickup point but the authoritative family/carrier/current-destination selection is absent; representative quote stations remain non-authoritative. Yandex pickup-map selection is reconciled only by namespaced provider station/id/code identity, and side-list preview explicitly focuses the map without committing the point or allowing programmatic bounds refresh to transfer selection. The standalone WDC configuration console requires `manage_options`; WooCommerce order operational tools retain their explicit `manage_woocommerce` contract. Order-admin delivery recalculation preserves canonical selected-location state/city values when saving pickup delivery, while pickup address and point postcode remain carrier-owned. Yandex manual location overrides may retain a truthful empty source region and bind that incomplete identity to the exact geo id and locality. Calendar admin alignment, background workers, imports, and Shipment Framework remain unchanged.
 
 Current production scope includes:
 

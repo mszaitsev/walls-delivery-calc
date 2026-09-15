@@ -1,6 +1,6 @@
 # Dependency Injection
 
-Version: 1.0.23
+Version: 1.0.24
 
 `Plugin.php` is the only composition root. Runtime services receive required collaborators through constructors; carrier-specific settings, clients, mappers, adapters, document providers, and schedulers remain owned by their carrier modules. Checkout and Rule Engine domain services do not locate WooCommerce globals outside the documented boundary adapters.
 
@@ -31,6 +31,8 @@ Ozon Delivery wiring is carrier-owned in `Plugin.php`: settings, encrypted crede
 `OzonDeliveryQuoteService` owns the Ozon pickup provider query snapshot placed on the rate metadata. It computes the generic checkout destination fingerprint from trusted `QuoteRequest` context and query location, stores it in `pickup_provider_query.destination_fingerprint` for `CheckoutPickupPointProviderQueryResolver`, and uses the canonical 60 km Ozon destination pickup radius. The Ozon pickup provider reads only the active local snapshot, limits SQL by generation, active flag, and coordinate rectangle before exact radius/cargo filtering, returns the full eligible buyer-map set without arbitrary first-N truncation, and exposes selected-point repricing through generic `requires_rate_refresh` metadata. The resolver and REST controllers are not relaxed and do not recompute trusted context from browser data.
 
 `src/Core/Plugin.php` is the composition root. `src/Core/Container.php` is a small lazy singleton container with `register()`, `get()`, and `has()`.
+
+`CurrentWdcRateResolver` receives `CheckoutSessionManager` and is injected into both `CheckoutValidation` and `OrderShippingMetaPersister`. This keeps the final order-creation pickup guard and the metadata persister on the same current-session rate resolution semantics, while normal checkout validation continues to resolve the submitted POST shipping method first.
 
 ## Rules
 

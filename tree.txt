@@ -1,5 +1,5 @@
 Repository file tree
-Generated for Walls Delivery Calc 1.0.22
+Generated for Walls Delivery Calc 1.0.24
 
 .
 |-- tree.txt
@@ -407,6 +407,7 @@ Generated for Walls Delivery Calc 1.0.22
 |-- src/Checkout/WooCommerce/CheckoutSessionManager.php
 |-- src/Checkout/WooCommerce/CheckoutSortSelector.php
 |-- src/Checkout/WooCommerce/CheckoutValidation.php
+|-- src/Checkout/WooCommerce/CurrentWdcRateResolver.php
 |-- src/Checkout/WooCommerce/CourierRateSupport.php
 |-- src/Checkout/WooCommerce/NewShippingMethod.php
 |-- src/Checkout/WooCommerce/OrderDeliveryCustomerCommentsDisplay.php
@@ -732,6 +733,7 @@ Generated for Walls Delivery Calc 1.0.22
 |-- tests/checkout/run-checkout-city-selector-smoke.js
 |-- tests/checkout/run-checkout-delivery-messages-smoke.php
 |-- tests/checkout/run-checkout-location-picker-smoke.php
+|-- tests/checkout/run-checkout-order-creation-guard-smoke.php
 |-- tests/checkout/run-checkout-rate-sorting-smoke.php
 |-- tests/checkout/run-checkout-selection-smoke.php
 |-- tests/checkout/run-checkout-smoke.php

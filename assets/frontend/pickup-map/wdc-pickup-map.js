@@ -497,7 +497,12 @@
 				}
 				var point = findPoint(row.getAttribute('data-wdc-point-id'));
 				if (point) {
-					openPointPreviewFromMarker(point);
+					preview(point, {
+						userAction: true,
+						focus: true,
+						forcePopup: true,
+						ensureVisible: true
+					});
 				}
 			});
 		}
@@ -1253,6 +1258,18 @@
 				['code:', snapshot.point_code],
 				['code:', snapshot.cdek_code],
 				['code:', snapshot.delivery_point]
+			]);
+		}
+		if (carrier === 'yandex_delivery' || family === 'yandex_delivery:pickup') {
+			return uniquePointMatchKeys([
+				['station:', point && point.platform_station_id],
+				['station:', snapshot.platform_station_id],
+				['id:', point && point.id],
+				['id:', point && point.point_id],
+				['id:', snapshot.id],
+				['id:', snapshot.point_id],
+				['code:', point && point.point_code],
+				['code:', snapshot.point_code]
 			]);
 		}
 		var values = [

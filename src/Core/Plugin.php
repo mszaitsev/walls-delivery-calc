@@ -258,6 +258,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
+use WallsShop\WDC\Checkout\WooCommerce\CurrentWdcRateResolver;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
@@ -949,11 +950,12 @@ final class Plugin {
 				$this->container->get( PickupPointCardRenderer::class )
 			)
 		);
-		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutAddressValidation::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ) ) );
+		$this->container->register( CurrentWdcRateResolver::class, fn(): CurrentWdcRateResolver => new CurrentWdcRateResolver( $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutAddressValidation::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), null, $this->container->get( CurrentWdcRateResolver::class ) ) );
 		$this->container->register( CheckoutSortSelector::class, fn(): CheckoutSortSelector => new CheckoutSortSelector( $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( RuleFormulaFormatter::class, fn(): RuleFormulaFormatter => new RuleFormulaFormatter() );
 		$this->container->register( DeliveryCalculationDataBuilder::class, fn(): DeliveryCalculationDataBuilder => new DeliveryCalculationDataBuilder( $this->container->get( RuleFormulaFormatter::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
-		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ), $this->container->get( DeliveryDateFormatter::class ), $this->container->get( DeliveryCalculationDataBuilder::class ), $this->container->get( LocationRepository::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
+		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ), $this->container->get( DeliveryDateFormatter::class ), $this->container->get( DeliveryCalculationDataBuilder::class ), $this->container->get( LocationRepository::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ), $this->container->get( CurrentWdcRateResolver::class ) ) );
 		$this->container->register( PickupMapCheckout::class, fn(): PickupMapCheckout => new PickupMapCheckout( $this->container->get( CheckoutSessionManager::class ), $this->environment, $this->container->get( SettingsRepository::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ) ) );
 		$this->container->register( PickupPointOrderDisplay::class, fn(): PickupPointOrderDisplay => new PickupPointOrderDisplay( $this->container->get( PickupPointCardRenderer::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( OrderDeliveryCustomerCommentsDisplay::class, fn(): OrderDeliveryCustomerCommentsDisplay => new OrderDeliveryCustomerCommentsDisplay( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryCustomerCommentRenderer::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );

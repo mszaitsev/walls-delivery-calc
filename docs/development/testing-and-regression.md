@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 1.0.23
+Version: 1.0.24
 
 Tests are executable smoke programs with no production dependency installer. Run commands from the repository root with a supported PHP and Node.js runtime.
 
@@ -34,6 +34,8 @@ Shipment package-editor changes run `node tests/shipments/run-shipment-package-e
 
 Classic checkout releases run `tests/checkout/run-woocommerce-checkout-smoke.php`. Its grouped-tariff regression protects Woo shipping-package cache invalidation after nested selection, server-side recalculation of the selected title/price/crossed price and total, canonical planned-comment payloads, checked-state restoration, and preservation of the chosen top-level method and same-family pickup point.
 
+Checkout order-creation releases also run `tests/checkout/run-checkout-order-creation-guard-smoke.php`. It deterministically validates POST state A, mutates the current session to Yandex pickup state B before order creation, and proves the priority-19 guard aborts before WDC metadata persistence. It also covers the direct #87291 empty-selection fixture, representative-station non-authority, stale destination rejection, valid Yandex persistence, and explicit no-selection/fixed-pickup bypasses.
+
 Admin-access releases run `tests/delivery-services/run-delivery-services-smoke.php` together with the order recalculation and shipment-admin smokes. The suite models an Administrator and a Shop Manager, protects `manage_options` on WDC menus, direct pages, configuration POST and representative read/mutating AJAX endpoints, and separately proves that order operational actions remain under `manage_woocommerce`.
 
 ## Schema acceptance
@@ -42,7 +44,7 @@ Admin-access releases run `tests/delivery-services/run-delivery-services-smoke.p
 
 ## ZIP acceptance
 
-Build `dist/walls-delivery-calc-1.0.23.zip`, inspect its one-folder layout, lint/check the extracted runtime files, and install that ZIP through the standard WordPress upload UI. With `WP_DEBUG` and `WP_DEBUG_LOG` enabled, exercise activation, WDC admin pages, checkout location/rates, pickup map/selection, and recalculation. Any WDC notice, warning, deprecation, or fatal is a release blocker.
+Build `dist/walls-delivery-calc-1.0.24.zip`, inspect its one-folder layout, lint/check the extracted runtime files, and install that ZIP through the standard WordPress upload UI. With `WP_DEBUG` and `WP_DEBUG_LOG` enabled, exercise activation, WDC admin pages, checkout location/rates, pickup map/selection, and recalculation. Any WDC notice, warning, deprecation, or fatal is a release blocker.
 
 Russian Post release checks include `tests/pickup/run-russian-post-weekly-schedule-smoke.php`, the import lifecycle smoke, the optimization smoke, and `node tests/pickup/run-russian-post-pickup-import-runner-smoke.js`. They protect CAS-backed monotonic state revisions across import IDs, owner-safe terminal writes, single-flight status polling, lower-revision rejection, transport recovery, terminal polling stop, bounded exact-FIAS prefetch, bounded bulk staging writes, duplicate/ambiguity behavior, and result parity without depending on the retired production profiler.
 

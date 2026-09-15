@@ -25,14 +25,49 @@ final class CheckoutValidation {
 		private ?RussianPostPickupPointRepository $pickup_repository = null,
 		private ?DpdPickupPointService $dpd_pickup_points = null,
 		private ?YandexDeliveryPickupPointV2Repository $yandex_pickup_points = null,
-		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null
+		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null,
+		private ?CurrentWdcRateResolver $current_rate_resolver = null
 	) {
 		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
+		$this->current_rate_resolver ??= new CurrentWdcRateResolver( $this->session_manager );
 	}
 
 	public function register(): void {
 		add_action( 'woocommerce_checkout_process', array( $this, 'preload_from_post' ), 5, 0 );
 		add_action( 'woocommerce_after_checkout_validation', array( $this, 'validate' ), 20, 2 );
+		add_action( 'woocommerce_checkout_create_order', array( $this, 'guard_order_creation' ), 19, 2 );
+	}
+
+	/**
+	 * Revalidate the current session-owned delivery state immediately before WDC
+	 * order metadata persistence.
+	 *
+	 * @param array<string,mixed> $data
+	 * @throws \Exception When a required pickup selection is missing or stale.
+	 */
+	public function guard_order_creation( mixed $order, array $data = array() ): void {
+		unset( $order, $data );
+		$rate = $this->current_rate_resolver->resolve();
+		if ( array() === $rate ) {
+			return;
+		}
+
+		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
+		if ( ! $this->selected_rate_requires_pickup_point( $rate, $delivery_type ) ) {
+			return;
+		}
+
+		if ( array() !== $this->fixed_pickup_snapshot_for_rate( $rate ) ) {
+			return;
+		}
+
+		$rate_id = (string) ( $rate['rate_id'] ?? '' );
+		$family = $this->rate_pickup_family( $rate, $rate_id );
+		if ( $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $rate_id, $family ) ) {
+			return;
+		}
+
+		throw new \Exception( $this->pickup_error_message( $rate ) );
 	}
 
 	public function preload_from_post(): void {
@@ -153,14 +188,7 @@ final class CheckoutValidation {
 	 * @param array<string,mixed> $rate
 	 */
 	private function add_pickup_error( mixed $errors = null, array $rate = array() ): void {
-		$carrier = (string) ( $rate['carrier_key'] ?? '' );
-		$message = match ( $carrier ) {
-			RussianPostDomesticSettings::CARRIER_KEY => __( 'Выберите пункт выдачи Почты России.', 'walls-delivery-calc' ),
-			DpdSettings::CARRIER_KEY => __( 'Выберите пункт выдачи DPD.', 'walls-delivery-calc' ),
-			YandexDeliverySettings::CARRIER_KEY => __( 'Выберите пункт выдачи Яндекс.Доставки.', 'walls-delivery-calc' ),
-			PekSettings::CARRIER_KEY => __( 'Выберите терминал ПЭК.', 'walls-delivery-calc' ),
-			default => __( 'Выберите пункт выдачи.', 'walls-delivery-calc' ),
-		};
+		$message = $this->pickup_error_message( $rate );
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
 			$errors->add( 'wdc_pickup_required', $message );
 			return;
@@ -169,6 +197,28 @@ final class CheckoutValidation {
 		if ( function_exists( 'wc_add_notice' ) ) {
 			wc_add_notice( $message, 'error' );
 		}
+	}
+
+	/** @param array<string,mixed> $rate */
+	private function pickup_error_message( array $rate ): string {
+		$carrier = (string) ( $rate['carrier_key'] ?? '' );
+		return match ( $carrier ) {
+			RussianPostDomesticSettings::CARRIER_KEY => __( 'Выберите пункт выдачи Почты России.', 'walls-delivery-calc' ),
+			DpdSettings::CARRIER_KEY => __( 'Выберите пункт выдачи DPD.', 'walls-delivery-calc' ),
+			YandexDeliverySettings::CARRIER_KEY => __( 'Выберите пункт выдачи Яндекс.Доставки.', 'walls-delivery-calc' ),
+			PekSettings::CARRIER_KEY => __( 'Выберите терминал ПЭК.', 'walls-delivery-calc' ),
+			default => __( 'Выберите пункт выдачи.', 'walls-delivery-calc' ),
+		};
+	}
+
+	/** @param array<string,mixed> $rate @return array<string,mixed> */
+	private function fixed_pickup_snapshot_for_rate( array $rate ): array {
+		if ( is_array( $rate['fixed_pickup_point_snapshot'] ?? null ) ) {
+			return $rate['fixed_pickup_point_snapshot'];
+		}
+
+		$rate_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		return is_array( $rate_meta['fixed_pickup_point_snapshot'] ?? null ) ? $rate_meta['fixed_pickup_point_snapshot'] : array();
 	}
 
 	/**
