@@ -8,6 +8,7 @@ const source = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/wdc-p
 const checkoutSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/wdc-pickup-checkout.js'), 'utf8');
 const leafletProviderSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js'), 'utf8');
 const yandexProviderSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js'), 'utf8');
+const pickupMapCss = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/wdc-pickup-map.css'), 'utf8');
 
 function wait(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -2601,6 +2602,12 @@ async function run() {
 		&& leafletProviderSource.includes('requestAnimationFrame')
 		&& !leafletProviderSource.includes("map.on('zoomend', rebuildClusters)"), 'Leaflet zoom reclustering must be scheduled and coalesced instead of bound as a synchronous full rebuild.');
 	assert(yandexProviderSource.includes('getZoom: function ()') && yandexProviderSource.includes('map.getZoom() : pendingCenter.zoom'), 'Yandex adapter must expose current or pending zoom through the generic map contract.');
+	const highlightedContract = "markerType === 'postamat' || markerType === 'highlighted'";
+	assert(leafletProviderSource.includes(highlightedContract) && yandexProviderSource.includes(highlightedContract), 'Leaflet and Yandex providers must consume the same generic highlighted marker semantic.');
+	assert(pickupMapCss.includes('.wdc-map-marker-pin--highlighted')
+		&& pickupMapCss.includes('.wdc-map-marker--highlighted')
+		&& pickupMapCss.indexOf('.wdc-map-marker-pin.is-active') > pickupMapCss.indexOf('.wdc-map-marker-pin--highlighted')
+		&& pickupMapCss.indexOf('.wdc-map-marker.is-active') > pickupMapCss.indexOf('.wdc-map-marker--highlighted'), 'Highlighted markers must be purple while later active rules make both providers red and restore their base color after deactivation.');
 	assert(checkoutSource.includes('function hasAuthoritativePickupSelections(response)')
 		&& checkoutSource.includes('? extractPickupSelections(response)')
 		&& checkoutSource.includes(': mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response))'), 'checkout state response with explicit pickup selections must replace local selections instead of preserving stale selected points.');

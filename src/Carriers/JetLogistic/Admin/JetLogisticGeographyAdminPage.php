@@ -94,6 +94,23 @@ final class JetLogisticGeographyAdminPage {
 		if ( '' === $identity || array() === $this->geography->find_by_source_identity( $identity ) ) {
 			return array( 'success' => false, 'message' => 'Строка географии Jet Logistic не найдена. Повторите импорт cities.csv.' );
 		}
+		if ( 0 === $location_id ) {
+			$live_row = $this->geography->find_by_source_identity( $identity );
+			$previous = $this->overrides->find( $identity );
+			if ( ! $this->geography->reset_manual_override( $identity ) ) {
+				return array( 'success' => false, 'message' => 'Не удалось убрать ручное сопоставление из текущей географии Jet Logistic.' );
+			}
+			if ( array() !== $previous && ! $this->overrides->delete( $identity ) ) {
+				$this->geography->apply_manual_override( $identity, (int) ( $previous['location_id'] ?? $live_row['location_id'] ?? 0 ), (string) ( $previous['country_code'] ?? $live_row['country_code'] ?? '' ) );
+				return array( 'success' => false, 'message' => 'Не удалось удалить ручное сопоставление Jet Logistic.' );
+			}
+
+			return array(
+				'success' => true,
+				'message' => 'Ручное сопоставление Jet Logistic удалено.',
+				'details' => array( 'source_identity' => $identity, 'location_id' => 0, 'country_code' => (string) ( $live_row['country_code'] ?? '' ) ),
+			);
+		}
 		$location = $this->locations->find_by_id( $location_id );
 		if ( null === $location || ! $location->active ) {
 			return array( 'success' => false, 'message' => 'Выбранный населённый пункт не найден или неактивен.' );
@@ -207,7 +224,7 @@ final class JetLogisticGeographyAdminPage {
 					<td><?php echo esc_html( $this->match_source_label( (string) ( $row['match_source'] ?? '' ) ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['location_id'] ?? '' ) ); ?></td>
 					<td><?php echo esc_html( $location_id > 0 ? ( $location_display_names[ $location_id ] ?? '—' ) : '—' ); ?></td>
-					<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="save_jet_geography_override"><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>"><input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>"><input type="hidden" name="jet_page" value="<?php echo esc_attr( (string) $page ); ?>"><input type="hidden" name="jet_per_page" value="<?php echo esc_attr( (string) $per_page ); ?>"><input type="hidden" name="source_identity" value="<?php echo esc_attr( (string) ( $row['source_identity'] ?? '' ) ); ?>"><input type="number" min="1" name="location_id" value="<?php echo esc_attr( $location_id > 0 ? (string) $location_id : '' ); ?>"> <button class="button button-secondary" type="submit"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></form></td>
+					<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="save_jet_geography_override"><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>"><input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>"><input type="hidden" name="jet_page" value="<?php echo esc_attr( (string) $page ); ?>"><input type="hidden" name="jet_per_page" value="<?php echo esc_attr( (string) $per_page ); ?>"><input type="hidden" name="source_identity" value="<?php echo esc_attr( (string) ( $row['source_identity'] ?? '' ) ); ?>"><input type="number" min="0" name="location_id" value="<?php echo esc_attr( $location_id > 0 ? (string) $location_id : '' ); ?>"> <button class="button button-secondary" type="submit"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button><br><span class="description"><?php echo esc_html__( '0 — удалить сопоставление', 'walls-delivery-calc' ); ?></span></form></td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>

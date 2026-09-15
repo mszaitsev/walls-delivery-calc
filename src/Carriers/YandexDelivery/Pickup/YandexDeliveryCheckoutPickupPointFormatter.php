@@ -15,8 +15,9 @@ final class YandexDeliveryCheckoutPickupPointFormatter {
 	public function format( array $row ): array {
 		$station_id = $this->station_id( $row );
 		$type = trim( (string) ( $row['type'] ?? '' ) );
+		$operator_id = $this->normalized( $row['operator_id'] ?? '' );
 		$type_label = 'terminal' === $type ? 'Терминал' : 'Пункт выдачи';
-		$marker_type = 'terminal' === $type ? 'terminal' : 'pickup';
+		$marker_type = '5post' === $operator_id || ( 'market_l4g' === $operator_id && 'terminal' === $this->normalized( $type ) ) ? 'highlighted' : 'pickup';
 		$address = (string) ( $row['full_address'] ?? '' );
 		$name = (string) ( $row['name'] ?? '' );
 		$presentation = $this->presentation( $row );

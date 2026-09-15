@@ -20,6 +20,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
+use WallsShop\WDC\Orders\Application\OrderDeliveryDataClearService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
@@ -39,6 +40,7 @@ final class OrderDeliveryRecalculationAdminController {
 	public const AJAX_ADDRESS_SUGGEST = 'wdc_order_delivery_recalculate_address_suggest';
 	public const AJAX_GEOCODE_ADDRESS = 'wdc_order_delivery_recalculate_geocode_address';
 	public const AJAX_SAVE = 'wdc_order_delivery_recalculate_save';
+	public const AJAX_CLEAR = 'wdc_order_delivery_clear';
 	public const NONCE_ACTION = 'wdc_order_delivery_recalculation';
 
 	public function __construct(
@@ -61,7 +63,8 @@ final class OrderDeliveryRecalculationAdminController {
 		private ?CdekDeliveryPointService $cdek_points = null,
 		private ?DpdPickupPointService $dpd_points = null,
 		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
-		private ?YandexLocationMappingV2Repository $yandex_location_mapping = null
+		private ?YandexLocationMappingV2Repository $yandex_location_mapping = null,
+		private ?OrderDeliveryDataClearService $clear_service = null
 	) {
 	}
 
@@ -74,6 +77,7 @@ final class OrderDeliveryRecalculationAdminController {
 		add_action( 'wp_ajax_' . self::AJAX_ADDRESS_SUGGEST, array( $this, 'ajax_address_suggest' ) );
 		add_action( 'wp_ajax_' . self::AJAX_GEOCODE_ADDRESS, array( $this, 'ajax_geocode_address' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SAVE, array( $this, 'ajax_save' ) );
+		add_action( 'wp_ajax_' . self::AJAX_CLEAR, array( $this, 'ajax_clear' ) );
 	}
 
 	public function enqueue_assets(): void {
@@ -109,6 +113,7 @@ final class OrderDeliveryRecalculationAdminController {
 				'addressSuggestAction' => self::AJAX_ADDRESS_SUGGEST,
 				'geocodeAddressAction' => self::AJAX_GEOCODE_ADDRESS,
 				'saveAction' => self::AJAX_SAVE,
+				'clearAction' => self::AJAX_CLEAR,
 				'mapProvider' => $provider,
 				'yandexApiKeyPresent' => '' !== $this->yandex_api_key(),
 				'yandexApiKey' => 'yandex' === $provider ? $this->yandex_api_key() : '',
@@ -362,6 +367,28 @@ final class OrderDeliveryRecalculationAdminController {
 		);
 		if ( empty( $result['success'] ) ) {
 			wp_send_json_error( array( 'message' => (string) $result['message'] ), 400 );
+		}
+
+		wp_send_json_success( array( 'message' => (string) $result['message'] ) );
+	}
+
+	public function ajax_clear(): void {
+		if ( ! current_user_can( OrderDeliveryMetabox::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
+		}
+		if ( ! $this->clear_service instanceof OrderDeliveryDataClearService ) {
+			wp_send_json_error( array( 'message' => __( 'Очистка данных доставки недоступна.', 'walls-delivery-calc' ) ), 500 );
+		}
+
+		$result = $this->clear_service->clear( $order );
+		if ( empty( $result['success'] ) ) {
+			wp_send_json_error( array( 'message' => (string) $result['message'] ), 409 );
 		}
 
 		wp_send_json_success( array( 'message' => (string) $result['message'] ) );
@@ -910,7 +937,7 @@ final class OrderDeliveryRecalculationAdminController {
 		$point_title = $this->registry_presentation_value( $raw, 'point_title', $type_label );
 		$card_title = $this->registry_presentation_value( $raw, 'card_title', $point_title );
 		$marker_type = $this->registry_presentation_value( $raw, 'marker_type', 'pickup' );
-		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
+		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal', 'highlighted' ), true ) ) {
 			$marker_type = 'pickup';
 		}
 		$point_comment = trim( (string) $point->comment );

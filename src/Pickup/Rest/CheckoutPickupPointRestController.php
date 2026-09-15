@@ -465,7 +465,7 @@ final class CheckoutPickupPointRestController {
 			$presentation_comment = 'Возможна небольшая доплата за доставку в этот пункт';
 		}
 		$marker_type = $this->provider_presentation_value( $raw, 'marker_type' );
-		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
+		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal', 'highlighted' ), true ) ) {
 			$marker_type = 'terminal' === $type ? 'terminal' : 'pickup';
 		}
 		$point_name = $this->public_provider_point_name( $point, $raw );

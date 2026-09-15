@@ -146,26 +146,31 @@ $presentation_cases = array(
 		'row' => array( 'platform_station_id' => 'TECH-5POST', 'operator_id' => '5post', 'type' => 'pickup_point', 'name' => 'Любое имя', 'full_address' => 'Адрес 5Post', 'active' => 1 ),
 		'title' => '5 Post (Пятерочка)',
 		'comment' => 'Цена будет пересчитана, иногда сюда получается дороже!',
+		'marker_type' => 'highlighted',
 	),
 	array(
 		'row' => array( 'platform_station_id' => 'TECH-MARKET', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов Яндекс Маркета', 'full_address' => 'Адрес Маркет', 'active' => 1 ),
 		'title' => 'Пункт выдачи Яндекс.Маркет',
 		'comment' => '',
+		'marker_type' => 'pickup',
 	),
 	array(
 		'row' => array( 'platform_station_id' => 'TECH-PARTNER', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов партнёра', 'full_address' => 'Адрес партнера', 'active' => 1 ),
 		'title' => 'Партнёрский пункт выдачи',
 		'comment' => '',
+		'marker_type' => 'pickup',
 	),
 	array(
 		'row' => array( 'platform_station_id' => 'TECH-TERMINAL', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Другое имя', 'full_address' => 'Адрес терминал', 'active' => 1 ),
 		'title' => 'Постамат Яндекса',
 		'comment' => 'Срок хранения посылки - 2-3 дня!',
+		'marker_type' => 'highlighted',
 	),
 	array(
 		'row' => array( 'platform_station_id' => 'TECH-FALLBACK', 'operator_id' => 'other', 'type' => 'pickup_point', 'name' => 'Другое имя', 'full_address' => 'Адрес fallback', 'active' => 1 ),
 		'title' => 'Выдача посылок Яндекс.Доставки',
 		'comment' => '',
+		'marker_type' => 'pickup',
 	),
 );
 foreach ( $presentation_cases as $case ) {
@@ -177,6 +182,7 @@ foreach ( $presentation_cases as $case ) {
 	}
 	yandex_pickup_selection_assert( '' === (string) ( $point['display_code'] ?? 'not-empty' ) && '' === (string) ( $point['snapshot']['display_code'] ?? 'not-empty' ), 'Yandex formatter must keep display_code empty.' );
 	yandex_pickup_selection_assert( $case['comment'] === (string) ( $point['presentation_comment'] ?? '' ) && $case['comment'] === (string) ( $point['snapshot']['presentation_comment'] ?? '' ), 'Yandex formatter must expose presentation_comment separately from description.' );
+	yandex_pickup_selection_assert( $case['marker_type'] === (string) ( $point['marker_type'] ?? '' ) && $case['marker_type'] === (string) ( $point['snapshot']['marker_type'] ?? '' ), 'Yandex formatter must classify 5Post/postamat as highlighted and ordinary pickup as pickup.' );
 	yandex_pickup_selection_assert( $station === (string) ( $point['point_code'] ?? '' ) && $station === (string) ( $point['platform_station_id'] ?? '' ) && $station === (string) ( $point['snapshot']['platform_station_id'] ?? '' ), 'Yandex formatter must keep technical platform_station_id in identity fields.' );
 }
 

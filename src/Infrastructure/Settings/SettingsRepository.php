@@ -24,6 +24,7 @@ final class SettingsRepository {
 	public const SHOP_PROCESSING_DYNAMIC_ORDERS_PER_DAY_KEY = 'shop_processing_dynamic_orders_per_day';
 	public const SHOP_PROCESSING_DYNAMIC_ORDER_STATUSES_KEY = 'shop_processing_dynamic_order_statuses';
 	public const SHOP_PROCESSING_DYNAMIC_EXTRA_DAYS_KEY = 'shop_processing_dynamic_extra_days';
+	public const ALLOW_EDIT_ORDERS_IN_ALL_STATUSES_KEY = 'allow_edit_orders_in_all_statuses';
 	private const OPTION_NAME = 'wdc_core_settings';
 
 	/**
@@ -59,6 +60,7 @@ final class SettingsRepository {
 			'checkout_sort_mode'            => 'cheapest',
 			'checkout_sort_selector_enabled' => true,
 			'show_checkout_debug_panel'     => false,
+			self::ALLOW_EDIT_ORDERS_IN_ALL_STATUSES_KEY => false,
 			CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY => false,
 			CheckoutDeliveryMessageSettings::INFO_HTML_KEY => CheckoutDeliveryMessageSettings::DEFAULT_INFO_HTML,
 			CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY => false,

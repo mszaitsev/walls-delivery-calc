@@ -1,8 +1,8 @@
 # Project Status
 
-Version: 1.0.25
+Version: 1.0.26
 
-The current Walls Delivery Calc release source is version 1.0.25. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Shipment production acceptance now uses the WooCommerce display order number in the modal heading, keeps postcode out of the manager-editable normalization source while retaining the separate shipment postcode, and labels the Ozon pickup scenario explicitly. Ozon shipment mutations, status reads, and documents use bounded operation-specific timeouts and retry only transient failures; order creation keeps one idempotency key, checkpoints known carrier references before approval, and reconciles ambiguous approval results before another mutation. Carrier status eligibility owns Ozon label availability, protected document failures remain inside the shipment block, and every successful AJAX refresh clears stale errors and renders one fresh canonical status payload including universal status and document actions. Shipment Framework boundaries and schema remain unchanged.
+The current Walls Delivery Calc release source is version 1.0.26. It uses one fresh-install schema migration and does not promise upgrade compatibility from arbitrary unpublished 0.x development databases. Order administrators can optionally edit orders in every status, and can explicitly clear only WDC-owned delivery calculation metadata when no shipment record exists; the WooCommerce shipping line and customer-visible planned delivery metadata remain intact. Jet Logistic manual geography mapping accepts `0` as an explicit unmap command and resets the live row to unmatched. Generic pickup maps now use one marker semantic in checkout and admin recalculation: ordinary points are blue, reliable postamats plus Yandex 5Post and paid PEK partners are purple, and the active point is red. Shipment Framework boundaries and schema remain unchanged.
 
 Current production scope includes:
 

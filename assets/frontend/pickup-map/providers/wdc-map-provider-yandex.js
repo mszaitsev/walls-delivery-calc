@@ -475,8 +475,8 @@
 
 	function pointType(point) {
 		var markerType = String(point.marker_type || '').toLowerCase();
-		if (markerType === 'postamat') {
-			return 'POSTAMAT';
+		if (markerType === 'postamat' || markerType === 'highlighted') {
+			return markerType === 'highlighted' ? 'HIGHLIGHTED' : 'POSTAMAT';
 		}
 		if (markerType === 'pickup') {
 			return 'PVZ';
