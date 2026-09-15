@@ -214,6 +214,7 @@ Generated for Walls Delivery Calc 1.0.26
 |-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupImportService.php
 |-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupParser.php
 |-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupPointProvider.php
+|-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupProgressiveQueryService.php
 |-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupRepository.php
 |-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupScheduleFormatter.php
 |-- src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupScheduler.php
@@ -809,6 +810,7 @@ Generated for Walls Delivery Calc 1.0.26
 |-- tests/ozon-delivery/run-ozon-delivery-pickup-import-smoke.php
 |-- tests/ozon-delivery/run-ozon-delivery-pickup-owner-smoke.php
 |-- tests/ozon-delivery/run-ozon-delivery-pickup-progress-smoke.php
+|-- tests/ozon-delivery/run-ozon-delivery-pickup-progressive-map-smoke.php
 |-- tests/ozon-delivery/run-ozon-delivery-pickup-provider-smoke.php
 |-- tests/ozon-delivery/run-ozon-delivery-pickup-query-count-smoke.php
 |-- tests/ozon-delivery/run-ozon-delivery-pickup-ready-transition-race-smoke.php

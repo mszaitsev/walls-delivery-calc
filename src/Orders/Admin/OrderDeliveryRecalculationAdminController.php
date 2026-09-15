@@ -11,6 +11,7 @@ use WallsShop\WDC\Carriers\Pek\Checkout\PekCheckoutQuoteContextResolver;
 use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupProgressiveQueryService;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
@@ -64,7 +65,8 @@ final class OrderDeliveryRecalculationAdminController {
 		private ?DpdPickupPointService $dpd_points = null,
 		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
 		private ?YandexLocationMappingV2Repository $yandex_location_mapping = null,
-		private ?OrderDeliveryDataClearService $clear_service = null
+		private ?OrderDeliveryDataClearService $clear_service = null,
+		private ?OzonDeliveryPickupProgressiveQueryService $ozon_progressive = null
 	) {
 	}
 
@@ -99,7 +101,10 @@ final class OrderDeliveryRecalculationAdminController {
 
 		wp_enqueue_style( 'wdc-pickup-map', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-map.css', array(), $this->version );
 		wp_enqueue_style( 'wdc-order-delivery-recalculation', $this->plugin_url . 'assets/admin/order-delivery-recalculation.css', array( 'wdc-pickup-map' ), $this->version );
-		wp_enqueue_script( 'wdc-order-delivery-recalculation', $this->plugin_url . 'assets/admin/order-delivery-recalculation.js', array( $provider_handle ), $this->version, true );
+		wp_enqueue_script( 'wdc-pickup-api', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-api.js', array(), $this->version, true );
+		wp_enqueue_script( 'wdc-pickup-modal', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-modal.js', array(), $this->version, true );
+		wp_enqueue_script( 'wdc-pickup-map', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-map.js', array( $provider_handle, 'wdc-pickup-api' ), $this->version, true );
+		wp_enqueue_script( 'wdc-order-delivery-recalculation', $this->plugin_url . 'assets/admin/order-delivery-recalculation.js', array( 'wdc-pickup-modal', 'wdc-pickup-map' ), $this->version, true );
 		wp_localize_script(
 			'wdc-order-delivery-recalculation',
 			'wdcOrderDeliveryRecalculation',
@@ -180,6 +185,30 @@ final class OrderDeliveryRecalculationAdminController {
 		$mode = 'location' === $this->request_string( 'mode' ) ? 'location' : 'search';
 		$limit = max( 1, min( 'location' === $mode ? 2000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 2000 : 50 ) ) ) );
 		$carrier = (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' );
+		if ( 'ozon_delivery' === $carrier && '1' === $this->request_string( 'progressive' ) ) {
+			if ( ! $this->ozon_progressive instanceof OzonDeliveryPickupProgressiveQueryService ) {
+				wp_send_json_error( array( 'message' => __( 'Progressive loading Ozon временно недоступен.', 'walls-delivery-calc' ) ), 503 );
+			}
+			try {
+				$context = $this->registry_pickup_context_from_rate( $order, $rate, $location );
+				if ( null === $context || 'ozon_delivery' !== $context['carrier'] ) {
+					throw new \RuntimeException( 'Контекст пунктов Ozon устарел. Пересчитайте доставку.' );
+				}
+				$dataset = $this->request_string( 'dataset' );
+				$cursor = $this->request_string( 'cursor' );
+				$result = '' !== $dataset || '' !== $cursor
+					? $this->ozon_progressive->next( $context['query'], $dataset, $cursor, $limit )
+					: $this->ozon_progressive->start( $context['query'], $this->progressive_viewport(), $limit );
+				$result['points'] = array_map(
+					fn( PickupPoint $point ): array => $this->registry_point_payload( $point, $context['carrier'], $context['family'], $context['fingerprint'], $context['query']->location_id, $context['query']->country_code ),
+					$result['points']
+				);
+			} catch ( \Throwable $exception ) {
+				$status = 'ozon_progressive_generation_changed' === $exception->getMessage() ? 409 : 400;
+				wp_send_json_error( array( 'message' => $this->safe_message( $exception->getMessage() ) ), $status );
+			}
+			wp_send_json_success( $result );
+		}
 		if ( DpdSettings::CARRIER_KEY === $carrier ) {
 			$rows = $this->dpd_pickup_points( $location, $query, $mode, $limit );
 			wp_send_json_success(
@@ -826,6 +855,23 @@ final class OrderDeliveryRecalculationAdminController {
 	 * @return array<int,array<string,mixed>>|null
 	 */
 	private function registry_pickup_points_from_rate( object $order, array $rate, array $location ): ?array {
+		$context = $this->registry_pickup_context_from_rate( $order, $rate, $location );
+		if ( null === $context ) {
+			return null;
+		}
+		$provider = $this->pickup_providers->get( $context['carrier'] );
+		if ( null === $provider ) {
+			return null;
+		}
+
+		return array_map(
+			fn( PickupPoint $point ): array => $this->registry_point_payload( $point, $context['carrier'], $context['family'], $context['fingerprint'], $context['query']->location_id, $context['query']->country_code ),
+			$provider->search( $context['query'] )
+		);
+	}
+
+	/** @param array<string,mixed> $rate @param array<string,mixed> $location @return array{carrier:string,family:string,fingerprint:string,query:CarrierPickupPointQuery}|null */
+	private function registry_pickup_context_from_rate( object $order, array $rate, array $location ): ?array {
 		$meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
 		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
 		if ( array() === $snapshot ) {
@@ -858,19 +904,22 @@ final class OrderDeliveryRecalculationAdminController {
 		if ( '' === $fingerprint ) {
 			throw new \RuntimeException( 'Контекст пунктов выдачи устарел. Пересчитайте доставку.' );
 		}
-		$provider = $this->pickup_providers->get( $carrier );
-		if ( null === $provider ) {
-			return null;
-		}
 		$query = $this->registry_query_from_snapshot( $snapshot, $carrier );
 		if ( null === $query ) {
 			throw new \RuntimeException( 'Контекст пунктов выдачи устарел. Пересчитайте доставку.' );
 		}
 
-		return array_map(
-			fn( PickupPoint $point ): array => $this->registry_point_payload( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code ),
-			$provider->search( $query )
-		);
+		return compact( 'carrier', 'family', 'fingerprint', 'query' );
+	}
+
+	/** @return array{west:float,south:float,east:float,north:float}|null */
+	private function progressive_viewport(): ?array {
+		$parts = array_map( 'trim', explode( ',', $this->request_string( 'bbox' ) ) );
+		if ( 4 !== count( $parts ) || array_filter( $parts, static fn( string $value ): bool => ! is_numeric( $value ) ) ) {
+			return null;
+		}
+		$viewport = array( 'west' => (float) $parts[0], 'south' => (float) $parts[1], 'east' => (float) $parts[2], 'north' => (float) $parts[3] );
+		return $viewport['west'] <= $viewport['east'] && $viewport['south'] <= $viewport['north'] ? $viewport : null;
 	}
 
 	/** @param array<string,mixed> $snapshot */

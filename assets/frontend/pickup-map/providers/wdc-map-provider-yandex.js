@@ -21,6 +21,7 @@
 		var searchPlacemark = null;
 		var placemarkById = {};
 		var pointById = {};
+		var loadedPointIds = {};
 		var markerLayout = null;
 		var searchMarkerLayout = null;
 		var maxClusterZoom = 18;
@@ -92,7 +93,12 @@
 		}
 
 		function renderMarkers(points, options) {
-			pendingPoints = points || [];
+			pendingPoints = Array.isArray(points) ? points.slice() : [];
+			loadedPointIds = {};
+			pendingPoints.forEach(function (point) {
+				var id = pointId(point);
+				if (id) { loadedPointIds[id] = true; }
+			});
 			if (options && Object.prototype.hasOwnProperty.call(options, 'searchMarker')) {
 				pendingSearchMarker = options.searchMarker || null;
 			}
@@ -116,6 +122,28 @@
 			renderSearchMarker(options && Object.prototype.hasOwnProperty.call(options, 'searchMarker') ? options.searchMarker : pendingSearchMarker);
 			suppressPopupClose = false;
 			applyPendingFit();
+		}
+
+		function appendMarkers(points, options) {
+			points = Array.isArray(points) ? points : [];
+			if (options && Object.prototype.hasOwnProperty.call(options, 'searchMarker')) {
+				pendingSearchMarker = options.searchMarker || null;
+			}
+			if (options && Object.prototype.hasOwnProperty.call(options, 'activePointId')) {
+				activePointId = options.activePointId ? String(options.activePointId) : null;
+			}
+			points.forEach(function (point) {
+				var id = pointId(point);
+				if (!id || loadedPointIds[id]) { return; }
+				loadedPointIds[id] = true;
+				pendingPoints.push(point);
+				if (!map || !collection || !ymapsApi || !validPointCoordinates(point)) { return; }
+				var placemark = createPickupPlacemark(point, id);
+				addPickupPlacemark(placemark, map.getZoom() < maxClusterZoom);
+				placemarkById[id] = placemark;
+				pointById[id] = point;
+			});
+			updateActivePlacemarks();
 		}
 
 		function clearMarkers() {
@@ -207,9 +235,18 @@
 				activePointId = pointId ? String(pointId) : null;
 				updateActivePlacemarks();
 			},
+			setSearchMarker: function (marker) {
+				pendingSearchMarker = marker || null;
+				if (!map || !ymapsApi) { return; }
+				if (searchPlacemark) { map.geoObjects.remove(searchPlacemark); searchPlacemark = null; }
+				renderSearchMarker(pendingSearchMarker);
+			},
 			renderMarkers: renderMarkers,
+			appendMarkers: appendMarkers,
+			flushAppendedMarkers: function () {},
 			clearMarkers: function () {
 				pendingPoints = [];
+				loadedPointIds = {};
 				pendingSearchMarker = null;
 				suppressPopupClose = true;
 				clearMarkers();

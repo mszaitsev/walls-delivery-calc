@@ -82,6 +82,11 @@ final class OzonDeliveryPickupRepository {
 		return $active ? (int) $this->wpdb->get_var( $this->wpdb->prepare( "SELECT COUNT(*) FROM {$this->points_table()} WHERE generation_id=%d", $active['id'] ) ) : 0;
 	}
 
+	public function active_generation_id(): int {
+		$active = $this->active_generation();
+		return is_array( $active ) ? max( 0, (int) ( $active['id'] ?? 0 ) ) : 0;
+	}
+
 	/** @param array<string,mixed> $row */
 	public function insert_point( int $generation_id, array $row ): bool {
 		$row['generation_id'] = $generation_id;
@@ -548,5 +553,55 @@ final class OzonDeliveryPickupRepository {
 		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
 		$sql = $this->wpdb->prepare( "UPDATE {$this->ids_table()} SET status='rejected',reject_code=CASE point_id " . implode( ' ', $cases ) . " ELSE reject_code END,updated_at=%s WHERE generation_id=%d AND status='pending' AND point_id IN ({$placeholders})", ...$args );
 		return count( $rejects ) === (int) $this->wpdb->query( $sql );
+	}
+
+	/**
+	 * Returns a generation-pinned, deterministic candidate window for the buyer map.
+	 * Viewport rows are ordered first, followed by increasing destination distance,
+	 * with point_id as the stable tie-breaker.
+	 *
+	 * @param array{phase:int,distance:string,point_id:int}|null $after
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function find_generation_candidates_ordered(
+		int $generation_id,
+		float $latitude,
+		float $longitude,
+		float $latitude_delta,
+		float $longitude_delta,
+		?array $viewport,
+		?array $after = null,
+		int $limit = 2500
+	): array {
+		if ( $generation_id <= 0 ) {
+			return array();
+		}
+		$south = $latitude - $latitude_delta;
+		$north = $latitude + $latitude_delta;
+		$west = $longitude - $longitude_delta;
+		$east = $longitude + $longitude_delta;
+		$has_viewport = is_array( $viewport ) && isset( $viewport['west'], $viewport['south'], $viewport['east'], $viewport['north'] );
+		$viewport = $has_viewport ? $viewport : array( 'west' => 0.0, 'south' => 0.0, 'east' => 0.0, 'north' => 0.0 );
+		$cosine = max( 0.01, abs( cos( deg2rad( $latitude ) ) ) );
+		$phase_sql = $has_viewport
+			? $this->wpdb->prepare( 'CASE WHEN latitude BETWEEN %f AND %f AND longitude BETWEEN %f AND %f THEN 0 ELSE 1 END', (float) $viewport['south'], (float) $viewport['north'], (float) $viewport['west'], (float) $viewport['east'] )
+			: '1';
+		$distance_sql = $this->wpdb->prepare( 'ROUND((((latitude-%f)*(latitude-%f))+(((longitude-%f)*%f)*((longitude-%f)*%f)))*1000000000000,0)', $latitude, $latitude, $longitude, $cosine, $longitude, $cosine );
+		$inner = "SELECT point_id,name,type,full_address,latitude,longitude,schedule,is_active,is_bulky,min_weight_g,max_weight_g,max_width_mm,max_length_mm,max_height_mm, {$phase_sql} AS wdc_phase, {$distance_sql} AS wdc_distance FROM {$this->points_table()} WHERE generation_id=%d AND is_active=1 AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude BETWEEN %f AND %f AND longitude BETWEEN %f AND %f";
+		$sql = $this->wpdb->prepare( $inner, $generation_id, $south, $north, $west, $east );
+		$where = '';
+		if ( is_array( $after ) ) {
+			$where = $this->wpdb->prepare(
+				' WHERE (wdc_phase>%d OR (wdc_phase=%d AND (wdc_distance>%f OR (wdc_distance=%f AND point_id>%d))))',
+				(int) $after['phase'],
+				(int) $after['phase'],
+				(float) $after['distance'],
+				(float) $after['distance'],
+				(int) $after['point_id']
+			);
+		}
+		$sql = 'SELECT * FROM (' . $sql . ') AS wdc_candidates' . $where . ' ORDER BY wdc_phase ASC,wdc_distance ASC,point_id ASC LIMIT ' . max( 1, min( 10000, $limit ) );
+		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+		return is_array( $rows ) ? $rows : array();
 	}
 }

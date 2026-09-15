@@ -10,7 +10,9 @@
 		return fetch(requestUrl(config.restUrl || '/wp-json/wdc/v1/', path), Object.assign({}, options || {}, { headers: headers }))
 			.then(function (response) {
 				if (!response.ok) {
-					throw new Error('HTTP ' + response.status);
+					var error = new Error('HTTP ' + response.status);
+					error.status = response.status;
+					throw error;
 				}
 				return response.json();
 			});
@@ -29,6 +31,32 @@
 	}
 
 	window.WDCPickupApi = {
+		supportsProgressive: function (context) {
+			return 'ozon_delivery' === String(context && (context.carrier || context.carrier_key) || '').toLowerCase();
+		},
+		loadInitial: function (bbox, signal, context) {
+			var params = safeContextParams(context);
+			if (!params) {
+				return Promise.reject(new Error('pickup_carrier_context_missing'));
+			}
+			params.set('progressive', '1');
+			params.set('limit', '1500');
+			if (bbox) {
+				params.set('bbox', bbox);
+			}
+			return request('points?' + params.toString(), { signal: signal });
+		},
+		loadNext: function (state, signal, context) {
+			var params = safeContextParams(context);
+			if (!params) {
+				return Promise.reject(new Error('pickup_carrier_context_missing'));
+			}
+			params.set('progressive', '1');
+			params.set('limit', '1500');
+			params.set('dataset', String(state && state.dataset || ''));
+			params.set('cursor', String(state && state.cursor || ''));
+			return request('points?' + params.toString(), { signal: signal });
+		},
 		points: function (bbox, signal, context) {
 			var params = safeContextParams(context);
 			if (!params) {

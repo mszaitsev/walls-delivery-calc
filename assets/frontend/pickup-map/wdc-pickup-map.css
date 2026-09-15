@@ -372,6 +372,11 @@
 	overflow-wrap: anywhere;
 }
 
+.wdc-pickup-map__loading-retry {
+	flex: 0 0 auto;
+	pointer-events: auto;
+}
+
 .wdc-pickup-map__locate {
 	position: absolute;
 	right: 16px;

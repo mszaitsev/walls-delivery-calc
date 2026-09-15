@@ -22,6 +22,8 @@
 
 	function createMap(element, card, confirmButton, labels, initialContext) {
 		var config = window.wdcPickupCheckout || {};
+		var context = initialContext || {};
+		var dataSource = context.dataSource || window.WDCPickupApi || {};
 		var providerName = normalizeProvider(config.mapProvider || 'leaflet');
 		var providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[providerName];
 		var list = findList(element, card);
@@ -30,7 +32,6 @@
 		var programmaticBoundsReleaseTimer = 0;
 		var userViewportInteracted = false;
 		var destroyed = false;
-		var context = initialContext || {};
 		var initialSelectedPoint = normalizeInitialSelectedPoint(context.selectedPoint || context.selectedPickupPoint);
 		var listSelectButton = createListSelectButton(list);
 		var previewPoint = initialSelectedPoint;
@@ -62,12 +63,10 @@
 		var provider = null;
 		var visiblePoints = [];
 		var pointById = {};
-		var listFilterQuery = '';
 		var virtualListState = null;
 		var virtualListScrollContainer = null;
 		var virtualListScrollFrame = 0;
 		var lastBbox = '';
-		var yandexCityListMode = isYandexDeliveryContext(context);
 		var reloadOnViewportChange = contextReloadOnViewportChange(context);
 		var fixedDatasetLoaded = false;
 		var popupManuallyClosed = false;
@@ -78,10 +77,21 @@
 		var loadingRequestId = 0;
 		var activeLoadingRequestId = 0;
 		var loadingOverlay = createLoadingOverlay(element, list, labels);
-		var initialLoadingZoom = hasInitialCoordinates ? 13 : 11;
+		var initialLoadingZoom = (hasInitialCoordinates ? 13 : 11) + Number(context.initial_zoom_delta || context.initialZoomDelta || 0);
 		var minLoadingZoom = initialLoadingZoom - 1;
 		var zoomLoadingWasBlocked = false;
 		var zoomWarning = createZoomWarning(element, labels);
+		var progressive = typeof dataSource.supportsProgressive === 'function' && dataSource.supportsProgressive(context);
+		var progressiveStarted = false;
+		var progressiveState = null;
+		var progressiveController = null;
+		var progressiveIngestHandle = 0;
+		var progressiveChunksSinceCommit = 0;
+		var loadedPointIdentities = {};
+		var progressiveRetry = null;
+		if (loadingOverlay) {
+			loadingOverlay.onRetry = function () { if (typeof progressiveRetry === 'function') { progressiveRetry(); } };
+		}
 
 		if ('yandex' === providerName && !config.yandexApiKeyPresent) {
 			card.textContent = (config.errors && config.errors.yandexApiKeyMissing) || 'Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.';
@@ -109,10 +119,8 @@
 				return;
 			}
 			if (!viewportReloadRequired() && visiblePoints.length) {
-				if (listFollowsViewport()) {
-					renderCurrentList();
-					updateListSelectButton();
-				}
+				renderCurrentList();
+				updateListSelectButton();
 				return;
 			}
 			if (zoomLoadingWasBlocked) {
@@ -124,11 +132,11 @@
 		}
 
 		function viewportReloadRequired() {
-			return reloadOnViewportChange !== false;
+			return !progressive && reloadOnViewportChange !== false;
 		}
 
 		function listFollowsViewport() {
-			return yandexCityListMode || !viewportReloadRequired();
+			return true;
 		}
 
 		function zoomLoadingBlocked() {
@@ -513,6 +521,15 @@
 			if (!bbox) {
 				return;
 			}
+			if (progressive) {
+				if (!progressiveStarted) {
+					startProgressive(bbox);
+				} else {
+					renderCurrentList();
+					updateListSelectButton();
+				}
+				return;
+			}
 			if (zoomLoadingBlocked()) {
 				zoomLoadingWasBlocked = true;
 				setZoomWarningVisible(true);
@@ -538,7 +555,7 @@
 			}
 			controller = new AbortController();
 			var requestId = beginLoading(labels.loading || 'Загружаем пункты выдачи…');
-			window.WDCPickupApi.points(bbox, controller.signal, context).then(function (points) {
+			dataSource.points(bbox, controller.signal, context).then(function (points) {
 				if (destroyed) {
 					return;
 				}
@@ -568,17 +585,8 @@
 		}
 
 		function listPointsForCurrentBounds() {
-			var points = visiblePoints;
-			if (listFollowsViewport() && lastBbox) {
-				points = visiblePoints.filter(function (point) {
-					return !validPointCoordinates(point) || pointInsideBounds(point, lastBbox);
-				});
-			}
-			if (!listFilterQuery) {
-				return points;
-			}
-			return points.filter(function (point) {
-				return pointMatchesListSearch(point, listFilterQuery);
+			return visiblePoints.filter(function (point) {
+				return validPointCoordinates(point) && (!lastBbox || pointInsideBounds(point, lastBbox));
 			});
 		}
 
@@ -591,64 +599,26 @@
 		}
 
 		function search(query) {
-			return runSearch(query, false);
+			return runSearch(query);
 		}
 
 		function initialSearch(query) {
-			return runSearch(query, true);
+			return runSearch(query);
 		}
 
-		function runSearch(query, initial) {
+		function runSearch(query) {
 			if (controller) {
 				controller.abort();
 			}
 			controller = new AbortController();
 			var requestId = beginLoading(labels.loading || 'Загружаем пункты выдачи…');
-			if (initial) {
-				var initialRequest = window.WDCPickupApi.searchInitial || window.WDCPickupApi.search;
-				return initialRequest(query, controller.signal, context).then(function (points) {
-					if (destroyed) {
-						return;
-					}
-					if (points[0] && validPointCoordinates(points[0])) {
-						var point = enrichPoints([points[0]])[0];
-						cancelPendingProviderFit();
-						beginProgrammaticBoundsSuppression();
-						provider.setCenter(point.lat, point.lng, 15);
-						preview(point, { focus: false, initial: true });
-						if (viewportReloadRequired() || !visiblePoints.length) {
-							loadBounds(bboxAround(point.lat, point.lng), { force: true });
-						} else {
-							endLoading(requestId);
-						}
-						return;
-					}
-					card.textContent = labels.notFound || labels.empty || '';
-					endLoading(requestId);
-				}).catch(function (error) {
-					if (!destroyed && error.name !== 'AbortError') {
-						card.textContent = labels.error || 'Не удалось загрузить пункты выдачи';
-					}
-					endLoading(requestId);
-				});
-			}
-			if (!window.WDCPickupApi.addressSearch) {
-				return window.WDCPickupApi.search(query, controller.signal, context).then(function (points) {
-					if (destroyed) {
-						return;
-					}
-					renderMarkers(points, labels.empty || '');
-					applyInitialPointsViewport(visiblePoints);
-					endLoading(requestId);
-				}).catch(function (error) {
-					if (!destroyed && error.name !== 'AbortError') {
-						card.textContent = labels.error || 'Не удалось загрузить пункты выдачи';
-					}
-					endLoading(requestId);
-				});
+			if (!dataSource.addressSearch) {
+				card.textContent = labels.dadataError || labels.error || 'Поиск адреса недоступен.';
+				endLoading(requestId);
+				return Promise.resolve();
 			}
 			updateLoadingMessage(requestId, labels.searchingAddress || 'Ищем адрес...');
-			return window.WDCPickupApi.addressSearch(query, context, controller.signal).then(function (result) {
+			return dataSource.addressSearch(query, context, controller.signal).then(function (result) {
 				if (result && result.address_search_available === false) {
 					setPostcodeOnlyMode();
 					if (!result.address) {
@@ -688,8 +658,10 @@
 			claimViewportForExplicitAction();
 			beginProgrammaticBoundsSuppression();
 			provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
+			if (provider.setSearchMarker) {
+				provider.setSearchMarker(searchAddress);
+			}
 			if (Array.isArray(result.points) && result.points.length > 0) {
-				listFilterQuery = '';
 				renderMarkers(result.points, labels.empty || '');
 				card.textContent = labels.addressFound || 'Адрес найден';
 				return;
@@ -733,6 +705,12 @@
 				if (controller) {
 					controller.abort();
 				}
+				if (progressiveController) {
+					progressiveController.abort();
+				}
+				cancelFrame(progressiveIngestHandle);
+				progressiveIngestHandle = 0;
+				progressiveRetry = null;
 				activeLoadingRequestId = ++loadingRequestId;
 				setLoadingState(false, '');
 				if (debouncedLoad.cancel) {
@@ -799,6 +777,146 @@
 			if (loading) {
 				card.textContent = message || 'Загружаем пункты выдачи…';
 			}
+		}
+
+		function startProgressive(bbox) {
+			progressiveStarted = true;
+			progressiveController = new AbortController();
+			var requestId = beginLoading(labels.loading || 'Загружаем пункты выдачи…');
+			progressiveRetry = function () { progressiveStarted = false; startProgressive(bbox); };
+			dataSource.loadInitial(bbox, progressiveController.signal, context).then(function (envelope) {
+				if (destroyed) { return; }
+				return ingestProgressiveEnvelope(envelope, true).then(function () {
+					if (destroyed) { return; }
+					endLoading(requestId);
+					loadProgressiveNext();
+				});
+			}).catch(function (error) {
+				if (!destroyed && error.name !== 'AbortError') {
+					card.textContent = labels.error || 'Не удалось загрузить пункты выдачи';
+					endLoading(requestId);
+					showProgressError('Не удалось загрузить ПВЗ Ozon.');
+				}
+			});
+		}
+
+		function loadProgressiveNext() {
+			if (destroyed || !progressiveState || progressiveState.complete || !progressiveState.cursor) {
+				setProgressState(false, '');
+				return;
+			}
+			setProgressState(true, progressText());
+			progressiveController = new AbortController();
+			progressiveRetry = loadProgressiveNext;
+			dataSource.loadNext(progressiveState, progressiveController.signal, context).then(function (envelope) {
+				if (destroyed) { return; }
+				return ingestProgressiveEnvelope(envelope, false).then(function () {
+					if (!destroyed) { loadProgressiveNext(); }
+				});
+			}).catch(function (error) {
+				if (destroyed || error.name === 'AbortError') { return; }
+				if (provider && provider.flushAppendedMarkers) {
+					provider.flushAppendedMarkers();
+					progressiveChunksSinceCommit = 0;
+				}
+				if (Number(error && error.status || 0) === 409 || String(error && error.message || '').indexOf('409') !== -1) {
+					progressiveStarted = false;
+					progressiveState = null;
+					progressiveRetry = function () { resetProgressiveDataset(); startProgressive(lastBbox); };
+				}
+				showProgressError('Не удалось загрузить остальные ПВЗ Ozon. Загружено ' + formatCount(visiblePoints.length) + (progressiveState ? ' из ' + formatCount(progressiveState.total) : '') + '.');
+			});
+		}
+
+		function ingestProgressiveEnvelope(envelope, initial) {
+			envelope = envelope && typeof envelope === 'object' ? envelope : {};
+			var incoming = Array.isArray(envelope.points) ? envelope.points : [];
+			var offset = 0;
+			return new Promise(function (resolve) {
+				function ingestBatch() {
+					progressiveIngestHandle = 0;
+					if (destroyed) { resolve(); return; }
+					var accepted = [];
+					incoming.slice(offset, offset + 100).forEach(function (point) {
+						var identity = progressivePointIdentity(point);
+						if (!identity || loadedPointIdentities[identity]) { return; }
+						loadedPointIdentities[identity] = true;
+						var enriched = enrichPoints([point])[0];
+						if (committedPoint && progressivePointIdentity(committedPoint) === identity) {
+							committedPoint = enriched;
+							if (!previewPoint || progressivePointIdentity(previewPoint) === identity) { previewPoint = enriched; }
+						}
+						accepted.push(enriched);
+					});
+					offset += 100;
+					if (accepted.length) {
+						Array.prototype.push.apply(visiblePoints, accepted);
+						if (!initial && provider.appendMarkers) {
+							provider.appendMarkers(accepted, { activePointId: previewPoint ? pointId(previewPoint) : null, searchMarker: activeOriginMarker(), deferCommit: true });
+						}
+					}
+					if (offset < incoming.length) {
+						progressiveIngestHandle = requestFrame(ingestBatch);
+						return;
+					}
+					rebuildPointIndex();
+					progressiveState = { dataset: String(envelope.dataset || ''), cursor: String(envelope.cursor || ''), total: Math.max(0, Number(envelope.total || 0)), complete: !!envelope.complete };
+					if (initial) {
+						provider.renderMarkers(visiblePoints, { activePointId: previewPoint ? pointId(previewPoint) : null, searchMarker: activeOriginMarker() });
+						applyInitialPointsViewport(visiblePoints);
+					} else {
+						progressiveChunksSinceCommit += 1;
+						if (provider.flushAppendedMarkers && (progressiveState.complete || progressiveChunksSinceCommit >= 3)) {
+							provider.flushAppendedMarkers();
+							progressiveChunksSinceCommit = 0;
+						}
+					}
+					renderCurrentList();
+					updateListSelectButton();
+					setProgressState(!progressiveState.complete, progressText());
+					resolve();
+				}
+				ingestBatch();
+			});
+		}
+
+		function progressivePointIdentity(point) {
+			var snapshot = pointSnapshot(point);
+			var carrier = String(point && (point.carrier_key || point.carrier) || snapshot.carrier_key || '').toLowerCase();
+			var code = String(point && (point.point_code || point.id) || snapshot.point_code || '');
+			return carrier && code ? carrier + ':' + code : pointId(point);
+		}
+
+		function resetProgressiveDataset() {
+			visiblePoints = [];
+			pointById = {};
+			loadedPointIdentities = {};
+			progressiveChunksSinceCommit = 0;
+			if (provider && provider.renderMarkers) {
+				provider.renderMarkers([], { activePointId: previewPoint ? pointId(previewPoint) : null, searchMarker: activeOriginMarker() });
+			}
+			renderCurrentList();
+		}
+
+		function progressText() {
+			return progressiveState ? 'Загружаем ПВЗ Ozon… ' + formatCount(visiblePoints.length) + ' из ' + formatCount(progressiveState.total) : 'Загружаем ПВЗ Ozon…';
+		}
+
+		function formatCount(value) {
+			return String(Math.max(0, Number(value || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+		}
+
+		function setProgressState(visible, message) {
+			if (!loadingOverlay) { return; }
+			loadingOverlay.hidden = !visible;
+			loadingOverlay.setAttribute('aria-hidden', visible ? 'false' : 'true');
+			if (loadingOverlay.textNode) { loadingOverlay.textNode.textContent = message || ''; }
+			if (loadingOverlay.retryButton) { loadingOverlay.retryButton.hidden = true; }
+		}
+
+		function showProgressError(message) {
+			setProgressState(true, message);
+			if (loadingOverlay && loadingOverlay.retryButton) { loadingOverlay.retryButton.hidden = false; }
 		}
 
 		function enrichPoints(points) {
@@ -1091,34 +1209,6 @@
 			return !falsy(context.viewport_reload);
 		}
 		return true;
-	}
-
-	function normalizeListSearchQuery(query) {
-		return String(query || '').trim().toLowerCase();
-	}
-
-	function pointMatchesListSearch(point, query) {
-		if (!query) {
-			return true;
-		}
-		var snapshot = pointSnapshot(point);
-		var haystack = [
-			pointDisplayTitle(point),
-			presentationComment(point),
-			pointComment(point),
-			point && point.address,
-			point && point.work_time,
-			point && point.point_code,
-			point && point.display_code,
-			point && point.postcode,
-			point && point.postal_code,
-			snapshot.address,
-			snapshot.point_code,
-			snapshot.display_code,
-			snapshot.postcode,
-			snapshot.postal_code
-		].join(' ').toLowerCase();
-		return haystack.indexOf(query) !== -1;
 	}
 
 	function requestFrame(callback) {
@@ -1623,6 +1713,7 @@
 		var overlay = document.createElement('div');
 		var spinner = document.createElement('span');
 		var text = document.createElement('span');
+		var retry = document.createElement('button');
 		overlay.className = 'wdc-pickup-map__loading';
 		overlay.hidden = true;
 		overlay.setAttribute('aria-hidden', 'true');
@@ -1632,9 +1723,19 @@
 		spinner.setAttribute('aria-hidden', 'true');
 		text.className = 'wdc-pickup-map__loading-text';
 		text.textContent = (labels && labels.loading) || 'Загружаем пункты выдачи…';
+		retry.type = 'button';
+		retry.className = 'button wdc-pickup-map__loading-retry';
+		retry.textContent = 'Повторить';
+		retry.hidden = true;
+		retry.addEventListener('click', function () {
+			retry.hidden = true;
+			if (typeof overlay.onRetry === 'function') { overlay.onRetry(); }
+		});
 		overlay.appendChild(spinner);
 		overlay.appendChild(text);
+		overlay.appendChild(retry);
 		overlay.textNode = text;
+		overlay.retryButton = retry;
 		parent.appendChild(overlay);
 		return overlay;
 	}

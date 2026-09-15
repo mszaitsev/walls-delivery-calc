@@ -9,6 +9,7 @@ const checkoutSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-m
 const leafletProviderSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js'), 'utf8');
 const yandexProviderSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js'), 'utf8');
 const pickupMapCss = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/wdc-pickup-map.css'), 'utf8');
+const adminSource = fs.readFileSync(path.join(root, 'assets/admin/order-delivery-recalculation.js'), 'utf8');
 
 function wait(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -208,6 +209,15 @@ function createHarness(api) {
 							pendingFit: false,
 							renderMarkers(points, options) {
 								calls.push(['renderMarkers', points, options || {}]);
+							},
+							appendMarkers(points, options) {
+								calls.push(['appendMarkers', points, options || {}]);
+							},
+							flushAppendedMarkers() {
+								calls.push(['flushAppendedMarkers']);
+							},
+							setSearchMarker(marker) {
+								calls.push(['setSearchMarker', marker]);
 							},
 							getZoom() {
 								return this.currentZoom;
@@ -1170,9 +1180,9 @@ async function sidebarPresentationLimitBoundaries() {
 	for (const count of [99, 100, 150]) {
 		const points = largePoints(count);
 		const api = {
-			context: { carrier: 'cdek', cdek_city_code: '9220' },
+			context: { carrier: 'cdek', cdek_city_code: '9220', lat: 55.75, lng: 37.61 },
 			points: () => Promise.resolve(points),
-			search: () => Promise.resolve([points[Math.min(139, points.length - 1)]])
+			addressSearch: () => Promise.resolve({ address: { lat: 55.76, lng: 37.62, value: 'Москва, Тверская, 12' } })
 		};
 		const harness = createHarness(api);
 		await wait(120);
@@ -1180,11 +1190,113 @@ async function sidebarPresentationLimitBoundaries() {
 		assert.strictEqual(renderedPointRows(harness.list.innerHTML), Math.min(100, count), count + ' source points must respect only the 100-card sidebar limit');
 		assert.strictEqual(harness.list.innerHTML.includes('Показаны ближайшие 100 пунктов.'), count > 100, count + ' source points must toggle the overflow hint at the exact boundary');
 		if (count === 150) {
-			await harness.map.search('p00140');
-			assert(harness.list.innerHTML.includes('p00140'), 'existing search must still find and render point 140 beyond the default presentation cap');
+			await harness.map.search('Москва, Тверская, 12');
+			assert(harness.calls.some((call) => call[0] === 'setCenter' && call[1] === 55.76 && call[2] === 37.62), 'map search must geocode and center on an address, not filter points by point text');
 		}
 		harness.map.destroy();
 	}
+}
+
+async function progressiveIngestionPreservesSelectionAndCoalescesRendering() {
+	const nextOne = deferred();
+	const nextTwo = deferred();
+	let nextCalls = 0;
+	const p1 = point('oz-1', 55.75, 37.61);
+	const p2 = point('oz-2', 55.751, 37.611);
+	const p3 = point('oz-3', 55.752, 37.612);
+	const p4 = point('oz-4', 55.753, 37.613);
+	[p1, p2, p3, p4].forEach((item) => {
+		item.carrier_key = 'ozon_delivery';
+		item.pickup_family = 'ozon_delivery:pickup';
+	});
+	const api = {
+		context: { carrier: 'ozon_delivery', pickup_family: 'ozon_delivery:pickup', lat: 55.75, lng: 37.61 },
+		supportsProgressive: () => true,
+		loadInitial: () => Promise.resolve({ points: [p1, p2], loaded: 2, total: 4, complete: false, dataset: 'dataset', cursor: 'cursor-1' }),
+		loadNext: () => {
+			nextCalls += 1;
+			return nextCalls === 1 ? nextOne.promise : nextTwo.promise;
+		},
+		addressSearch: () => Promise.resolve({ address: { lat: 55.76, lng: 37.62, value: 'Москва, Тверская, 12' } })
+	};
+	const harness = createHarness(api);
+	await wait(150);
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'first usable progressive portion must perform one replacement render');
+	assert(mapLoader(harness).textNode.textContent.includes('2 из 4'), 'progress indicator must show accepted unique points over authoritative total');
+	harness.provider().popupSelect(p1);
+	assert.strictEqual(harness.map.selected().id, 'oz-1', 'user must be able to commit selection before background completion');
+	const centersBeforeAppend = harness.calls.filter((call) => call[0] === 'setCenter').length;
+	nextOne.resolve({ points: [p2, p3], loaded: 3, total: 4, complete: false, dataset: 'dataset', cursor: 'cursor-2' });
+	await wait(80);
+	nextTwo.resolve({ points: [p4], loaded: 4, total: 4, complete: true, dataset: 'dataset', cursor: '' });
+	await wait(100);
+	const appended = harness.calls.filter((call) => call[0] === 'appendMarkers').flatMap((call) => call[1]);
+	assert.deepStrictEqual(appended.map((item) => item.id), ['oz-3', 'oz-4'], 'duplicate retry/spatial overlap points must not be appended twice');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'background micro-batches must not cause repeated destructive replacement renders');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'flushAppendedMarkers').length, 1, 'background completion must coalesce provider rendering through one flush');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'setCenter').length, centersBeforeAppend, 'background ingestion must not reset the current viewport');
+	assert.strictEqual(harness.map.selected().id, 'oz-1', 'committed selection must survive all background chunks');
+	assert.strictEqual(mapLoader(harness).hidden, true, 'authoritative complete=true must hide the progress indicator');
+	harness.map.destroy();
+}
+
+async function progressivePartialFailureRetriesWithoutLosingMapState() {
+	let nextCalls = 0;
+	const p1 = Object.assign(point('oz-r1', 55.75, 37.61), { carrier_key: 'ozon_delivery', pickup_family: 'ozon_delivery:pickup' });
+	const p2 = Object.assign(point('oz-r2', 55.751, 37.611), { carrier_key: 'ozon_delivery', pickup_family: 'ozon_delivery:pickup' });
+	const p3 = Object.assign(point('oz-r3', 55.752, 37.612), { carrier_key: 'ozon_delivery', pickup_family: 'ozon_delivery:pickup' });
+	const p4 = Object.assign(point('oz-r4', 55.753, 37.613), { carrier_key: 'ozon_delivery', pickup_family: 'ozon_delivery:pickup' });
+	const harness = createHarness({
+		context: { carrier: 'ozon_delivery', pickup_family: 'ozon_delivery:pickup', lat: 55.75, lng: 37.61 },
+		supportsProgressive: () => true,
+		loadInitial: () => Promise.resolve({ points: [p1, p2], loaded: 2, total: 4, complete: false, dataset: 'dataset', cursor: 'cursor-1' }),
+		loadNext: () => {
+			nextCalls += 1;
+			return nextCalls === 1
+				? Promise.reject(new Error('temporary'))
+				: Promise.resolve({ points: [p2, p3, p4], loaded: 4, total: 4, complete: true, dataset: 'dataset', cursor: '' });
+		},
+		addressSearch: () => Promise.resolve({ address: { lat: 55.76, lng: 37.62, value: 'Москва' } })
+	});
+	await wait(180);
+	harness.provider().popupSelect(p1);
+	const loader = mapLoader(harness);
+	assert.strictEqual(loader.hidden, false, 'partial background failure must keep a visible non-blocking error state');
+	assert(loader.textNode.textContent.includes('2 из 4'), 'partial error must preserve authoritative loaded/total progress');
+	assert.strictEqual(loader.retryButton.hidden, false, 'partial error must offer retry');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'clearMarkers').length, 0, 'partial error must not clear usable markers');
+	loader.retryButton.dispatch('click');
+	await wait(160);
+	assert.strictEqual(nextCalls, 2, 'retry must continue from the current progressive cursor');
+	assert.strictEqual(harness.map.selected().id, 'oz-r1', 'retry and completion must preserve committed selection');
+	const appended = harness.calls.filter((call) => call[0] === 'appendMarkers').flatMap((call) => call[1]);
+	assert.deepStrictEqual(appended.map((item) => item.id), ['oz-r3', 'oz-r4'], 'retry overlap must be browser-deduplicated');
+	assert.strictEqual(loader.hidden, true, 'successful retry completion must hide progress');
+	harness.map.destroy();
+}
+
+function denseCityZoomPolicyMatrix() {
+	function extractFunctionBody(fileSource, name) {
+		const start = fileSource.indexOf('function ' + name + '(');
+		assert.notStrictEqual(start, -1, name + ' must exist');
+		const brace = fileSource.indexOf('{', start);
+		let depth = 0;
+		for (let index = brace; index < fileSource.length; index += 1) {
+			if (fileSource[index] === '{') { depth += 1; }
+			if (fileSource[index] === '}' && --depth === 0) { return fileSource.slice(start, index + 1); }
+		}
+		throw new Error('Cannot extract ' + name);
+	}
+	const checkoutZoom = new Function('contextCountryCode', extractFunctionBody(checkoutSource, 'denseOzonZoomDelta') + '; return denseOzonZoomDelta;')((context) => String(context.country_code || 'RU').toUpperCase());
+	const adminZoom = new Function(extractFunctionBody(adminSource, 'denseOzonZoomDelta') + '; return denseOzonZoomDelta;')();
+	assert.strictEqual(checkoutZoom({ carrier: 'ozon_delivery', country_code: 'RU', city_name: 'Москва' }), 1);
+	assert.strictEqual(checkoutZoom({ carrier: 'ozon_delivery', country_code: 'RU', settlement_name: 'Санкт-Петербург' }), 1);
+	assert.strictEqual(checkoutZoom({ carrier: 'ozon_delivery', country_code: 'RU', city_name: 'Новосибирск' }), 0);
+	assert.strictEqual(checkoutZoom({ carrier: 'yandex_delivery', country_code: 'RU', city_name: 'Москва' }), 0);
+	assert.strictEqual(checkoutZoom({ carrier: 'cdek', country_code: 'RU', city_name: 'Москва' }), 0);
+	assert.strictEqual(adminZoom('ozon_delivery', { country_code: 'RU', city_value: 'Москва' }), 1);
+	assert.strictEqual(adminZoom('ozon_delivery', { country_code: 'RU', settlement_name: 'Санкт-Петербург' }), 1);
+	assert.strictEqual(adminZoom('ozon_delivery', { country_code: 'RU', city_value: 'Новосибирск' }), 0);
 }
 
 async function manualFixedDatasetKeepsTitleCommentAndSingleRequest() {
@@ -1199,6 +1311,8 @@ async function manualFixedDatasetKeepsTitleCommentAndSingleRequest() {
 		display_title: 'Тестовый ПВЗ',
 		display_code: '',
 		address: 'Красный проспект, 1',
+		lat: 55.03,
+		lng: 82.92,
 		work_time: '10:00-20:00',
 		point_comment: 'Отличный ПВЗ',
 		description: 'Отличный ПВЗ',
@@ -2600,14 +2714,20 @@ async function run() {
 		&& leafletProviderSource.includes('getZoom: function ()')
 		&& leafletProviderSource.includes('function cancelScheduledClusterRebuild()')
 		&& leafletProviderSource.includes('requestAnimationFrame')
+		&& leafletProviderSource.includes('if (!(options && options.deferCommit))')
+		&& leafletProviderSource.includes('flushAppendedMarkers: function ()')
 		&& !leafletProviderSource.includes("map.on('zoomend', rebuildClusters)"), 'Leaflet zoom reclustering must be scheduled and coalesced instead of bound as a synchronous full rebuild.');
-	assert(yandexProviderSource.includes('getZoom: function ()') && yandexProviderSource.includes('map.getZoom() : pendingCenter.zoom'), 'Yandex adapter must expose current or pending zoom through the generic map contract.');
+	assert(yandexProviderSource.includes('getZoom: function ()')
+		&& yandexProviderSource.includes('map.getZoom() : pendingCenter.zoom')
+		&& yandexProviderSource.includes('pendingPoints = Array.isArray(points) ? points.slice() : []')
+		&& yandexProviderSource.includes('loadedPointIds[id] = true'), 'Yandex adapter must preserve legacy loading while exposing idempotent append state without sharing the caller array.');
 	const highlightedContract = "markerType === 'postamat' || markerType === 'highlighted'";
 	assert(leafletProviderSource.includes(highlightedContract) && yandexProviderSource.includes(highlightedContract), 'Leaflet and Yandex providers must consume the same generic highlighted marker semantic.');
 	assert(pickupMapCss.includes('.wdc-map-marker-pin--highlighted')
 		&& pickupMapCss.includes('.wdc-map-marker--highlighted')
 		&& pickupMapCss.indexOf('.wdc-map-marker-pin.is-active') > pickupMapCss.indexOf('.wdc-map-marker-pin--highlighted')
 		&& pickupMapCss.indexOf('.wdc-map-marker.is-active') > pickupMapCss.indexOf('.wdc-map-marker--highlighted'), 'Highlighted markers must be purple while later active rules make both providers red and restore their base color after deactivation.');
+	assert(pickupMapCss.includes('.wdc-pickup-map__loading-retry') && pickupMapCss.includes('pointer-events: auto'), 'Non-blocking progressive error state must leave its retry control clickable without blocking the map.');
 	assert(checkoutSource.includes('function hasAuthoritativePickupSelections(response)')
 		&& checkoutSource.includes('? extractPickupSelections(response)')
 		&& checkoutSource.includes(': mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response))'), 'checkout state response with explicit pickup selections must replace local selections instead of preserving stale selected points.');
@@ -2679,6 +2799,9 @@ async function run() {
 	await fixedAreaLargeDatasetDoesNotReloadOnViewportChange();
 	await zoomOutThrottleAndResume();
 	await sidebarPresentationLimitBoundaries();
+	await progressiveIngestionPreservesSelectionAndCoalescesRendering();
+	await progressivePartialFailureRetriesWithoutLosingMapState();
+	denseCityZoomPolicyMatrix();
 	await manualFixedDatasetKeepsTitleCommentAndSingleRequest();
 	await fixedDatasetSearchUsesAddressOriginWithoutReloadingPoints();
 	await dynamicDatasetSearchReloadsByAddressBounds();

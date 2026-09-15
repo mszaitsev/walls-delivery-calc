@@ -53,6 +53,11 @@ final class OzonDeliveryPickupPointProvider implements CarrierPickupPointProvide
 		$point = is_array( $row ) ? $this->point( $row, $query->query ) : null;
 		return $point instanceof PickupPoint && $this->within_radius( $point, $query->query ) ? $point : null;
 	}
+	/** @param array<string,mixed> $row */
+	public function eligible_point_from_row( array $row, CarrierPickupPointQuery $query ): ?PickupPoint {
+		$point = $this->point( $row, $query );
+		return $point instanceof PickupPoint && $this->within_radius( $point, $query ) ? $point : null;
+	}
 	/** @param array<string,mixed> $snapshot */
 	public function query_from_snapshot( array $snapshot ): ?CarrierPickupPointQuery {
 		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();

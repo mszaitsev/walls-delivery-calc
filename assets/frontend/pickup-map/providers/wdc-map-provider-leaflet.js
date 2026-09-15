@@ -20,6 +20,8 @@
 		var clusterCellSize = 128;
 		var suppressPopupClose = false;
 		var clusterRebuildFrame = 0;
+		var appendCommitTimer = 0;
+		var loadedPointIds = {};
 
 		if (!window.L) {
 			return unavailable('Leaflet is not available.');
@@ -59,6 +61,7 @@
 		}
 
 		map.on('zoomend', scheduleClusterRebuild);
+		map.on('moveend', scheduleHighZoomRebuild);
 		map.on('moveend zoomend', boundsChanged);
 		map.on('click', mapClicked);
 		map.on('popupclose', popupClosed);
@@ -84,12 +87,20 @@
 				activePointId = pointId ? String(pointId) : null;
 				updateActiveMarkers();
 			},
+			setSearchMarker: function (marker) {
+				lastSearchMarker = marker || null;
+				if (searchMarker) { searchMarker.remove(); searchMarker = null; }
+				renderSearchMarker(lastSearchMarker);
+			},
 			renderMarkers: function (points, options) {
 				cancelScheduledClusterRebuild();
+				cancelAppendCommit();
 				suppressPopupClose = true;
 				popupState = null;
 				clearRenderedMarkers();
 				lastPoints = Array.isArray(points) ? points.slice() : [];
+				loadedPointIds = {};
+				lastPoints.forEach(function (point) { loadedPointIds[pointId(point)] = true; });
 				if (options && Object.prototype.hasOwnProperty.call(options, 'searchMarker')) {
 					lastSearchMarker = options.searchMarker || null;
 				}
@@ -97,6 +108,26 @@
 				renderClustered(lastPoints);
 				renderSearchMarker(lastSearchMarker);
 				suppressPopupClose = false;
+			},
+			appendMarkers: function (points, options) {
+				(Array.isArray(points) ? points : []).forEach(function (point) {
+					var id = pointId(point);
+					if (!id || loadedPointIds[id]) { return; }
+					loadedPointIds[id] = true;
+					lastPoints.push(point);
+				});
+				if (options && Object.prototype.hasOwnProperty.call(options, 'searchMarker')) {
+					lastSearchMarker = options.searchMarker || null;
+				}
+				if (options && Object.prototype.hasOwnProperty.call(options, 'activePointId')) {
+					activePointId = options.activePointId ? String(options.activePointId) : null;
+				}
+				if (!(options && options.deferCommit)) {
+					scheduleAppendCommit(0);
+				}
+			},
+			flushAppendedMarkers: function () {
+				scheduleAppendCommit(0);
 			},
 			openPointPopup: function (point, html, options) {
 				var id = pointId(point);
@@ -130,8 +161,10 @@
 			destroy: function () {
 				suppressPopupClose = true;
 				cancelScheduledClusterRebuild();
+				cancelAppendCommit();
 				clearMarkers();
 				map.off('zoomend', scheduleClusterRebuild);
+				map.off('moveend', scheduleHighZoomRebuild);
 				map.off('moveend zoomend', boundsChanged);
 				map.off('click', mapClicked);
 				map.off('popupclose', popupClosed);
@@ -161,6 +194,27 @@
 				clusterRebuildFrame = 0;
 				rebuildClusters();
 			});
+		}
+
+		function scheduleHighZoomRebuild() {
+			if (map && map.getZoom() >= maxClusterZoom) {
+				scheduleClusterRebuild();
+			}
+		}
+
+		function scheduleAppendCommit(delay) {
+			cancelAppendCommit();
+			appendCommitTimer = window.setTimeout(function () {
+				appendCommitTimer = 0;
+				scheduleClusterRebuild();
+			}, Math.max(0, Number(delay || 0)));
+		}
+
+		function cancelAppendCommit() {
+			if (appendCommitTimer) {
+				window.clearTimeout(appendCommitTimer);
+				appendCommitTimer = 0;
+			}
 		}
 
 		function cancelScheduledClusterRebuild() {
@@ -242,7 +296,9 @@
 		}
 
 		function clearMarkers() {
+			cancelAppendCommit();
 			lastPoints = [];
+			loadedPointIds = {};
 			lastSearchMarker = null;
 			popupState = null;
 			clearRenderedMarkers();
@@ -398,7 +454,10 @@
 
 		function clusterPoints(points) {
 			if (map.getZoom() >= maxClusterZoom) {
-				return points.filter(validPointCoordinates).map(function (point) {
+				var visibleBounds = map.getBounds && map.getBounds().pad ? map.getBounds().pad(0.35) : null;
+				return points.filter(function (point) {
+					return validPointCoordinates(point) && (!visibleBounds || visibleBounds.contains([point.lat, point.lng]));
+				}).map(function (point) {
 					return { points: [point], lat: parseFloat(point.lat), lng: parseFloat(point.lng) };
 				});
 			}
@@ -450,9 +509,12 @@
 			setCenter: function () {},
 			focusPoint: function () {},
 			setActivePoint: function () {},
+			setSearchMarker: function () {},
 			openPointPopup: function () {},
 			closePopup: function () {},
 			renderMarkers: function () {},
+			appendMarkers: function () {},
+			flushAppendedMarkers: function () {},
 			clearMarkers: function () {},
 			fitToMarkers: function () {},
 			cancelPendingFit: function () {},

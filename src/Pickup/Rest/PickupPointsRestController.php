@@ -13,6 +13,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repo
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupProgressiveQueryService;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
@@ -39,7 +40,8 @@ final class PickupPointsRestController {
 		private ?CarrierPickupPointProviderRegistry $provider_registry = null,
 		private ?CheckoutPickupPointProviderQueryResolver $provider_query_resolver = null,
 		private ?PekCheckoutPickupPointFormatter $pek_formatter = null,
-		private ?WooCommerceSessionBootstrapper $session_bootstrapper = null
+		private ?WooCommerceSessionBootstrapper $session_bootstrapper = null,
+		private ?OzonDeliveryPickupProgressiveQueryService $ozon_progressive = null
 	) {
 		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
 		$this->pek_formatter ??= new PekCheckoutPickupPointFormatter();
@@ -117,6 +119,13 @@ final class PickupPointsRestController {
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
 			return $this->response( $this->yandex_points( $request ) );
+		}
+		if ( 'ozon_delivery' === $carrier && '1' === $this->param( $request, 'progressive' ) ) {
+			$nonce = $this->check_nonce( $request );
+			if ( true !== $nonce ) {
+				return $nonce;
+			}
+			return $this->registry_progressive_response( $request, $carrier );
 		}
 		if ( $this->is_registry_backed_carrier( $carrier ) ) {
 			$nonce = $this->check_nonce( $request );
@@ -409,6 +418,46 @@ final class PickupPointsRestController {
 		}
 
 		return $this->response( $this->filter_generic_points( $formatted, $query_text ) );
+	}
+
+	private function registry_progressive_response( mixed $request, string $carrier ): mixed {
+		if ( ! $this->ozon_progressive instanceof OzonDeliveryPickupProgressiveQueryService || ! $this->provider_query_resolver instanceof CheckoutPickupPointProviderQueryResolver || ! $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper ) {
+			return $this->error( 'ozon_progressive_unavailable', 'Ozon progressive pickup loading is unavailable.', 503 );
+		}
+		$method_id = $this->param( $request, 'shipping_method_id' );
+		$family = $this->param( $request, 'pickup_family' );
+		if ( '' === $method_id || '' === $family ) {
+			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
+		}
+		if ( ! $this->session_bootstrapper->ensure() ) {
+			return $this->error( 'provider_session_unavailable', 'Checkout session is unavailable.', 503 );
+		}
+		try {
+			$context = $this->provider_query_resolver->resolve_context( $method_id, $carrier, $family );
+			$query = $context['query'];
+			$fingerprint = (string) $context['destination_fingerprint'];
+			$family = (string) $context['pickup_family'];
+			$dataset = $this->param( $request, 'dataset' );
+			$cursor = $this->param( $request, 'cursor' );
+			if ( '' !== $dataset || '' !== $cursor ) {
+				if ( '' === $dataset || '' === $cursor ) {
+					throw new \RuntimeException( 'ozon_progressive_cursor_invalid' );
+				}
+				$result = $this->ozon_progressive->next( $query, $dataset, $cursor, $this->limit( $request, 1500, 2000 ) );
+			} else {
+				$bbox = $this->bbox( $request );
+				$viewport = null === $bbox ? null : array( 'west' => $bbox['min_lng'], 'south' => $bbox['min_lat'], 'east' => $bbox['max_lng'], 'north' => $bbox['max_lat'] );
+				$result = $this->ozon_progressive->start( $query, $viewport, $this->limit( $request, 1500, 2000 ) );
+			}
+		} catch ( \Throwable $exception ) {
+			$code = in_array( $exception->getMessage(), array( 'ozon_progressive_generation_changed', 'ozon_progressive_dataset_mismatch', 'ozon_progressive_cursor_invalid' ), true ) ? $exception->getMessage() : 'pickup_provider_search_failed';
+			return $this->error( $code, 'Ozon progressive pickup dataset is no longer compatible.', 'ozon_progressive_generation_changed' === $code ? 409 : 400 );
+		}
+		$result['points'] = array_values( array_filter( array_map(
+			fn( mixed $point ): ?array => $point instanceof PickupPoint ? $this->registry_point_payload( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code, $query->service_key ) : null,
+			$result['points'] ?? array()
+		) ) );
+		return $this->response( $result );
 	}
 
 	private function checkout_rate_context_guard( mixed $request, string $carrier ): mixed {

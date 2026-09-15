@@ -719,6 +719,17 @@ pickup_rest_assert( 'Пункт выдачи Ozon' === (string) ( $ozon_points[0
 pickup_rest_assert( 650000 === $ozon_provider->queries[0]->location_id && 1000 === $ozon_provider->queries[0]->cargo->weight_g, 'Ozon /points must ignore browser location/cargo authority and use stored rate snapshot.' );
 pickup_rest_assert( $ozon_fingerprint === (string) ( $ozon_points[0]['destination_fingerprint'] ?? '' ) && $ozon_fingerprint === (string) ( $ozon_points[0]['provider_destination_fingerprint'] ?? '' ), 'Ozon REST provider projection must carry the trusted destination fingerprint.' );
 pickup_rest_assert( ! array_key_exists( 'generation_id', $ozon_points[0] ) && ! array_key_exists( 'raw_reference', $ozon_points[0] ), 'Ozon REST provider projection must not expose generation_id or internal provider raw_reference fields.' );
+$ozon_progressive_unavailable = $ozon_points_controller->points(
+	new WdcPickupRestRequest(
+		array( 'carrier' => OzonDeliverySettings::CARRIER_KEY, 'shipping_method_id' => 'ozon_delivery:pickup', 'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY, 'progressive' => '1' ),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( $ozon_progressive_unavailable instanceof WP_Error && 'ozon_progressive_unavailable' === $ozon_progressive_unavailable->get_error_code(), 'Only explicit progressive=1 may select the Ozon envelope path; the ordinary /points call above must remain a plain array.' );
+$ozon_progressive_without_nonce = $ozon_points_controller->points(
+	new WdcPickupRestRequest( array( 'carrier' => OzonDeliverySettings::CARRIER_KEY, 'shipping_method_id' => 'ozon_delivery:pickup', 'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY, 'progressive' => '1' ) )
+);
+pickup_rest_assert( $ozon_progressive_without_nonce instanceof WP_Error && 'wdc_forbidden' === $ozon_progressive_without_nonce->get_error_code(), 'Ozon progressive REST must preserve the WP REST nonce guard.' );
 
 WC()->session = new WC_Session_Handler();
 $pek_session->save_city_context( array( 'country_code' => 'RU', 'location_id' => 153912 ) );

@@ -1159,11 +1159,21 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		context.carrier_key = carrier;
 		context.pickup_family = family;
 		context.shipping_method_id = normalizeShippingMethod(method || activeMethod || currentShippingMethod());
+		context.initial_zoom_delta = denseOzonZoomDelta(context);
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
 		}
 		window.wdcPickupCheckout.carrier = context.carrier;
 		return context;
+	}
+
+	function denseOzonZoomDelta(context) {
+		context = context || {};
+		if ('ozon_delivery' !== String(context.carrier || context.carrier_key || '') || 'RU' !== contextCountryCode(context)) {
+			return 0;
+		}
+		var city = String(context.city_name || context.settlement_name || context.place_name || '').toLowerCase().replace(/^\s*г(?:ород)?[.\s]+/u, '').trim();
+		return city === 'москва' || city === 'санкт-петербург' ? 1 : 0;
 	}
 
 	function coordinateKey(value) {
