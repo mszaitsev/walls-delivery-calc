@@ -110,7 +110,7 @@ final class OrderShipmentDraftFactory {
 		$tariff_object = $this->meta_string( $order, '_wdc_platform_tariff_object' );
 		$tariff = $this->tariff_for_service_object( $service, $tariff_object, $delivery_type );
 		$pickup_row = DeliveryType::PICKUP === $delivery_type ? $this->pickup_point_row( $order ) : null;
-		$original_address = DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : '';
+		$original_address = DeliveryType::COURIER === $delivery_type ? $this->shipping_normalization_address( $order ) : '';
 		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->cached_normalized_address( $order, $service_key, $original_address ) : array();
 
 		return new ShipmentCreateRequest(
@@ -255,7 +255,7 @@ final class OrderShipmentDraftFactory {
 					array(
 						'service_key' => OzonDeliverySettings::SERVICE_KEY,
 						'group_id' => $request->rate_id,
-						'title' => DeliveryType::COURIER === $delivery_type ? 'Ozon курьером' : OzonDeliverySettings::TITLE,
+						'title' => DeliveryType::COURIER === $delivery_type ? 'Ozon курьером' : OzonDeliverySettings::SHIPMENT_PICKUP_TITLE,
 						'delivery_type' => $delivery_type,
 						'tariffs' => array(),
 					),
@@ -558,7 +558,7 @@ final class OrderShipmentDraftFactory {
 				'pickup_point_row' => $pickup_row,
 				'pickup_family' => CdekSettings::CARRIER_KEY . ':pickup',
 				'pickup_location_context' => $location_context,
-				'courier_original_address' => $this->shipping_address( $order ),
+				'courier_original_address' => $this->shipping_normalization_address( $order ),
 				'order_num' => $this->order_number( $order ),
 				'calculation_data' => $calculation,
 				'rate_meta' => $rate_meta,
@@ -741,7 +741,7 @@ final class OrderShipmentDraftFactory {
 				'sender_name' => $this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->tariff_sender_name() : '',
 				'sender_phone' => $this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->tariff_sender_phone() : '',
 				'place_weight_hint_g' => $this->default_weight_g( $order, $items ),
-				'courier_original_address' => $this->shipping_address( $order ),
+				'courier_original_address' => $this->shipping_normalization_address( $order ),
 				'date_pickup' => $date_pickup['date'],
 				'date_pickup_calendar_used' => $date_pickup['calendar_used'],
 				'date_pickup_fallback_used' => $date_pickup['fallback_used'],
@@ -768,7 +768,7 @@ final class OrderShipmentDraftFactory {
 		);
 		$pickup_code = $this->first_non_empty( $this->meta_string( $order, '_wdc_yandex_delivery_pickup_platform_station_id' ), $this->meta_string( $order, '_wdc_platform_pickup_code' ), $this->meta_string( $order, '_wdc_pickup_point_code' ) );
 		$ready = $this->yandex_default_ready_time();
-		$full_address = $this->shipping_address( $order );
+		$full_address = $this->shipping_normalization_address( $order );
 
 		return new ShipmentCreateRequest(
 			order_id: $this->order_id( $order ),
@@ -906,7 +906,7 @@ final class OrderShipmentDraftFactory {
 				'provider_destination_fingerprint' => (string) ( $rate_meta['provider_destination_fingerprint'] ?? $rate_meta['destination_fingerprint'] ?? $pickup['provider_destination_fingerprint'] ?? '' ),
 				'pickup_provider_query' => $provider_query,
 				'pek_pickup_selected_snapshot' => $pek_pickup_snapshot,
-				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $address : '',
+				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->shipping_normalization_address( $order ) : '',
 				'pek_courier_address_evidence' => DeliveryType::COURIER === $delivery_type && is_array( $courier['evidence'] ?? null ) ? $courier['evidence'] : array(),
 				'calculation_data' => $calculation,
 				'rate_meta' => $rate_meta,
@@ -1030,14 +1030,14 @@ final class OrderShipmentDraftFactory {
 				'carrier_key' => OzonDeliverySettings::CARRIER_KEY,
 				'service_key' => OzonDeliverySettings::SERVICE_KEY,
 				'delivery_type' => $delivery_type,
-				'service_title' => DeliveryType::COURIER === $delivery_type ? 'Ozon курьером' : OzonDeliverySettings::TITLE,
+				'service_title' => DeliveryType::COURIER === $delivery_type ? 'Ozon курьером' : OzonDeliverySettings::SHIPMENT_PICKUP_TITLE,
 				'order_num' => $this->order_number( $order ),
 				'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY,
 				'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? $point_code : '',
 				'pickup_point_address' => DeliveryType::PICKUP === $delivery_type ? $address : '',
 				'pickup_point_found' => DeliveryType::COURIER === $delivery_type || '' !== $point_code,
 				'pickup_provider_query' => DeliveryType::PICKUP === $delivery_type ? $provider_query : array(),
-				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->structured_address_reader()->legacy_recipient_address_line( $order ) : '',
+				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->structured_address_reader()->legacy_recipient_normalization_address_line( $order ) : '',
 				'courier_address_snapshot' => $courier_address_snapshot,
 				'courier_address_source' => array() !== $courier_address_snapshot ? 'trusted_order_snapshot' : 'legacy_woo_order_address',
 				'courier_legacy_address' => $courier_legacy_address,
@@ -1092,7 +1092,7 @@ final class OrderShipmentDraftFactory {
 				'pickup_point_found' => false,
 				'pickup_point_row' => array(),
 				'pickup_point_code' => '',
-				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : '',
+				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->shipping_normalization_address( $order ) : '',
 				'normalization_required' => false,
 				'normalization_valid' => false,
 				'normalization_attempted' => false,
@@ -1152,7 +1152,7 @@ final class OrderShipmentDraftFactory {
 				'pickup_point_found' => false,
 				'pickup_point_row' => array(),
 				'pickup_point_code' => '',
-				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : '',
+				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->shipping_normalization_address( $order ) : '',
 				'normalization_required' => false,
 				'normalization_valid' => false,
 				'normalization_attempted' => false,
@@ -3019,6 +3019,23 @@ final class OrderShipmentDraftFactory {
 				array_filter(
 					array(
 						method_exists( $order, 'get_shipping_postcode' ) ? trim( (string) $order->get_shipping_postcode() ) : '',
+						method_exists( $order, 'get_shipping_state' ) ? trim( (string) $order->get_shipping_state() ) : '',
+						method_exists( $order, 'get_shipping_city' ) ? trim( (string) $order->get_shipping_city() ) : '',
+						method_exists( $order, 'get_shipping_address_1' ) ? trim( (string) $order->get_shipping_address_1() ) : '',
+						method_exists( $order, 'get_shipping_address_2' ) ? trim( (string) $order->get_shipping_address_2() ) : '',
+					),
+					static fn ( string $value ): bool => '' !== trim( $value )
+				)
+			)
+		);
+	}
+
+	private function shipping_normalization_address( object $order ): string {
+		return implode(
+			', ',
+			array_values(
+				array_filter(
+					array(
 						method_exists( $order, 'get_shipping_state' ) ? trim( (string) $order->get_shipping_state() ) : '',
 						method_exists( $order, 'get_shipping_city' ) ? trim( (string) $order->get_shipping_city() ) : '',
 						method_exists( $order, 'get_shipping_address_1' ) ? trim( (string) $order->get_shipping_address_1() ) : '',

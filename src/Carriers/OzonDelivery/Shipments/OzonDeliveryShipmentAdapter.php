@@ -153,6 +153,9 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 
 	/** @param array<string,mixed> $shipment */
 	private function shipment_status_label( array $shipment ): string {
+		if ( ! empty( $shipment['pending_creation_in_carrier'] ) ) {
+			return (string) ( $shipment['status_title'] ?? 'создано, но не подтверждено' );
+		}
 		$universal = (string) ( $shipment['universal_status_code'] ?? '' );
 		if ( '' !== $universal && DeliveryStatus::is_valid( $universal ) ) {
 			return DeliveryStatus::label( $universal );

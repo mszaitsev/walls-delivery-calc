@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\OzonDelivery\Shipments;
 
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiClient;
+use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiException;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Shipments\Documents\CarrierShipmentDocumentProviderInterface;
 use WallsShop\WDC\Shipments\Documents\ShipmentBinaryDocument;
@@ -27,7 +28,7 @@ final class OzonDeliveryShipmentDocumentProvider implements CarrierShipmentDocum
 		$total = count( $postings );
 		$actions = array();
 		foreach ( $postings as $index => $posting ) {
-			if ( empty( $posting['approved'] ) ) {
+			if ( ! $this->label_available( $posting, $shipment, $index ) ) {
 				continue;
 			}
 			$place = (int) ( $posting['place_number'] ?? $index + 1 );
@@ -43,18 +44,18 @@ final class OzonDeliveryShipmentDocumentProvider implements CarrierShipmentDocum
 		if ( $place <= 0 ) {
 			throw new \RuntimeException( 'Неизвестный ярлык Ozon.' );
 		}
-		foreach ( $this->postings( $shipment ) as $posting ) {
+		foreach ( $this->postings( $shipment ) as $index => $posting ) {
 			if ( (int) ( $posting['place_number'] ?? 0 ) !== $place ) {
 				continue;
 			}
-			if ( empty( $posting['approved'] ) ) {
+			if ( ! $this->label_available( $posting, $shipment, $index ) ) {
 				throw new \RuntimeException( 'Ярлык Ozon доступен только после подтверждения отправления.' );
 			}
 			$number = (string) ( $posting['posting_number'] ?? '' );
 			if ( '' === $number ) {
 				break;
 			}
-			$label = $this->api->posting_label( $number );
+			$label = $this->download_label_with_retry( $number );
 			return new ShipmentBinaryDocument( $label['body'], $label['content_type'], $this->filename( $order, count( $this->postings( $shipment ) ), $place ) );
 		}
 
@@ -77,5 +78,41 @@ final class OzonDeliveryShipmentDocumentProvider implements CarrierShipmentDocum
 		}
 
 		return $total <= 1 ? sprintf( 'ozon-%s.pdf', $order_number ) : sprintf( 'ozon-%s-%d.pdf', $order_number, $place );
+	}
+
+	/** @param array<string,mixed> $posting @param array<string,mixed> $shipment */
+	private function label_available( array $posting, array $shipment, int $index ): bool {
+		if ( ! empty( $posting['approved'] ) ) {
+			return true;
+		}
+		$status = trim( (string) ( $posting['last_raw_status'] ?? '' ) );
+		$statuses = is_array( $shipment['ozon_statuses'] ?? null ) ? array_values( array_filter( $shipment['ozon_statuses'], 'is_array' ) ) : array();
+		$number = trim( (string) ( $posting['posting_number'] ?? '' ) );
+		foreach ( $statuses as $status_row ) {
+			if ( '' !== $number && $number === trim( (string) ( $status_row['posting_number'] ?? '' ) ) ) {
+				$status = (string) ( $status_row['status'] ?? $status );
+				break;
+			}
+		}
+		if ( '' === $status && isset( $statuses[ $index ] ) ) {
+			$status = (string) ( $statuses[ $index ]['status'] ?? '' );
+		}
+
+		return OzonDeliveryShipmentCreationStatusPolicy::is_ready( $status );
+	}
+
+	/** @return array{body:string,content_type:string} */
+	private function download_label_with_retry( string $posting_number ): array {
+		for ( $attempt = 1; $attempt <= OzonDeliveryApiClient::SHIPMENT_MAX_NETWORK_ATTEMPTS; ++$attempt ) {
+			try {
+				return $this->api->posting_label( $posting_number, OzonDeliveryApiClient::SHIPMENT_REQUEST_TIMEOUT );
+			} catch ( OzonDeliveryApiException $exception ) {
+				if ( ! $exception->retryable ) {
+					throw new \RuntimeException( 'Не удалось скачать этикетку Ozon. Проверьте статус отправления или воспользуйтесь личным кабинетом Ozon.' );
+				}
+			}
+		}
+
+		throw new \RuntimeException( 'Не удалось скачать этикетку Ozon после нескольких попыток. Попробуйте скачать её позже или воспользуйтесь личным кабинетом Ozon.' );
 	}
 }

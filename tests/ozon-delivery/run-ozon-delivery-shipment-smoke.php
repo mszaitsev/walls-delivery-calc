@@ -194,10 +194,19 @@ oz_ship_assert( empty( $not_deliverable['success'] ) && 'Не удалось р�
 oz_ship_assert( ! str_contains( (string) ( $not_deliverable['message'] ?? '' ), 'Адрес распознан недостаточно точно' ), 'Ozon courier address normalizer fallback must not use the old insufficient-precision message.' );
 
 final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
-	/** @var array<int,array{method:string,url:string,body:array<string,mixed>,headers:array<string,mixed>}> */
+	/** @var array<int,array{method:string,url:string,body:array<string,mixed>,headers:array<string,mixed>,timeout:int}> */
 	public array $calls = array();
+	public int $fail_create_attempts = 0;
+	public int $fail_create_status = 0;
+	public int $fail_label_attempts = 0;
+	public int $fail_label_status = 0;
+	/** @var array<string,int> */
+	public array $ambiguous_approve_attempts = array();
+	public mixed $on_approve = null;
 	/** @var array<int,string> */
 	public array $fail_approve = array();
+	/** @var array<int,string> */
+	public array $fail_approve_permanently = array();
 	/** @var array<string,string> */
 	public array $statuses = array();
 	/** @var array<int,array<string,mixed>> */
@@ -205,7 +214,11 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 	/** @var array<int,array{delivery:string,insurance:string,days:int}> */
 	public array $checkout_quotes = array();
 	public bool $fail_checkout = false;
+	public int $fail_checkout_attempts = 0;
+	public int $fail_checkout_status = 0;
 	public bool $fail_info = false;
+	public int $fail_info_attempts = 0;
+	public int $fail_info_status = 0;
 	public bool $fail_cancel = false;
 	/** @var array<int,string> */
 	public array $fail_cancel_numbers = array();
@@ -222,11 +235,18 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 		$body = json_decode( (string) ( $args['body'] ?? '{}' ), true );
 		$body = is_array( $body ) ? $body : array();
 		$headers = is_array( $args['headers'] ?? null ) ? $args['headers'] : array();
-		$this->calls[] = array( 'method' => $method, 'url' => $url, 'body' => $body, 'headers' => $headers );
+		$this->calls[] = array( 'method' => $method, 'url' => $url, 'body' => $body, 'headers' => $headers, 'timeout' => (int) ( $args['timeout'] ?? 0 ) );
 		if ( str_contains( $url, '/oauth/token' ) ) {
 			return new OzonDeliveryApiResponse( 200, '{"access_token":"token","expires_in":9999999999,"token_type":"bearer","scope":["delivery-api.all"]}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/order/checkout' ) ) {
+			if ( $this->fail_checkout_status > 0 ) {
+				return new OzonDeliveryApiResponse( $this->fail_checkout_status, '{"error":{"code":"checkout_failed","message":"invalid"}}', array( 'content-type' => 'application/json' ) );
+			}
+			if ( $this->fail_checkout_attempts > 0 ) {
+				--$this->fail_checkout_attempts;
+				throw new \WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiException( 'http', 'transport_error', 0, true, 'timeout' );
+			}
 			if ( $this->fail_checkout ) {
 				return new OzonDeliveryApiResponse( 500, '{"error":{"code":"checkout_failed","message":"temporary"}}', array( 'content-type' => 'application/json' ) );
 			}
@@ -246,6 +266,13 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 			return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'results' => $results ) ) ?: '{}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/order/create' ) ) {
+			if ( $this->fail_create_status > 0 ) {
+				return new OzonDeliveryApiResponse( $this->fail_create_status, '{"error":{"code":"invalid_request","message":"invalid"}}', array( 'content-type' => 'application/json' ) );
+			}
+			if ( $this->fail_create_attempts > 0 ) {
+				--$this->fail_create_attempts;
+				throw new \WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiException( 'http', 'transport_error', 0, true, 'timeout' );
+			}
 			$postings = array();
 			foreach ( is_array( $body['postings'] ?? null ) ? $body['postings'] : array() as $posting ) {
 				$id = (int) ( $posting['request_id'] ?? 0 );
@@ -261,6 +288,17 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 		}
 		if ( str_contains( $url, '/v1/posting/approve' ) ) {
 			$number = (string) ( $body['posting_number'] ?? '' );
+			if ( is_callable( $this->on_approve ) ) {
+				( $this->on_approve )( $number );
+			}
+			if ( (int) ( $this->ambiguous_approve_attempts[ $number ] ?? 0 ) > 0 ) {
+				--$this->ambiguous_approve_attempts[ $number ];
+				$this->statuses[ $number ] = 'READY_FOR_SHIPPING';
+				throw new \WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiException( 'http', 'transport_error', 0, true, 'timeout after accept' );
+			}
+			if ( in_array( $number, $this->fail_approve_permanently, true ) ) {
+				return new OzonDeliveryApiResponse( 400, '{"error":{"code":"invalid_request","message":"invalid"}}', array( 'content-type' => 'application/json' ) );
+			}
 			if ( in_array( $number, $this->fail_approve, true ) ) {
 				return new OzonDeliveryApiResponse( 500, '{"error":{"code":"approve_failed","message":"temporary"}}', array( 'content-type' => 'application/json' ) );
 			}
@@ -270,6 +308,13 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 			return new OzonDeliveryApiResponse( 200, '{}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/posting/info' ) ) {
+			if ( $this->fail_info_status > 0 ) {
+				return new OzonDeliveryApiResponse( $this->fail_info_status, '{"error":{"code":"info_failed","message":"invalid"}}', array( 'content-type' => 'application/json' ) );
+			}
+			if ( $this->fail_info_attempts > 0 ) {
+				--$this->fail_info_attempts;
+				throw new \WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiException( 'http', 'transport_error', 0, true, 'timeout' );
+			}
 			if ( $this->fail_info ) {
 				return new OzonDeliveryApiResponse( 500, '{"error":{"code":"info_failed","message":"temporary"}}', array( 'content-type' => 'application/json' ) );
 			}
@@ -315,6 +360,13 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 			return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'returns' => $returns ) ) ?: '{}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/posting/label' ) ) {
+			if ( $this->fail_label_status > 0 ) {
+				return new OzonDeliveryApiResponse( $this->fail_label_status, '{"error":{"code":"invalid_request","message":"invalid"}}', array( 'content-type' => 'application/json' ) );
+			}
+			if ( $this->fail_label_attempts > 0 ) {
+				--$this->fail_label_attempts;
+				throw new \WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiException( 'http', 'transport_error', 0, true, 'timeout' );
+			}
 			return new OzonDeliveryApiResponse( 200, '%PDF-1.4 test', array( 'content-type' => 'application/pdf' ) );
 		}
 		return new OzonDeliveryApiResponse( 404, '{"error":{"code":"not_found","message":"not found"}}', array( 'content-type' => 'application/json' ) );
@@ -536,6 +588,7 @@ $create_calls = $stack['http']->calls_for( '/v1/order/create' );
 oz_ship_assert( 1 === count( $create_calls ), 'Ozon shipment create must call /v1/order/create once.' );
 $body = $create_calls[0]['body'];
 oz_ship_assert( '11111111-1111-4111-8111-111111111111' === (string) ( $create_calls[0]['headers']['Idempotency-Key'] ?? '' ), 'Ozon order/create must pass the stable Shipment Framework idempotency UUID.' );
+oz_ship_assert( OzonDeliveryApiClient::SHIPMENT_REQUEST_TIMEOUT === (int) ( $checkout_calls[0]['timeout'] ?? 0 ) && OzonDeliveryApiClient::SHIPMENT_REQUEST_TIMEOUT === (int) ( $create_calls[0]['timeout'] ?? 0 ), 'Ozon shipment checkout/create must use the operation-specific 15 second timeout.' );
 oz_ship_assert( 2 === count( $body['postings'] ?? array() ), 'Ozon postings count must equal actual modal places count.' );
 foreach ( $body['postings'] as $index => $posting ) {
 	$checkout_posting = $checkout_calls[0]['body']['postings'][ $index ] ?? array();
@@ -557,6 +610,35 @@ $status_payload = $stack['adapter']->status_payload( $order, $stored );
 oz_ship_assert( ! empty( $status_payload['has_actual_cost'] ) && 'carrier_api' === (string) ( $status_payload['actual_cost_source'] ?? '' ), 'Ozon status payload must expose actual cost immediately after create.' );
 oz_ship_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $status_payload['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $status_payload['shipment_status_label'] ?? '' ) && 'READY_FOR_SHIPPING, READY_FOR_SHIPPING' === (string) ( $status_payload['carrier_status_title'] ?? '' ), 'Ozon create UI payload must immediately show created_in_carrier and raw Ozon statuses without a manual refresh.' );
 oz_ship_assert( 'Номера Ozon' === (string) ( $status_payload['tracking_presentation']['label'] ?? '' ) && 2 === count( $status_payload['tracking_presentation']['items'] ?? array() ) && 'OZON-1' === (string) ( $status_payload['tracking_presentation']['items'][0]['copy_value'] ?? '' ) && 'OZON-2' === (string) ( $status_payload['tracking_presentation']['items'][1]['copy_value'] ?? '' ), 'Ozon multi-box status payload must expose every posting number sorted by place for individual copying.' );
+
+$create_retry_stack = oz_ship_stack( $db );
+$create_retry_stack['http']->fail_create_attempts = 1;
+$create_retry_order = new OzonShipmentSmokeOrder( 85391, '85391', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$create_retry_result = $create_retry_stack['service']->create( $create_retry_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85391, '85391' ) );
+$retried_create_calls = $create_retry_stack['http']->calls_for( '/v1/order/create' );
+oz_ship_assert( $create_retry_result->success && 2 === count( $retried_create_calls ), 'Retryable Ozon order/create timeout must retry and continue the existing flow.' );
+oz_ship_assert( count( array_unique( array_map( static fn( array $call ): string => (string) ( $call['headers']['Idempotency-Key'] ?? '' ), $retried_create_calls ) ) ) === 1, 'Every Ozon order/create retry must use exactly the same ShipmentCreationAttempt idempotency key.' );
+oz_ship_assert( array() !== ( new OrderShipmentRepository() )->find_by_carrier( $create_retry_order, OzonDeliverySettings::CARRIER_KEY ), 'Successful create retry must persist one Ozon shipment.' );
+$create_exhausted_stack = oz_ship_stack( $db );
+$create_exhausted_stack['http']->fail_create_attempts = 3;
+$create_exhausted_order = new OzonShipmentSmokeOrder( 85393, '85393', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$create_exhausted_result = $create_exhausted_stack['service']->create( $create_exhausted_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85393, '85393' ) );
+oz_ship_assert( ! $create_exhausted_result->success && 3 === count( $create_exhausted_stack['http']->calls_for( '/v1/order/create' ) ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $create_exhausted_order, OzonDeliverySettings::CARRIER_KEY ), 'Exhausted Ozon create retries must stay bounded and must not create a fake local shipment.' );
+oz_ship_assert( str_contains( $create_exhausted_result->error_message, 'Проверьте заказ в личном кабинете Ozon' ) && ! str_contains( strtolower( $create_exhausted_result->error_message ), 'timeout' ), 'Exhausted Ozon create retries must expose an actionable Russian error without raw transport details.' );
+$create_permanent_stack = oz_ship_stack( $db );
+$create_permanent_stack['http']->fail_create_status = 400;
+$create_permanent_result = $create_permanent_stack['service']->create( new OzonShipmentSmokeOrder( 85394, '85394', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85394, '85394' ) );
+oz_ship_assert( ! $create_permanent_result->success && 1 === count( $create_permanent_stack['http']->calls_for( '/v1/order/create' ) ), 'Permanent Ozon order/create 4xx business errors must not be retried.' );
+$preflight_retry_stack = oz_ship_stack( $db );
+$preflight_retry_stack['http']->fail_checkout_attempts = 2;
+$preflight_retry_result = $preflight_retry_stack['service']->create( new OzonShipmentSmokeOrder( 85395, '85395', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85395, '85395' ) );
+$preflight_retry_calls = $preflight_retry_stack['http']->calls_for( '/v1/order/checkout' );
+oz_ship_assert( $preflight_retry_result->success && 3 === count( $preflight_retry_calls ), 'Retryable shipment preflight failures must use at most two retries before create.' );
+oz_ship_assert( array() === array_filter( $preflight_retry_calls, static fn( array $call ): bool => OzonDeliveryApiClient::SHIPMENT_REQUEST_TIMEOUT !== (int) ( $call['timeout'] ?? 0 ) ), 'Every retried shipment preflight request must keep the 15 second timeout.' );
+$preflight_permanent_stack = oz_ship_stack( $db );
+$preflight_permanent_stack['http']->fail_checkout_status = 400;
+$preflight_permanent_result = $preflight_permanent_stack['service']->create( new OzonShipmentSmokeOrder( 85396, '85396', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85396, '85396' ) );
+oz_ship_assert( ! $preflight_permanent_result->success && 1 === count( $preflight_permanent_stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $preflight_permanent_stack['http']->calls_for( '/v1/order/create' ) ), 'Permanent shipment preflight 4xx errors must not retry or reach order/create.' );
 
 $courier_stack = oz_ship_stack( $db );
 $courier_order = new OzonShipmentSmokeOrder( 85410, '85410', array( new OzonShipmentSmokeOrderItem( 501, 2, '2000.00' ) ) );
@@ -611,13 +693,29 @@ $manual_stack['http']->statuses['MANUAL-OZON-1'] = 'ON_WAY';
 $manual_attach = $manual_stack['adapter']->attach_manual( $manual_order, array( 'barcode' => ' MANUAL-OZON-1 ' ) );
 $manual_stored = ( new OrderShipmentRepository() )->find_by_carrier( $manual_order, OzonDeliverySettings::CARRIER_KEY );
 $manual_payload = $manual_stack['adapter']->status_payload( $manual_order, $manual_stored );
+$manual_actions = $manual_stack['docs']->actions( $manual_order, $manual_stored );
 oz_ship_assert( ! empty( $manual_attach['success'] ) && 'MANUAL-OZON-1' === (string) ( $manual_attach['tracking_number'] ?? '' ), 'Ozon manual attach must accept a posting_number through the existing generic manual attach payload.' );
 oz_ship_assert( 'MANUAL-OZON-1' === (string) ( $manual_stored['ozon_postings'][0]['posting_number'] ?? '' ) && 'ON_WAY' === (string) ( $manual_stored['ozon_statuses'][0]['status'] ?? '' ) && DeliveryStatus::IN_TRANSIT === (string) ( $manual_stored['universal_status_code'] ?? '' ), 'Ozon manual attach must persist the official posting/info status through the settings-backed mapper.' );
 oz_ship_assert( 11900 === (int) ( $manual_stored['actual_cost_kopecks'] ?? 0 ) && 'RUB' === (string) ( $manual_stored['actual_cost_currency'] ?? '' ) && 'carrier_api' === (string) ( $manual_stored['actual_cost_source'] ?? '' ) && OzonDeliveryShipmentService::MANUAL_ATTACH_ACTUAL_COST_SOURCE_DETAIL === (string) ( $manual_stored['actual_cost_source_detail'] ?? '' ) && ! empty( $manual_payload['has_actual_cost'] ), 'Ozon manual attach must persist posting/info delivery 109 + insurance 10 as canonical actual cost.' );
 oz_ship_assert( 10900 === (int) ( $manual_stored['response_snapshot']['delivery_cost_kopecks'] ?? 0 ) && 1000 === (int) ( $manual_stored['response_snapshot']['insurance_cost_kopecks'] ?? 0 ) && 11900 === (int) ( $manual_stored['response_snapshot']['total_cost_kopecks'] ?? 0 ), 'Ozon manual attach snapshot must keep only safe cost summary fields.' );
+oz_ship_assert( 1 === count( $manual_actions ) && 'Скачать этикетку' === $manual_actions[0]->label, 'Manual-attached Ozon posting in an authoritative ready state must expose its label without a local approved flag.' );
+$manual_info_retry_stack = oz_ship_stack( $db );
+$manual_info_retry_stack['http']->fail_info_attempts = 2;
+$manual_info_retry_stack['http']->statuses['MANUAL-OZON-RETRY'] = 'READY_FOR_SHIPPING';
+$manual_info_retry_result = $manual_info_retry_stack['adapter']->attach_manual( new OzonShipmentSmokeOrder( 85397, '85397', array( new OzonShipmentSmokeOrderItem( 102, 1, '1500.00' ) ) ), array( 'barcode' => 'MANUAL-OZON-RETRY' ) );
+$manual_info_retry_calls = $manual_info_retry_stack['http']->calls_for( '/v1/posting/info' );
+oz_ship_assert( ! empty( $manual_info_retry_result['success'] ) && 3 === count( $manual_info_retry_calls ), 'Retryable posting/info failures must use at most two retries for shipment status/manual attach reads.' );
+oz_ship_assert( array() === array_filter( $manual_info_retry_calls, static fn( array $call ): bool => OzonDeliveryApiClient::SHIPMENT_REQUEST_TIMEOUT !== (int) ( $call['timeout'] ?? 0 ) ), 'Every retried posting/info request must keep the 15 second timeout.' );
+$manual_info_permanent_stack = oz_ship_stack( $db );
+$manual_info_permanent_stack['http']->fail_info_status = 400;
+$manual_info_permanent_result = $manual_info_permanent_stack['adapter']->attach_manual( new OzonShipmentSmokeOrder( 85398, '85398', array( new OzonShipmentSmokeOrderItem( 102, 1, '1500.00' ) ) ), array( 'barcode' => 'MANUAL-OZON-PERMANENT' ) );
+oz_ship_assert( empty( $manual_info_permanent_result['success'] ) && 1 === count( $manual_info_permanent_stack['http']->calls_for( '/v1/posting/info' ) ), 'Permanent posting/info 4xx errors must not be retried.' );
+$unapproved_actions = $manual_stack['docs']->actions( $manual_order, array( 'ozon_postings' => array( array( 'posting_number' => 'WAITING', 'place_number' => 1, 'last_raw_status' => 'CREATED' ) ) ) );
+oz_ship_assert( array() === $unapproved_actions, 'Ozon posting that is genuinely not approved must keep label action unavailable.' );
 $manual_stack['http']->statuses['MANUAL-OZON-1'] = 'DELIVERED';
 $manual_update = $manual_stack['adapter']->update_status( $manual_order );
 oz_ship_assert( ! empty( $manual_update['success'] ) && DeliveryStatus::DELIVERED === (string) ( $manual_update['shipment']['universal_status_code'] ?? '' ), 'Manual-attached Ozon shipment must use the normal status update path.' );
+oz_ship_assert( 1 === count( $manual_stack['docs']->actions( $manual_order, $manual_update['shipment'] ) ), 'Ozon label action must remain derived from fresh authoritative status after live status transition.' );
 
 $decimal_stack = oz_ship_stack( $db );
 $decimal_order = new OzonShipmentSmokeOrder( 85388, '85388', array() );
@@ -686,6 +784,21 @@ $single_actions = $stack['docs']->actions( $single_document_order, $single_docum
 oz_ship_assert( 1 === count( $single_actions ) && 'Скачать этикетку' === $single_actions[0]->label, 'Ozon single-box document action must use the concise label button name.' );
 $single_document = $stack['docs']->download( $single_document_order, $single_document_shipment, 'ozon_label_1' );
 oz_ship_assert( 'ozon-1030.pdf' === $single_document->filename, 'Ozon label provider must omit box suffix for a single posting.' );
+$label_retry_stack = oz_ship_stack( $db );
+$label_retry_stack['http']->fail_label_attempts = 2;
+$label_retry_document = $label_retry_stack['docs']->download( $single_document_order, $single_document_shipment, 'ozon_label_1' );
+$label_retry_calls = $label_retry_stack['http']->calls_for( '/v1/posting/label' );
+oz_ship_assert( $label_retry_document instanceof ShipmentBinaryDocument && 3 === count( $label_retry_calls ), 'Ozon label download must retry retryable failures at most twice after the initial attempt.' );
+oz_ship_assert( array() === array_filter( $label_retry_calls, static fn( array $call ): bool => OzonDeliveryApiClient::SHIPMENT_REQUEST_TIMEOUT !== (int) ( $call['timeout'] ?? 0 ) ), 'Every Ozon label attempt must use the operation-specific 15 second timeout.' );
+$label_permanent_stack = oz_ship_stack( $db );
+$label_permanent_stack['http']->fail_label_status = 400;
+try {
+	$label_permanent_stack['docs']->download( $single_document_order, $single_document_shipment, 'ozon_label_1' );
+	oz_ship_assert( false, 'Permanent Ozon label error must fail.' );
+} catch ( RuntimeException $exception ) {
+	oz_ship_assert( str_contains( $exception->getMessage(), 'Не удалось скачать этикетку Ozon' ), 'Ozon label failure must expose a safe Russian manager-facing error.' );
+}
+oz_ship_assert( 1 === count( $label_permanent_stack['http']->calls_for( '/v1/posting/label' ) ), 'Permanent Ozon label 4xx business error must not be retried.' );
 
 $forming_stack = oz_ship_stack( $db );
 $forming_stack['http']->approve_status = 'FORMING';
@@ -980,6 +1093,11 @@ oz_ship_assert( ! $strict->success && 0 === count( $stack['http']->calls_for( '/
 $stack = oz_ship_stack( $db );
 $stack['http']->fail_approve = array( 'OZON-3' );
 $partial_order = new OzonShipmentSmokeOrder( 85376, '85376', array( new OzonShipmentSmokeOrderItem( 101, 3, '5200.00' ) ) );
+$checkpoint_seen_before_approve = false;
+$stack['http']->on_approve = static function () use ( $partial_order, &$checkpoint_seen_before_approve ): void {
+	$checkpoint = ( new OrderShipmentRepository() )->find_by_carrier( $partial_order, OzonDeliverySettings::CARRIER_KEY );
+	$checkpoint_seen_before_approve = $checkpoint_seen_before_approve || ( ! empty( $checkpoint['pending_creation_in_carrier'] ) && '' !== (string) ( $checkpoint['ozon_order_number'] ?? '' ) && 3 === count( $checkpoint['ozon_postings'] ?? array() ) && '' !== (string) ( $checkpoint['ozon_idempotency_key'] ?? '' ) );
+};
 $partial_request = oz_ship_request( array(
 	new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
 	new ShipmentPlace( 2, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
@@ -990,9 +1108,12 @@ $partial_request = oz_ship_request( array(
 	array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 3, 'amount' => 1, 'cost' => 1000 ),
 ), '777', 85376, '85376' );
 $partial = $stack['service']->create( $partial_order, $partial_request );
-oz_ship_assert( ! $partial->success && 'ozon_posting_approve_partial' === $partial->error_code, 'Partial approve failure must not be reported as full success.' );
+oz_ship_assert( $partial->success && ! empty( $partial->raw_reference['lifecycle']['submit_required'] ), 'Partial approve must return the persisted intermediate shipment through the existing lifecycle continuation contract.' );
 $pending = ( new OrderShipmentRepository() )->find_by_carrier( $partial_order, OzonDeliverySettings::CARRIER_KEY );
 oz_ship_assert( ! empty( $pending['pending_creation_in_carrier'] ) && 3 === count( $pending['ozon_postings'] ?? array() ), 'Partial approve must persist all external references for recovery.' );
+oz_ship_assert( $checkpoint_seen_before_approve, 'Ozon order/posting/idempotency references must be durably checkpointed before the first unreliable approve mutation.' );
+oz_ship_assert( 'создано, но не подтверждено' === (string) ( $stack['adapter']->status_payload( $partial_order, $pending )['shipment_status_label'] ?? '' ), 'Persisted partial Ozon shipment must be immediately presentable with the canonical intermediate status.' );
+oz_ship_assert( 3 === count( array_filter( $stack['http']->calls_for( '/v1/posting/approve' ), static fn( array $call ): bool => 'OZON-3' === (string) ( $call['body']['posting_number'] ?? '' ) ) ), 'Retryable Ozon approve failure must be bounded to initial attempt plus two retries.' );
 oz_ship_assert( 34800 === (int) ( $pending['actual_cost_kopecks'] ?? 0 ) && OzonDeliveryShipmentPreflightQuoteService::SOURCE_DETAIL === (string) ( $pending['actual_cost_source_detail'] ?? '' ), 'Partial approve persistence must keep the initial Ozon preflight actual cost candidate.' );
 $stack['http']->fail_approve = array();
 $continued = $stack['adapter']->continue_lifecycle( $partial_order, OzonDeliveryShipmentService::CONTINUATION_TOKEN );
@@ -1001,6 +1122,17 @@ oz_ship_assert( 1 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 
 oz_ship_assert( 1 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ), 'Approve retry must not run a second Ozon checkout preflight.' );
 $finished = ( new OrderShipmentRepository() )->find_by_carrier( $partial_order, OzonDeliverySettings::CARRIER_KEY );
 oz_ship_assert( empty( $finished['pending_creation_in_carrier'] ) && 'created' === (string) ( $finished['status'] ?? '' ), 'Continuation must clear pending state after all postings are approved.' );
+
+$ambiguous_stack = oz_ship_stack( $db );
+$ambiguous_stack['http']->ambiguous_approve_attempts['OZON-1'] = 1;
+$ambiguous_order = new OzonShipmentSmokeOrder( 85392, '85392', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$ambiguous_result = $ambiguous_stack['service']->create( $ambiguous_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85392, '85392' ) );
+oz_ship_assert( $ambiguous_result->success && 1 === count( $ambiguous_stack['http']->calls_for( '/v1/posting/approve' ) ) && 1 <= count( $ambiguous_stack['http']->calls_for( '/v1/posting/info' ) ), 'Ambiguous approve timeout must reconcile ready carrier status before deciding whether to repeat the mutation.' );
+$permanent_approve_stack = oz_ship_stack( $db );
+$permanent_approve_stack['http']->fail_approve_permanently = array( 'OZON-1' );
+$permanent_approve_order = new OzonShipmentSmokeOrder( 85395, '85395', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$permanent_approve_result = $permanent_approve_stack['service']->create( $permanent_approve_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85395, '85395' ) );
+oz_ship_assert( $permanent_approve_result->success && ! empty( $permanent_approve_result->raw_reference['lifecycle']['submit_required'] ) && 1 === count( $permanent_approve_stack['http']->calls_for( '/v1/posting/approve' ) ), 'Permanent Ozon approve 4xx error must preserve the intermediate shipment without retrying the mutation.' );
 
 $architecture_source = file_get_contents( $root . '/src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentCreateRequestBuilder.php' ) ?: '';
 oz_ship_assert( ! str_contains( $architecture_source, 'PackagingBuilder' ) && ! str_contains( $architecture_source, 'PackagingResult' ) && ! str_contains( $architecture_source, 'ozon_delivery_places' ), 'Ozon shipment create must not depend on checkout Packaging or quote places metadata.' );

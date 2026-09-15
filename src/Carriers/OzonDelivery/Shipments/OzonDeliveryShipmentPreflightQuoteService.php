@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\OzonDelivery\Shipments;
 
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiClient;
+use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiException;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteParser;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 
@@ -26,7 +27,7 @@ final class OzonDeliveryShipmentPreflightQuoteService {
 		$request_ids = array_map( 'intval', array_column( $checkout_body['postings'], 'request_id' ) );
 		$shipment_method_id = (int) ( $checkout_body['postings'][0]['shipment_method_id'] ?? 0 );
 		$point_id = (string) ( $checkout_body['delivery']['delivery_point']['delivery_point_id'] ?? '' );
-		$response = $this->api->order_checkout( $checkout_body );
+		$response = $this->checkout_with_retry( $checkout_body );
 		$quote = $this->parser->parse( $response, $request_ids, $point_id, $shipment_method_id );
 
 		return array(
@@ -87,5 +88,22 @@ final class OzonDeliveryShipmentPreflightQuoteService {
 		}
 
 		return $delivery;
+	}
+
+	/** @param array<string,mixed> $body @return array<string,mixed> */
+	private function checkout_with_retry( array $body ): array {
+		$last_exception = null;
+		for ( $attempt = 1; $attempt <= OzonDeliveryApiClient::SHIPMENT_MAX_NETWORK_ATTEMPTS; ++$attempt ) {
+			try {
+				return $this->api->order_checkout( $body, OzonDeliveryApiClient::SHIPMENT_REQUEST_TIMEOUT );
+			} catch ( OzonDeliveryApiException $exception ) {
+				$last_exception = $exception;
+				if ( ! $exception->retryable ) {
+					break;
+				}
+			}
+		}
+
+		throw $last_exception ?? new OzonDeliveryApiException( 'order/checkout', 'transport_error', 0, true, 'Ошибка соединения с Ozon Delivery.' );
 	}
 }

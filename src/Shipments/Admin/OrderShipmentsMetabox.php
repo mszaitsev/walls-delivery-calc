@@ -289,6 +289,7 @@ final class OrderShipmentsMetabox {
 		$modal_extension = ! $non_shipment_active && $this->modal_extensions instanceof ShipmentModalExtensionRegistry ? $this->modal_extensions->get( $carrier_key ) : null;
 		$modal_extension_context = $modal_extension instanceof CarrierShipmentModalExtensionInterface ? $modal_extension->modal_context( $order, $draft ) : array();
 		$modal_create_button_label = __( 'Создать отправление', 'walls-delivery-calc' );
+		$modal_title = $this->shipment_modal_title( $order, $order_id );
 		if ( array_key_exists( 'requires_tariff', $modal_extension_context ) ) {
 			$requires_tariff = (bool) $modal_extension_context['requires_tariff'];
 		}
@@ -351,9 +352,9 @@ final class OrderShipmentsMetabox {
 				</p>
 			</div>
 			<div class="wdc-shipment-modal" data-wdc-shipment-modal hidden>
-				<div class="wdc-shipment-modal__dialog" role="dialog" aria-modal="true" aria-label="<?php echo esc_attr__( 'Подготовка отправления', 'walls-delivery-calc' ); ?>">
+				<div class="wdc-shipment-modal__dialog" role="dialog" aria-modal="true" aria-label="<?php echo esc_attr( $modal_title ); ?>">
 					<button type="button" class="wdc-shipment-modal__close" data-wdc-close-shipment-modal aria-label="<?php echo esc_attr__( 'Закрыть', 'walls-delivery-calc' ); ?>">×</button>
-					<h2><?php echo esc_html__( 'Подготовка отправления', 'walls-delivery-calc' ); ?></h2>
+					<h2><?php echo esc_html( $modal_title ); ?></h2>
 					<div id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1" data-wdc-requires-tariff="<?php echo $requires_tariff ? '1' : '0'; ?>" data-wdc-requires-successful-preview="<?php echo $requires_successful_preview ? '1' : '0'; ?>" role="group">
 						<input type="hidden" name="order_id" value="<?php echo esc_attr( (string) $order_id ); ?>">
 						<input type="hidden" name="carrier_key" value="<?php echo esc_attr( $carrier_key ); ?>">
@@ -1023,6 +1024,13 @@ final class OrderShipmentsMetabox {
 		}
 
 		return $actions;
+	}
+
+	private function shipment_modal_title( object $order, int $order_id ): string {
+		$order_number = method_exists( $order, 'get_order_number' ) ? trim( (string) $order->get_order_number() ) : '';
+		$order_number = '' !== $order_number ? $order_number : (string) $order_id;
+
+		return sprintf( __( 'Подготовка отправления, заказ %s', 'walls-delivery-calc' ), $order_number );
 	}
 
 	/**

@@ -2,6 +2,13 @@ function initializeShipmentAdmin() {
   document.addEventListener('click', function (event) {
     if (dispatchShipmentCarrierHook('handleClick', event)) return;
 
+    const documentDownload = event.target.closest('[data-wdc-shipment-document-download]');
+    if (documentDownload) {
+      event.preventDefault();
+      requestShipmentDocument(documentDownload);
+      return;
+    }
+
     const dateStep = event.target.closest('[data-wdc-date-step]');
     if (dateStep) {
       event.preventDefault();

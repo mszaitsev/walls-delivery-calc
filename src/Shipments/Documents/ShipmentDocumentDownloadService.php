@@ -38,7 +38,7 @@ final class ShipmentDocumentDownloadService {
 
 	public function admin_post_download(): void {
 		if ( ! current_user_can( ShipmentAdminAjaxService::CAPABILITY ) ) {
-			$this->die( 'Недостаточно прав.', 403 );
+			$this->fail( 'Недостаточно прав.', 403 );
 		}
 
 		$order_id = (int) ( $_GET['order_id'] ?? 0 );
@@ -46,19 +46,19 @@ final class ShipmentDocumentDownloadService {
 		$action_key = $this->sanitize_key( wp_unslash( (string) ( $_GET['action_key'] ?? '' ) ) );
 		$nonce = sanitize_text_field( wp_unslash( (string) ( $_GET['_wdc_nonce'] ?? '' ) ) );
 		if ( $order_id <= 0 || '' === $carrier_key || '' === $action_key || ! wp_verify_nonce( $nonce, $this->nonce_action( $order_id, $carrier_key, $action_key ) ) ) {
-			$this->die( 'Неверный запрос.', 403 );
+			$this->fail( 'Неверный запрос.', 403 );
 		}
 
 		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
 		if ( ! is_object( $order ) ) {
-			$this->die( 'Заказ не найден.', 404 );
+			$this->fail( 'Заказ не найден.', 404 );
 		}
 
 		try {
 			$document = $this->download_for_order( $order, $carrier_key, $action_key );
 		} catch ( \Throwable $exception ) {
 			$this->log_failure( $order_id, $carrier_key, $action_key, $exception );
-			$this->die( $exception->getMessage() ?: 'Не удалось скачать документ отправления.', 400 );
+			$this->fail( $exception->getMessage() ?: 'Не удалось скачать документ отправления.', 400 );
 		}
 
 		if ( function_exists( 'nocache_headers' ) ) {
@@ -105,6 +105,14 @@ final class ShipmentDocumentDownloadService {
 
 	private function die( string $message, int $status ): void {
 		wp_die( esc_html( $message ), '', array( 'response' => $status ) );
+	}
+
+	private function fail( string $message, int $status ): never {
+		if ( '1' === (string) ( $_SERVER['HTTP_X_WDC_SHIPMENT_DOCUMENT_FETCH'] ?? '' ) && function_exists( 'wp_send_json_error' ) ) {
+			wp_send_json_error( array( 'message' => $message ), $status );
+		}
+		$this->die( $message, $status );
+		exit;
 	}
 
 	private function log_failure( int $order_id, string $carrier_key, string $action_key, \Throwable $exception ): void {

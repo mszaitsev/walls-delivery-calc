@@ -13,6 +13,7 @@ final class OzonDeliverySettings {
 	public const SERVICE_KEY = 'ozon_delivery';
 	public const PICKUP_FAMILY = 'ozon_delivery:pickup';
 	public const TITLE = 'Ozon Доставка';
+	public const SHIPMENT_PICKUP_TITLE = 'Ozon Доставка до ПВЗ';
 	public const PUBLIC_TITLE = 'Ozon Доставка';
 	public const API_BASE_URL = 'https://api-delivery.ozon.ru';
 	public const TOKEN_URL = 'https://xapi.ozon.ru/oauth/token';

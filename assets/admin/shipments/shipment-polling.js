@@ -153,7 +153,9 @@
       .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
-          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось продолжить регистрацию отправления.');
+          const controlled = new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось продолжить регистрацию отправления.');
+          controlled.payload = payload;
+          throw controlled;
         }
         const statusPayload = shipmentStatusFromResponse(payload.data);
         renderShipmentStatus(box, statusPayload);
@@ -172,7 +174,12 @@
       .catch((error) => {
         setShipmentPollingIndicator(box, false);
         if (button) button.disabled = false;
-        showShipmentToast(box, error.message, 'error', { append: true });
+        const data = error && error.payload && error.payload.data ? error.payload.data : null;
+        if (data) {
+          renderShipmentStatus(box, shipmentStatusFromResponse(data));
+          renderShipmentTechnicalInfo(box, data);
+        }
+        showShipmentError(box, error.message);
         return null;
       });
   }

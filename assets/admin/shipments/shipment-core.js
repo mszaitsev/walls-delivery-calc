@@ -131,6 +131,83 @@
     return toast;
   }
 
+  function clearShipmentError(box) {
+    if (!box || !box.querySelector) return;
+    const message = box.querySelector('[data-wdc-shipment-status-message]');
+    if (message && message.dataset.status === 'error') {
+      message.textContent = '';
+      message.dataset.status = '';
+    }
+    const toast = box.querySelector('[data-wdc-shipment-toast]');
+    if (toast && toast.dataset.status === 'error') {
+      const timer = toastTimers.get(toast);
+      if (timer) window.clearTimeout(timer);
+      toastTimers.delete(toast);
+      toast.textContent = '';
+      toast.hidden = true;
+    }
+  }
+
+  function showShipmentError(box, message) {
+    const target = box && box.querySelector ? box.querySelector('[data-wdc-shipment-status-message]') : null;
+    if (target) {
+      target.dataset.status = 'error';
+      target.textContent = message;
+    }
+    showShipmentToast(box, message, 'error', { persist: true });
+  }
+
+  function requestShipmentDocument(link) {
+    const box = link && link.closest ? link.closest('[data-wdc-shipments-metabox]') : null;
+    const url = String(link && link.dataset ? link.dataset.downloadUrl || link.href || '' : '').trim();
+    if (!url || link.dataset.wdcDocumentBusy === '1') return Promise.resolve(null);
+    link.dataset.wdcDocumentBusy = '1';
+    link.setAttribute('aria-disabled', 'true');
+    return fetch(url, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: {
+        'Accept': 'application/pdf, application/json',
+        'X-WDC-Shipment-Document-Fetch': '1'
+      }
+    })
+      .then(function (response) {
+        const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+        if (!response.ok) {
+          if (contentType.indexOf('application/json') !== -1) {
+            return parseShipmentJsonResponse(response).then(function (payload) {
+              throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось скачать документ отправления.');
+            });
+          }
+          throw new Error('Не удалось скачать документ отправления. Попробуйте позже.');
+        }
+        return response.blob().then(function (blob) {
+          const disposition = String(response.headers.get('content-disposition') || '');
+          const match = disposition.match(/filename="?([^";]+)"?/i);
+          return { blob: blob, filename: match ? match[1] : 'shipment-document.pdf' };
+        });
+      })
+      .then(function (result) {
+        const objectUrl = window.URL.createObjectURL(result.blob);
+        const download = document.createElement('a');
+        download.href = objectUrl;
+        download.download = result.filename;
+        download.hidden = true;
+        document.body.appendChild(download);
+        download.click();
+        download.remove();
+        window.URL.revokeObjectURL(objectUrl);
+        clearShipmentError(box);
+      })
+      .catch(function (error) {
+        showShipmentError(box, error && error.message ? error.message : 'Не удалось скачать документ отправления.');
+      })
+      .finally(function () {
+        delete link.dataset.wdcDocumentBusy;
+        link.removeAttribute('aria-disabled');
+      });
+  }
+
   function copyText(text) {
     const value = String(text || '');
     if (!value) return Promise.reject(new Error('Нет номера для копирования.'));

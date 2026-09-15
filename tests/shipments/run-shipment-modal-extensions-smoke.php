@@ -15,6 +15,9 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentModalExtension;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentModalExtension;
+use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
+use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Application\OrderStructuredAddressReader;
 use WallsShop\WDC\Shipments\Modal\CarrierShipmentModalExtensionInterface;
 use WallsShop\WDC\Shipments\Modal\ShipmentModalExtensionRegistry;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentModalExtension;
@@ -113,6 +116,36 @@ try {
 }
 
 $order = new ModalExtensionsFakeOrder();
+$address_reader = new OrderStructuredAddressReader();
+$normalization_address = $address_reader->legacy_recipient_normalization_address_line( $order );
+$shipment_address = $address_reader->legacy_recipient_address( $order );
+modal_ext_assert( 'Новосибирская область, Новосибирск, Красный проспект 1' === $normalization_address && ! str_contains( $normalization_address, '630001' ), 'Initial editable shipment normalization address must contain region, city and address without postcode.' );
+modal_ext_assert( '630001' === $shipment_address->postcode, 'Removing postcode from editable normalization text must preserve the separate shipment postcode.' );
+$chelyabinsk_order = new class {
+	public function get_shipping_city(): string { return 'г Челябинск'; }
+	public function get_shipping_state(): string { return 'Челябинская область'; }
+	public function get_shipping_postcode(): string { return '454000'; }
+	public function get_shipping_address_1(): string { return 'ул. Ленина, 1'; }
+	public function get_shipping_address_2(): string { return ''; }
+};
+$chelyabinsk_normalization_address = $address_reader->legacy_recipient_normalization_address_line( $chelyabinsk_order );
+$chelyabinsk_shipment_address = $address_reader->legacy_recipient_address( $chelyabinsk_order );
+modal_ext_assert( 'Челябинская область, г Челябинск, ул. Ленина, 1' === $chelyabinsk_normalization_address && ! str_contains( $chelyabinsk_normalization_address, '454000' ), 'Production-like normalization text must exclude postcode while preserving region, city and street.' );
+modal_ext_assert( '454000' === $chelyabinsk_shipment_address->postcode, 'Production-like shipment request must retain the separate postcode.' );
+$draft_factory_reflection = new ReflectionClass( OrderShipmentDraftFactory::class );
+$draft_factory_without_dependencies = $draft_factory_reflection->newInstanceWithoutConstructor();
+$normalization_method = $draft_factory_reflection->getMethod( 'shipping_normalization_address' );
+$normalization_method->setAccessible( true );
+modal_ext_assert( $normalization_address === $normalization_method->invoke( $draft_factory_without_dependencies, $order ), 'All shipping-based shipment modal builders must share the postcode-free normalization presentation contract.' );
+$metabox_reflection = new ReflectionClass( OrderShipmentsMetabox::class );
+$metabox_without_dependencies = $metabox_reflection->newInstanceWithoutConstructor();
+$modal_title_method = $metabox_reflection->getMethod( 'shipment_modal_title' );
+$modal_title_method->setAccessible( true );
+$display_number_order = new class {
+	public function get_order_number(): string { return '82388'; }
+};
+modal_ext_assert( 'Подготовка отправления, заказ 82388' === $modal_title_method->invoke( $metabox_without_dependencies, $display_number_order, 123 ), 'Shipment modal title must use the WooCommerce display order number instead of the database id.' );
+modal_ext_assert( 'Ozon Доставка до ПВЗ' === OzonDeliverySettings::SHIPMENT_PICKUP_TITLE, 'Ozon pickup shipment scenario must use the explicit pickup presentation title.' );
 $services = array(
 	array(
 		'delivery_type' => 'pickup',

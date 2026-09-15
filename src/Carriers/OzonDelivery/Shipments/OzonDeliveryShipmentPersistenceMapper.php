@@ -65,7 +65,7 @@ final class OzonDeliveryShipmentPersistenceMapper implements CarrierShipmentPers
 			'tracking_number' => (string) ( $raw['ozon_postings'][0]['posting_number'] ?? $raw['ozon_order_number'] ?? '' ),
 			'barcode' => (string) ( $raw['ozon_postings'][0]['posting_number'] ?? '' ),
 			'status' => DeliveryStatus::PENDING_CREATION_IN_CARRIER,
-			'status_title' => 'Заказ Ozon создан, но не все отправления подтверждены. Продолжите создание.',
+			'status_title' => 'создано, но не подтверждено',
 			'universal_status_code' => DeliveryStatus::PENDING_CREATION_IN_CARRIER,
 			'universal_status_label' => DeliveryStatus::label( DeliveryStatus::PENDING_CREATION_IN_CARRIER ),
 			'pending_creation_in_carrier' => true,
@@ -87,5 +87,31 @@ final class OzonDeliveryShipmentPersistenceMapper implements CarrierShipmentPers
 	/** @param array<string,mixed> $shipment */
 	public function after_persist( object $order, array $shipment ): void {
 		unset( $order, $shipment );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	public function result_after_failed_persist( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $shipment ): ?ShipmentCreateResult {
+		unset( $request );
+		if ( 'ozon_posting_approve_partial' !== $result->error_code ) {
+			return null;
+		}
+		$postings = is_array( $shipment['ozon_postings'] ?? null ) ? $shipment['ozon_postings'] : array();
+		$tracking = (string) ( $postings[0]['posting_number'] ?? $shipment['tracking_number'] ?? '' );
+
+		return new ShipmentCreateResult(
+			true,
+			external_id: (string) ( $shipment['ozon_order_number'] ?? '' ),
+			tracking_number: $tracking,
+			backlog_order_id: (string) ( $shipment['ozon_order_number'] ?? '' ),
+			raw_reference: array(
+				'lifecycle' => array(
+					'phase' => 'submission_required',
+					'accepted' => true,
+					'submit_required' => true,
+					'continuation_token' => OzonDeliveryShipmentService::CONTINUATION_TOKEN,
+					'message' => 'Заказ Ozon создан. Подтверждение отправлений будет продолжено.',
+				),
+			)
+		);
 	}
 }

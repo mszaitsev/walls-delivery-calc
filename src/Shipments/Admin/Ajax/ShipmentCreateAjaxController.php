@@ -116,9 +116,12 @@ final class ShipmentCreateAjaxController {
 
 			$this->discard_preview_buffer( $buffer_level );
 			$accepted_reconciliation = is_array( $result->raw_reference['yandex_accepted_reconciliation'] ?? null ) ? $result->raw_reference['yandex_accepted_reconciliation'] : array();
-			$success_message = array() !== $accepted_reconciliation
-				? __( 'Отправление создано в Яндекс.Доставке. Ожидается получение статуса.', 'walls-delivery-calc' )
-				: $this->payloads->carrier_presentation( $request->carrier_key )['created_toast'];
+			$lifecycle = is_array( $result->raw_reference['lifecycle'] ?? null ) ? $result->raw_reference['lifecycle'] : array();
+			$success_message = '' !== trim( (string) ( $lifecycle['message'] ?? '' ) )
+				? (string) $lifecycle['message']
+				: ( array() !== $accepted_reconciliation
+					? __( 'Отправление создано в Яндекс.Доставке. Ожидается получение статуса.', 'walls-delivery-calc' )
+					: $this->payloads->carrier_presentation( $request->carrier_key )['created_toast'] );
 			wp_send_json_success(
 				array_merge(
 					$this->payloads->carrier_ui_payload( $order, $request->carrier_key ),
@@ -135,7 +138,7 @@ final class ShipmentCreateAjaxController {
 					'poll_interval_ms' => (int) ( $result->raw_reference['poll_interval_ms'] ?? 0 ),
 					'poll_max_attempts' => (int) ( $result->raw_reference['poll_max_attempts'] ?? 0 ),
 					'purpose' => (string) ( $result->raw_reference['purpose'] ?? '' ),
-					'lifecycle' => is_array( $result->raw_reference['lifecycle'] ?? null ) ? $result->raw_reference['lifecycle'] : ( ! empty( $result->raw_reference['poll_required'] ) ? array(
+					'lifecycle' => array() !== $lifecycle ? $lifecycle : ( ! empty( $result->raw_reference['poll_required'] ) ? array(
 						'phase' => 'polling_required',
 						'accepted' => true,
 						'poll_required' => true,

@@ -10,6 +10,7 @@
 
   function renderShipmentStatus(box, status) {
     if (!box || !status) return;
+    clearShipmentError(box);
     applyPresentation(box, status.presentation || null);
     const fields = {
       '[data-wdc-shipment-summary-status]': status.shipment_status_label || status.universal_status_label || 'создано',

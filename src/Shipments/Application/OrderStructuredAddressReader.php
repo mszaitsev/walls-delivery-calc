@@ -64,6 +64,24 @@ final class OrderStructuredAddressReader {
 		);
 	}
 
+	public function legacy_recipient_normalization_address_line( object $order ): string {
+		$role = $this->recipient_role( $order );
+		return implode(
+			', ',
+			array_values(
+				array_filter(
+					array(
+						$this->order_value( $order, $role, 'state' ),
+						$this->order_value( $order, $role, 'city' ),
+						$this->order_value( $order, $role, 'address_1' ),
+						$this->order_value( $order, $role, 'address_2' ),
+					),
+					static fn( string $value ): bool => '' !== trim( $value )
+				)
+			)
+		);
+	}
+
 	private function shipping_address_filled( object $order ): bool {
 		foreach ( array( 'address_1', 'city', 'postcode' ) as $field ) {
 			if ( '' !== $this->order_value( $order, 'shipping', $field ) ) {
