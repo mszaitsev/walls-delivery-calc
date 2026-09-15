@@ -305,6 +305,10 @@ $ozon_source = (string) file_get_contents( $root . '/src/Carriers/OzonDelivery/S
 $shipment_css = (string) file_get_contents( $root . '/assets/admin/shipments-admin.css' );
 
 modal_ext_assert( str_contains( $metabox_source, 'modal_extensions->get' ) && str_contains( $metabox_source, 'render_fields' ), 'Common metabox must call modal extensions through the registry.' );
+modal_ext_assert( str_contains( $metabox_source, '<h2 class="wdc-shipment-modal__title"><?php echo esc_html( $modal_title ); ?></h2>' ), 'Shipment modal title must remain an h2, use the semantic BEM class, and render the existing modal_title value.' );
+modal_ext_assert( str_contains( $metabox_source, 'role="dialog" aria-modal="true" aria-label="<?php echo esc_attr( $modal_title ); ?>"' ), 'Shipment modal dialog must retain its role, aria-modal state, and modal_title aria-label.' );
+modal_ext_assert( preg_match( '/\.wdc-shipment-modal__title\s*\{[^}]*margin:\s*0 44px 18px 0;[^}]*padding:\s*0;[^}]*color:\s*#1d2327;[^}]*font-size:\s*24px;[^}]*line-height:\s*1\.3;[^}]*font-weight:\s*600;[^}]*\}/s', $shipment_css ) === 1, 'Shipment modal title CSS must provide the scoped production visual hierarchy and reserve space for the close button.' );
+modal_ext_assert( preg_match( '/(^|})\s*h2\s*\{/m', $shipment_css ) !== 1 && ! str_contains( $shipment_css, '.wdc-shipment-modal h2' ) && preg_match( '/\.wdc-shipment-modal__title\s*\{[^}]*white-space\s*:\s*nowrap/si', $shipment_css ) !== 1, 'Shipment title styling must not add global/modal-wide h2 rules or disable responsive wrapping.' );
 modal_ext_assert( ! str_contains( $metabox_source, "name=\"date_pickup\"" ) && ! str_contains( $metabox_source, "name=\"postoffice_code\"" ) && ! str_contains( $metabox_source, "name=\"yandex_ready_from\"" ), 'Common delivery renderer must not keep DPD/Russian Post/Yandex delivery field markup.' );
 $render_start = strpos( $metabox_source, 'private function render_inner' );
 $render_end = strpos( $metabox_source, 'private function dpd_courier_contact_history', false === $render_start ? 0 : $render_start );
