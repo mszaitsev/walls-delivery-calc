@@ -259,7 +259,7 @@
   position: relative;
 }
 
-.wdc-shipment-modal__title {
+#poststuff .wdc-shipment-modal__title {
   margin: 0 44px 18px 0;
   padding: 0;
   color: #1d2327;
