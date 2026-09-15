@@ -228,6 +228,7 @@ function createHarness(api) {
 								calls.push(['cancelPendingFit']);
 							},
 							focusPoint(point) {
+								this.currentZoom = Math.max(this.currentZoom, 15);
 								calls.push(['focusPoint', point]);
 							},
 							setActivePoint(pointId) {
@@ -372,6 +373,150 @@ function cdekPoint(code, uuid, cityCode, name) {
 		lat: 55.75,
 		lng: 37.61
 	};
+}
+
+function yandexPoint(stationId, presentation) {
+	const point = {
+		id: 'yandex_delivery:' + stationId,
+		point_id: 'yandex_delivery:' + stationId,
+		carrier_key: 'yandex_delivery',
+		pickup_family: 'yandex_delivery:pickup',
+		point_code: stationId,
+		platform_station_id: stationId,
+		postcode: '454000',
+		postal_code: '454000',
+		point_postcode: '454000',
+		display_code: '454000',
+		point_name: presentation,
+		address: 'Адрес ' + presentation,
+		work_time: '09:00-18:00',
+		lat: 55.16,
+		lng: 61.40
+	};
+	point.snapshot = {
+		id: point.id,
+		point_id: point.point_id,
+		point_code: point.point_code,
+		platform_station_id: point.platform_station_id,
+		carrier_key: point.carrier_key,
+		pickup_family: point.pickup_family,
+		postcode: point.postcode,
+		postal_code: point.postal_code,
+		point_postcode: point.point_postcode,
+		display_code: point.display_code
+	};
+	return point;
+}
+
+async function yandexPostcodeCollisionKeepsStrongIdentity() {
+	const oldA = yandexPoint('station-A', 'Старый A');
+	const pointB = yandexPoint('station-B', 'Первый B');
+	pointB.address = 'А — первый B';
+	const refreshedA = Object.assign(yandexPoint('station-A', 'Обновлённый A'), {
+		postcode: 454000,
+		address: 'Я — новый адрес A',
+		work_time: 'Круглосуточно'
+	});
+	let response = 0;
+	const harness = createHarness({
+		context: {
+			carrier: 'yandex_delivery',
+			pickup_family: 'yandex_delivery:pickup',
+			selectedPoint: oldA,
+			reload_on_viewport_change: true
+		},
+		points: () => {
+			response += 1;
+			if (response === 1) {
+				return Promise.resolve([pointB, refreshedA]);
+			}
+			if (response === 2) {
+				return Promise.resolve([pointB, Object.assign({}, refreshedA, { point_name: 'Повторно обновлённый A' })]);
+			}
+			return Promise.resolve([pointB]);
+		}
+	});
+	await wait(120);
+	assert.strictEqual(harness.map.selected().platform_station_id, 'station-A', 'Yandex station A must not match earlier station B solely by shared postcode 454000.');
+	assert.strictEqual(harness.map.selected().address, 'Я — новый адрес A', 'same Yandex platform station refresh must replace presentation fields with the current REST object.');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers')[0][1][0].platform_station_id, 'station-B', 'production-like collision fixture must render station B before selected station A.');
+	let markerRender = harness.calls.filter((call) => call[0] === 'renderMarkers').pop();
+	assert.strictEqual(markerRender[2].activePointId, 'yandex_delivery:station-A', 'Yandex active marker must remain station A after postcode-collision render.');
+
+	harness.element.dispatch('pointerdown');
+	harness.provider().fireBounds('user-pan-same-station');
+	await wait(320);
+	assert.strictEqual(harness.map.selected().platform_station_id, 'station-A', 'user pan/zoom refresh must keep the same authoritative Yandex station.');
+	assert.strictEqual(harness.map.selected().point_name, 'Повторно обновлённый A', 'user pan/zoom refresh must reconcile to the new object for the same Yandex station.');
+	markerRender = harness.calls.filter((call) => call[0] === 'renderMarkers').pop();
+	assert.strictEqual(markerRender[2].activePointId, 'yandex_delivery:station-A', 'active marker must remain station A after user viewport refresh.');
+
+	harness.element.dispatch('pointerdown');
+	harness.provider().fireBounds('user-pan-station-absent');
+	await wait(320);
+	assert.strictEqual(harness.map.selected().platform_station_id, 'station-A', 'committed Yandex station must remain authoritative when absent from a refreshed viewport dataset.');
+	markerRender = harness.calls.filter((call) => call[0] === 'renderMarkers').pop();
+	assert.strictEqual(markerRender[2].activePointId, null, 'missing selected station must clear viewport preview instead of activating the first unrelated station.');
+	harness.map.destroy();
+
+	const reverseHarness = createHarness({
+		context: { carrier: 'yandex_delivery', pickup_family: 'yandex_delivery:pickup', selectedPoint: pointB },
+		points: () => Promise.resolve([refreshedA, Object.assign({}, pointB, { point_name: 'Обновлённый B' })])
+	});
+	await wait(120);
+	assert.strictEqual(reverseHarness.map.selected().platform_station_id, 'station-B', 'Yandex station B must reconcile only to station B when station A is first.');
+	reverseHarness.map.destroy();
+}
+
+async function yandexSideCardFocusSurvivesBoundsLifecycle() {
+	const pointB = yandexPoint('station-B', 'Первый B');
+	const pointA = yandexPoint('station-A', 'Выбранный A');
+	let requests = 0;
+	const harness = createHarness({
+		context: {
+			carrier: 'yandex_delivery',
+			pickup_family: 'yandex_delivery:pickup',
+			preloadedPoints: [pointB, pointA],
+			reload_on_viewport_change: true
+		},
+		points: () => {
+			requests += 1;
+			return Promise.resolve([pointB, Object.assign({}, pointA, { point_name: 'A после viewport refresh' })]);
+		}
+	});
+	await wait(20);
+	harness.provider().currentZoom = 10;
+	const row = { getAttribute: () => pointA.id };
+	harness.list.listeners.click[0]({ target: { closest: () => row } });
+	assert.strictEqual(harness.map.selected(), null, 'side-card preview must not commit or save the pickup point.');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'focusPoint').pop()[1].platform_station_id, 'station-A', 'zoomed-out side-card click must focus the clicked Yandex station through the controller.');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'setActivePoint').pop()[1], pointA.id, 'side-card click must activate the clicked Yandex marker.');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'openPointPopup').pop()[1].platform_station_id, 'station-A', 'side-card click must force open the clicked Yandex popup.');
+
+	harness.provider().fireBounds('programmatic-side-card-focus');
+	await wait(180);
+	assert.strictEqual(requests, 0, 'programmatic bounds from side-card focus must be suppressed without a REST reload loop.');
+
+	harness.element.dispatch('pointerdown');
+	harness.provider().fireBounds('subsequent-user-pan');
+	await wait(320);
+	assert.strictEqual(requests, 1, 'subsequent explicit user pan must resume the normal viewport REST lifecycle.');
+	const markerRender = harness.calls.filter((call) => call[0] === 'renderMarkers').pop();
+	assert.strictEqual(markerRender[2].activePointId, pointA.id, 'side-card preview must remain on the same Yandex station after bounds refresh with a new REST object.');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'openPointPopup').pop()[1].platform_station_id, 'station-A', 'bounds reconciliation must reopen the same station rather than the first postcode collision.');
+	harness.map.destroy();
+}
+
+async function genericPostcodeFallbackRemainsUnchanged() {
+	const old = { id: 'old-dpd-id', carrier_key: 'dpd', point_code: 'old-dpd-code', postcode: '454000', lat: 55.16, lng: 61.40 };
+	const legacyMatch = { id: 'new-dpd-id', carrier_key: 'dpd', point_code: 'new-dpd-code', postcode: '454000', lat: 55.17, lng: 61.41 };
+	const harness = createHarness({
+		context: { carrier: 'dpd', pickup_family: 'dpd:pickup', selectedPoint: old },
+		points: () => Promise.resolve([legacyMatch])
+	});
+	await wait(120);
+	assert.strictEqual(harness.map.selected().id, 'new-dpd-id', 'non-Yandex/non-CDEK carriers must retain the legacy shared-postcode matching contract.');
+	harness.map.destroy();
 }
 
 async function cdekPostcodeCollisionKeepsStrongIdentity() {
@@ -2531,7 +2676,10 @@ async function run() {
 	await fixedDatasetSearchUsesAddressOriginWithoutReloadingPoints();
 	await dynamicDatasetSearchReloadsByAddressBounds();
 	await presentationCommentStaysSeparateWhenDistinct();
+	await yandexPostcodeCollisionKeepsStrongIdentity();
+	await yandexSideCardFocusSurvivesBoundsLifecycle();
 	await cdekPostcodeCollisionKeepsStrongIdentity();
+	await genericPostcodeFallbackRemainsUnchanged();
 	await viewportFilteredFixedDatasetUpdatesListWithoutLoader();
 	await genericFixedDatasetSidebarFollowsViewport();
 	console.log('Pickup map lifecycle smoke OK');
