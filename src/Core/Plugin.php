@@ -1286,6 +1286,7 @@ final class Plugin {
 		$this->container->get( AdminNotices::class )->register();
 		$this->container->get( AdminMenu::class )->register();
 		$this->container->get( SettingsAdminPage::class )->register();
+		$this->container->get( OrderEditabilityPolicy::class )->register();
 		$this->container->get( CalendarAdminPage::class )->register();
 		$this->container->get( LocationsAdminPage::class )->register();
 		$this->container->get( RulesAdminPage::class )->register();
@@ -1295,7 +1296,6 @@ final class Plugin {
 
 	private function register_order_runtime_hooks(): void {
 		$this->container->get( OrderDeliveryRecalculationAdminController::class )->register();
-		$this->container->get( OrderEditabilityPolicy::class )->register();
 		$this->container->get( OrderDeliveryMetabox::class )->register();
 		$this->container->get( OrderShipmentsMetabox::class )->register();
 		$this->container->get( ShipmentDocumentDownloadService::class )->register();
