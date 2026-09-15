@@ -1,0 +1,917 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Pickup\Rest;
+
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
+use WallsShop\WDC\Domain\Pickup\PickupPoint;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
+use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
+
+defined( 'ABSPATH' ) || exit;
+
+final class PickupPointsRestController {
+	private const NAMESPACE = 'wdc/v1';
+
+	public function __construct(
+		private RussianPostPickupPointRepository $repository,
+		private ?RussianPostPickupPointTypeSettings $type_settings = null,
+		private ?PickupAddressSearchService $address_search = null,
+		private ?CdekDeliveryPointService $cdek_points = null,
+		private ?DpdPickupPointService $dpd_points = null,
+		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
+		private ?YandexLocationMappingV2Repository $yandex_location_mapping = null,
+		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null,
+		private ?CarrierPickupPointProviderRegistry $provider_registry = null,
+		private ?CheckoutPickupPointProviderQueryResolver $provider_query_resolver = null,
+		private ?PekCheckoutPickupPointFormatter $pek_formatter = null,
+		private ?WooCommerceSessionBootstrapper $session_bootstrapper = null
+	) {
+		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
+		$this->pek_formatter ??= new PekCheckoutPickupPointFormatter();
+	}
+
+	public function register(): void {
+		if ( ! function_exists( 'register_rest_route' ) ) {
+			return;
+		}
+
+		register_rest_route(
+			self::NAMESPACE,
+			'/points',
+			array(
+				'methods' => 'GET',
+				'callback' => array( $this, 'points' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+		register_rest_route(
+			self::NAMESPACE,
+			'/points/search',
+			array(
+				'methods' => 'GET',
+				'callback' => array( $this, 'search' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+		register_rest_route(
+			self::NAMESPACE,
+			'/points/address-search',
+			array(
+				'methods' => 'GET',
+				'callback' => array( $this, 'address_search' ),
+				'permission_callback' => array( $this, 'check_nonce' ),
+			)
+		);
+		register_rest_route(
+			self::NAMESPACE,
+			'/points/(?P<id>\d+)',
+			array(
+				'methods' => 'GET',
+				'callback' => array( $this, 'detail' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+	}
+
+	public function check_nonce( mixed $request ): mixed {
+		$nonce = '';
+		if ( is_object( $request ) && method_exists( $request, 'get_header' ) ) {
+			$nonce = (string) $request->get_header( 'X-WP-Nonce' );
+		}
+		if ( '' === $nonce && isset( $_SERVER['HTTP_X_WP_NONCE'] ) ) {
+			$nonce = (string) wp_unslash( $_SERVER['HTTP_X_WP_NONCE'] );
+		}
+		if ( '' !== $nonce && function_exists( 'wp_verify_nonce' ) && wp_verify_nonce( $nonce, 'wp_rest' ) ) {
+			return true;
+		}
+
+		return $this->error( 'wdc_forbidden', 'REST nonce is missing or invalid.', 403 );
+	}
+
+	public function points( mixed $request ): mixed {
+		$carrier = $this->carrier( $request );
+		$context_guard = $this->checkout_rate_context_guard( $request, $carrier );
+		if ( true !== $context_guard ) {
+			return $context_guard;
+		}
+		if ( 'cdek' === $carrier ) {
+			return $this->response( $this->cdek_points( $request ) );
+		}
+		if ( DpdSettings::CARRIER_KEY === $carrier ) {
+			return $this->response( $this->dpd_points( $request ) );
+		}
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
+			return $this->response( $this->yandex_points( $request ) );
+		}
+		if ( $this->is_registry_backed_carrier( $carrier ) ) {
+			$nonce = $this->check_nonce( $request );
+			if ( true !== $nonce ) {
+				return $nonce;
+			}
+			return $this->registry_points_response( $request, $carrier, '' );
+		}
+		if ( 'russian_post' !== $carrier ) {
+			return $this->response( array() );
+		}
+		$bbox = $this->bbox( $request );
+		if ( null === $bbox ) {
+			return $this->error( 'invalid_bbox', 'bbox must be minLng,minLat,maxLng,maxLat.' );
+		}
+
+		$types = $this->allowed_types( $request );
+		if ( array() === $types ) {
+			return $this->response( array() );
+		}
+
+		$rows = $this->repository->find_rows_by_bbox(
+			$bbox['min_lng'],
+			$bbox['min_lat'],
+			$bbox['max_lng'],
+			$bbox['max_lat'],
+			array(
+				'point_types' => $types,
+				'limit' => $this->limit( $request, 500, 1000 ),
+			)
+		);
+
+		return $this->response( array_map( fn( array $row ): array => $this->summary( $row ), $rows ) );
+	}
+
+	public function address_search( mixed $request ): mixed {
+		if ( ! $this->address_search instanceof PickupAddressSearchService ) {
+			return $this->error( 'address_search_unavailable', 'Address search is unavailable.', 503 );
+		}
+		$carrier = $this->carrier( $request );
+		$purpose = sanitize_key( $this->param( $request, 'purpose' ) );
+		$include_points = 'russian_post' === $carrier;
+		$location_id = YandexDeliverySettings::CARRIER_KEY === $carrier && 'source_dropoff' === $purpose
+			? 0
+			: (int) $this->param( $request, 'location_id' );
+
+		$query = trim( $this->param( $request, 'query' ) );
+		if ( '' === $query ) {
+			$query = trim( $this->param( $request, 'q' ) );
+		}
+
+		$types = $include_points ? $this->allowed_types( $request ) : array();
+		if ( array() === $types ) {
+			if ( ! $include_points ) {
+				return $this->response(
+					$this->address_search->search(
+						$query,
+						array(
+							'location_id' => $location_id,
+							'country_code' => strtoupper( $this->param( $request, 'country_code' ) ?: 'RU' ),
+							'include_points' => false,
+						)
+					)
+				);
+			}
+			return $this->response(
+				array(
+					'address_search_available' => true,
+					'points' => array(),
+				)
+			);
+		}
+
+		return $this->response(
+			$this->address_search->search(
+				$query,
+				array(
+					'location_id' => $location_id,
+					'country_code' => strtoupper( $this->param( $request, 'country_code' ) ?: 'RU' ),
+					'point_types' => $types,
+					'include_points' => $include_points,
+				)
+			)
+		);
+	}
+
+	public function search( mixed $request ): mixed {
+		$query = trim( $this->param( $request, 'q' ) );
+		$carrier = $this->carrier( $request );
+		$context_guard = $this->checkout_rate_context_guard( $request, $carrier );
+		if ( true !== $context_guard ) {
+			return $context_guard;
+		}
+		if ( 'cdek' === $carrier ) {
+			return $this->response( $this->filter_cdek_points( $this->cdek_points( $request ), $query ) );
+		}
+		if ( DpdSettings::CARRIER_KEY === $carrier ) {
+			return $this->response( $this->filter_generic_points( $this->dpd_points( $request ), $query ) );
+		}
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
+			return $this->response( $this->filter_generic_points( $this->yandex_points( $request ), $query ) );
+		}
+		if ( $this->is_registry_backed_carrier( $carrier ) ) {
+			$nonce = $this->check_nonce( $request );
+			if ( true !== $nonce ) {
+				return $nonce;
+			}
+			return $this->registry_points_response( $request, $carrier, $query );
+		}
+		if ( 'russian_post' !== $carrier ) {
+			return $this->response( array() );
+		}
+		if ( '' === $query ) {
+			return $this->response( array() );
+		}
+
+		$types = $this->allowed_types( $request );
+		if ( array() === $types ) {
+			return $this->response( array() );
+		}
+
+		$rows = $this->repository->search_point_rows(
+			$query,
+			array(
+				'city' => trim( $this->param( $request, 'city' ) ),
+				'point_types' => $types,
+				'limit' => $this->limit( $request, 50, 100 ),
+			)
+		);
+
+		return $this->response( array_map( fn( array $row ): array => $this->summary( $row ), $rows ) );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function cdek_points( mixed $request ): array {
+		if ( ! $this->cdek_points instanceof CdekDeliveryPointService ) {
+			return array();
+		}
+		$city_code = (int) $this->param( $request, 'city_code' );
+		$country_code = $this->cdek_country_code( $this->param( $request, 'country_code' ) );
+		if ( '' === $country_code ) {
+			return array();
+		}
+		$purpose = sanitize_key( $this->param( $request, 'purpose' ) );
+		$options = array(
+			'type' => $this->param( $request, 'type' ) ?: 'ALL',
+			'country_code' => $country_code,
+			'handout_only' => 'sender_dropoff' !== $purpose,
+			'refresh' => in_array( strtolower( $this->param( $request, 'refresh' ) ), array( '1', 'true', 'yes' ), true ),
+		);
+		$location_context = $this->location_context( $request );
+		if ( 'sender_dropoff' !== $purpose && (int) ( $location_context['location_id'] ?? 0 ) > 0 ) {
+			return array_map( array( $this, 'cdek_summary' ), $this->cdek_points->pointsForLocation( $location_context, $options ) );
+		}
+		if ( $city_code > 0 ) {
+			return array_map( array( $this, 'cdek_summary' ), $this->cdek_points->pointsByCityCode( $city_code, $options ) );
+		}
+
+		return array_map( array( $this, 'cdek_summary' ), $this->cdek_points->pointsForLocation( $this->location_context( $request ), $options ) );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function dpd_points( mixed $request ): array {
+		if ( ! $this->dpd_points instanceof DpdPickupPointService ) {
+			return array();
+		}
+		$limit = $this->limit( $request, 200, 500 );
+		$location_id = (int) $this->param( $request, 'location_id' );
+		$city_id = (int) $this->param( $request, 'dpd_city_id' );
+		$points = $city_id > 0
+			? $this->dpd_points->get_points_by_city_id( $city_id )
+			: ( $location_id > 0 ? $this->dpd_points->get_points_for_location_id( $location_id ) : array() );
+
+		return array_slice( array_map( array( $this, 'dpd_summary' ), $points ), 0, $limit );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function yandex_points( mixed $request ): array {
+		if ( ! $this->yandex_points instanceof YandexDeliveryPickupPointV2Repository || ! $this->yandex_location_mapping instanceof YandexLocationMappingV2Repository ) {
+			return array();
+		}
+		$location_id = (int) $this->param( $request, 'location_id' );
+		$geo_ids = $this->yandex_geo_ids_for_location( $location_id );
+		if ( array() === $geo_ids ) {
+			return array();
+		}
+		$rows = $this->yandex_points->destination_pickup_points_by_geo_ids( $geo_ids );
+
+		return array_map( fn( array $row ): array => $this->yandex_formatter->format( $row ), $rows );
+	}
+
+	/** @return array<int,int> */
+	private function yandex_geo_ids_for_location( int $location_id ): array {
+		if ( $location_id <= 0 || ! $this->yandex_location_mapping instanceof YandexLocationMappingV2Repository ) {
+			return array();
+		}
+
+		return array_values( array_unique( array_filter( array_map( 'intval', $this->yandex_location_mapping->geo_ids_for_location( $location_id ) ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+	}
+	/**
+	 * @param array<int,array<string,mixed>> $points
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function filter_cdek_points( array $points, string $query ): array {
+		return $this->filter_generic_points( $points, $query );
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $points
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function filter_generic_points( array $points, string $query ): array {
+		if ( '' === $query ) {
+			return $points;
+		}
+		$query = $this->normalize_search_text( $query );
+
+		return array_values(
+			array_filter(
+				$points,
+				fn( array $point ): bool => str_contains(
+					$this->normalize_search_text(
+						implode(
+							' ',
+							array(
+								(string) ( $point['point_code'] ?? '' ),
+								(string) ( $point['point_name'] ?? '' ),
+								(string) ( $point['point_address'] ?? $point['address'] ?? '' ),
+								(string) ( $point['city_name'] ?? $point['city'] ?? '' ),
+								(string) ( $point['point_postcode'] ?? $point['postal_code'] ?? '' ),
+							)
+						)
+					),
+					$query
+				)
+			)
+		);
+	}
+
+	private function is_registry_backed_carrier( string $carrier ): bool {
+		return $this->provider_registry instanceof CarrierPickupPointProviderRegistry
+			&& $this->provider_query_resolver instanceof CheckoutPickupPointProviderQueryResolver
+			&& $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper
+			&& $this->provider_registry->has( $carrier );
+	}
+
+	private function registry_points_response( mixed $request, string $carrier, string $query_text ): mixed {
+		$method_id = $this->param( $request, 'shipping_method_id' );
+		$family = $this->param( $request, 'pickup_family' );
+		if ( '' === $method_id || '' === $family ) {
+			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
+		}
+		if ( ! $this->session_bootstrapper->ensure() ) {
+			return $this->error( 'provider_session_unavailable', 'Checkout session is unavailable.', 503 );
+		}
+		try {
+			$context = $this->provider_query_resolver->resolve_context( $method_id, $carrier, $family );
+		} catch ( \RuntimeException $exception ) {
+			$code = in_array( $exception->getMessage(), array( 'provider_rate_context_missing', 'provider_rate_context_mismatch' ), true ) ? $exception->getMessage() : 'provider_rate_context_missing';
+			return $this->error( $code, 'Pickup rate context is invalid.', 400 );
+		}
+		$query = $context['query'];
+		$family = (string) $context['pickup_family'];
+		$fingerprint = (string) $context['destination_fingerprint'];
+		$provider = $this->provider_registry?->get( $carrier );
+		if ( null === $provider ) {
+			return $this->error( 'pickup_provider_unavailable', 'Pickup provider is unavailable.', 503 );
+		}
+		try {
+			$points = $provider->search( $query );
+		} catch ( \Throwable ) {
+			return $this->error( 'pickup_provider_search_failed', 'Pickup provider search failed.', 502 );
+		}
+		$formatted = array();
+		foreach ( $points as $point ) {
+			if ( ! $point instanceof PickupPoint ) {
+				continue;
+			}
+			if ( PekSettings::CARRIER_KEY === $carrier ) {
+				$formatted[] = $this->pek_formatter->format( $point, $fingerprint, $query->location_id, $query->country_code );
+			} else {
+				$formatted[] = $this->registry_point_payload( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code, $query->service_key );
+			}
+		}
+
+		return $this->response( $this->filter_generic_points( $formatted, $query_text ) );
+	}
+
+	private function checkout_rate_context_guard( mixed $request, string $carrier ): mixed {
+		$method_id = $this->param( $request, 'shipping_method_id' );
+		$family = $this->param( $request, 'pickup_family' );
+		if ( '' === $method_id && '' === $family ) {
+			return true;
+		}
+		$normalized_carrier = $this->normalize_checkout_carrier_key( $carrier );
+		if ( '' === $normalized_carrier ) {
+			return $this->error( 'provider_rate_context_missing', 'Pickup carrier context is missing.', 400 );
+		}
+		$family_carrier = $this->pickup_family_carrier( $family );
+		if ( '' !== $family_carrier && $this->normalize_checkout_carrier_key( $family_carrier ) !== $normalized_carrier ) {
+			return $this->error( 'provider_rate_context_mismatch', 'Pickup rate context is invalid.', 400 );
+		}
+		$method_carrier = $this->shipping_method_carrier( $method_id );
+		if ( '' !== $method_carrier && $this->normalize_checkout_carrier_key( $method_carrier ) !== $normalized_carrier ) {
+			return $this->error( 'provider_rate_context_mismatch', 'Pickup rate context is invalid.', 400 );
+		}
+
+		return true;
+	}
+
+	private function pickup_family_carrier( string $family ): string {
+		$parts = array_values( array_filter( explode( ':', trim( $family ) ), static fn( string $part ): bool => '' !== $part ) );
+		if ( count( $parts ) < 2 || 'pickup' !== end( $parts ) ) {
+			return '';
+		}
+
+		return sanitize_key( (string) $parts[0] );
+	}
+
+	private function shipping_method_carrier( string $method_id ): string {
+		$method_id = preg_replace( '/^wdc_platform(?:_delivery)?:/', '', trim( $method_id ) ) ?? trim( $method_id );
+		$parts = array_values( array_filter( explode( ':', $method_id ), static fn( string $part ): bool => '' !== $part ) );
+		if ( count( $parts ) < 2 ) {
+			return '';
+		}
+
+		return sanitize_key( (string) $parts[0] );
+	}
+
+	private function normalize_checkout_carrier_key( string $carrier ): string {
+		$carrier = sanitize_key( $carrier );
+
+		return 'russian_post_domestic' === $carrier ? 'russian_post' : $carrier;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function registry_point_payload( PickupPoint $point, string $carrier, string $family, string $fingerprint, int $location_id, string $country_code, string $service_key = '' ): array {
+		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
+		$type = $this->registry_presentation_value( $raw, 'presentation_type', $point->type );
+		if ( ! in_array( $type, array( 'pvz', 'postamat', 'terminal', 'warehouse', 'unknown' ), true ) ) {
+			$type = 'unknown';
+		}
+		$type_label = $this->registry_presentation_value( $raw, 'presentation_title', 'Пункт выдачи' );
+		$point_name = $this->registry_presentation_value( $raw, 'point_name', '' );
+		$point_title = $this->registry_presentation_value( $raw, 'point_title', $type_label );
+		$card_title = $this->registry_presentation_value( $raw, 'card_title', $point_title );
+		$marker_type = $this->registry_presentation_value( $raw, 'marker_type', 'pickup' );
+		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
+			$marker_type = 'pickup';
+		}
+		$point_comment = trim( (string) $point->comment );
+		$comment = $this->registry_presentation_value( $raw, 'presentation_comment', '' );
+		$display_code = $this->registry_presentation_value( $raw, 'display_code', '' );
+		$display_title = $this->registry_presentation_value( $raw, 'display_title', trim( $card_title . ( '' !== $display_code ? ' ' . $display_code : '' ) ) );
+		$requires_rate_refresh = array_key_exists( 'requires_rate_refresh', $raw ) ? $this->registry_boolean_value( $raw, 'requires_rate_refresh' ) : true;
+		$has_reload_on_viewport_change = array_key_exists( 'reload_on_viewport_change', $raw );
+		$reload_on_viewport_change = $has_reload_on_viewport_change ? $this->registry_boolean_value( $raw, 'reload_on_viewport_change' ) : null;
+		$snapshot = array(
+			'carrier_key' => $carrier,
+			'service_key' => '' !== trim( $service_key ) ? $service_key : $carrier,
+			'pickup_family' => $family,
+			'point_code' => $point->code,
+			'point_id' => $point->code,
+			'point_type' => $type,
+			'point_type_label' => $type_label,
+			'point_title' => $point_title,
+			'card_title' => $card_title,
+			'point_name' => $point_name,
+			'point_address' => $point->address,
+			'address' => $point->address,
+			'city_name' => $point->city,
+			'region_name' => $point->region,
+			'lat' => $point->latitude,
+			'lng' => $point->longitude,
+			'work_time' => $point->work_time,
+			'description' => $point_comment,
+			'point_comment' => $point_comment,
+			'presentation_comment' => $comment,
+			'marker_type' => $marker_type,
+			'display_code' => $display_code,
+			'display_title' => $display_title,
+			'location_id' => $location_id,
+			'country_code' => strtoupper( trim( $country_code ) ),
+			'destination_fingerprint' => $fingerprint,
+			'provider_destination_fingerprint' => $fingerprint,
+			'requires_rate_refresh' => $requires_rate_refresh,
+		);
+		if ( $has_reload_on_viewport_change ) {
+			$snapshot['reload_on_viewport_change'] = $reload_on_viewport_change;
+		}
+
+		$payload = array_merge( $snapshot, array( 'id' => $point->code, 'carrier' => $carrier, 'title' => $point_title, 'requires_rate_refresh' => $requires_rate_refresh, 'snapshot' => $snapshot ) );
+		if ( $has_reload_on_viewport_change ) {
+			$payload['reload_on_viewport_change'] = $reload_on_viewport_change;
+		}
+
+		return $payload;
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function registry_presentation_value( array $raw, string $key, string $default ): string {
+		$value = $raw[ $key ] ?? null;
+		return is_scalar( $value ) && '' !== trim( (string) $value ) ? trim( (string) $value ) : $default;
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function registry_boolean_value( array $raw, string $key ): bool {
+		$value = $raw[ $key ] ?? false;
+		return true === $value || '1' === $value || 1 === $value || 'true' === $value;
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 * @return array<string,mixed>
+	 */
+	private function cdek_summary( array $point ): array {
+		$type = strtoupper( (string) ( $point['point_type'] ?? '' ) );
+		$snapshot = array(
+			'id' => (string) ( $point['id'] ?? ( 'cdek:' . (string) ( $point['point_code'] ?? '' ) ) ),
+			'carrier_key' => 'cdek',
+			'service_key' => (string) ( $point['service_key'] ?? 'cdek' ),
+			'pickup_family' => (string) ( $point['pickup_family'] ?? 'cdek:pickup' ),
+			'point_code' => (string) ( $point['point_code'] ?? '' ),
+			'point_type' => $type,
+			'point_type_label' => (string) ( $point['point_type_label'] ?? ( 'POSTAMAT' === $type ? 'Постамат' : 'Пункт выдачи' ) ),
+			'point_title' => (string) ( $point['point_title'] ?? ( 'POSTAMAT' === $type ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК' ) ),
+			'marker_type' => (string) ( $point['marker_type'] ?? ( 'POSTAMAT' === $type ? 'postamat' : 'pickup' ) ),
+			'point_name' => (string) ( $point['point_name'] ?? '' ),
+			'postcode' => (string) ( $point['point_postcode'] ?? $point['postcode'] ?? '' ),
+			'address' => (string) ( $point['point_address'] ?? $point['address'] ?? '' ),
+			'city' => (string) ( $point['city_name'] ?? $point['city'] ?? '' ),
+			'region' => (string) ( $point['region_name'] ?? $point['region'] ?? '' ),
+			'lat' => $point['lat'] ?? null,
+			'lng' => $point['lng'] ?? null,
+			'work_time' => (string) ( $point['work_time'] ?? '' ),
+			'description' => (string) ( $point['description'] ?? '' ),
+			'storage_notice' => (string) ( $point['storage_notice'] ?? ( 'POSTAMAT' === $type ? 'Срок хранения 3 дня' : '' ) ),
+			'cdek_code' => (string) ( $point['cdek_code'] ?? $point['point_code'] ?? '' ),
+			'cdek_uuid' => (string) ( $point['cdek_uuid'] ?? '' ),
+			'cdek_type' => (string) ( $point['cdek_type'] ?? $type ),
+			'cdek_owner_code' => (string) ( $point['cdek_owner_code'] ?? '' ),
+			'cdek_nearest_station' => (string) ( $point['cdek_nearest_station'] ?? '' ),
+			'cdek_note' => (string) ( $point['cdek_note'] ?? '' ),
+			'country_code' => (string) ( $point['country_code'] ?? '' ),
+			'cdek_city_code' => (int) ( $point['cdek_city_code'] ?? 0 ),
+			'is_handout' => ! empty( $point['is_handout'] ),
+			'requires_destination_requote' => ! empty( $point['requires_destination_requote'] ),
+			'presentation_comment' => (string) ( $point['presentation_comment'] ?? '' ),
+		);
+		$snapshot['display_code'] = (string) ( $point['display_code'] ?? $snapshot['cdek_code'] );
+		$snapshot['display_title'] = (string) ( $point['display_title'] ?? trim( $snapshot['point_title'] . ' ' . $snapshot['display_code'] ) );
+
+		return array(
+			'id' => $snapshot['id'],
+			'carrier' => 'cdek',
+			'carrier_key' => 'cdek',
+			'service_key' => $snapshot['service_key'],
+			'pickup_family' => $snapshot['pickup_family'],
+			'point_code' => $snapshot['point_code'],
+			'point_type' => $snapshot['point_type'],
+			'point_type_label' => $snapshot['point_type_label'],
+			'point_title' => $snapshot['point_title'],
+			'card_title' => $snapshot['point_title'],
+			'display_code' => $snapshot['cdek_code'],
+			'display_title' => trim( $snapshot['point_title'] . ' ' . $snapshot['cdek_code'] ),
+			'marker_type' => $snapshot['marker_type'],
+			'title' => (string) ( $point['point_name'] ?? '' ),
+			'point_name' => $snapshot['point_name'],
+			'address' => $snapshot['address'],
+			'point_address' => $snapshot['address'],
+			'city' => $snapshot['city'],
+			'city_name' => $snapshot['city'],
+			'region' => $snapshot['region'],
+			'region_name' => $snapshot['region'],
+			'postal_code' => $snapshot['postcode'],
+			'postcode' => $snapshot['postcode'],
+			'point_postcode' => $snapshot['postcode'],
+			'lat' => $snapshot['lat'],
+			'lng' => $snapshot['lng'],
+			'work_time' => $snapshot['work_time'],
+			'description' => $snapshot['description'],
+			'storage_notice' => $snapshot['storage_notice'],
+			'raw' => is_array( $point['raw'] ?? null ) ? $point['raw'] : array(),
+			'cdek_code' => $snapshot['cdek_code'],
+			'cdek_uuid' => $snapshot['cdek_uuid'],
+			'cdek_type' => $snapshot['cdek_type'],
+			'cdek_owner_code' => $snapshot['cdek_owner_code'],
+			'cdek_nearest_station' => $snapshot['cdek_nearest_station'],
+			'cdek_note' => $snapshot['cdek_note'],
+			'country_code' => $snapshot['country_code'],
+			'cdek_city_code' => $snapshot['cdek_city_code'],
+			'is_handout' => $snapshot['is_handout'],
+			'requires_destination_requote' => $snapshot['requires_destination_requote'],
+			'presentation_comment' => $snapshot['presentation_comment'],
+			'snapshot' => $snapshot,
+		);
+	}
+
+	private function cdek_country_code( string $country_code ): string {
+		$country_code = strtoupper( trim( $country_code ) );
+		if ( '' === $country_code ) {
+			return 'RU';
+		}
+
+		return in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 * @return array<string,mixed>
+	 */
+	private function dpd_summary( array $point ): array {
+		$type = (string) ( $point['type'] ?? '' );
+		$type_label = 'terminal_self_delivery' === $type ? 'Терминал' : 'Пункт выдачи';
+		$point_title = 'terminal_self_delivery' === $type ? 'Терминал DPD' : 'Пункт выдачи DPD';
+		$marker_type = 'terminal_self_delivery' === $type ? 'terminal' : 'pickup';
+		$code = (string) ( $point['terminal_code'] ?? '' );
+		$work_time = ( new DpdPickupPointScheduleFormatter() )->format( $point['schedule'] ?? '' );
+		$snapshot = array(
+			'id' => DpdSettings::CARRIER_KEY . ':' . $code,
+			'carrier_key' => DpdSettings::CARRIER_KEY,
+			'service_key' => DpdSettings::SERVICE_KEY,
+			'pickup_family' => DpdSettings::CARRIER_KEY . ':pickup',
+			'point_code' => $code,
+			'terminal_code' => $code,
+			'point_type' => $type,
+			'point_type_label' => $type_label,
+			'point_title' => $point_title,
+			'display_code' => $code,
+			'display_title' => trim( $point_title . ' ' . $code ),
+			'marker_type' => $marker_type,
+			'point_name' => (string) ( $point['name'] ?? '' ),
+			'address' => (string) ( $point['address'] ?? '' ),
+			'city' => (string) ( $point['city_name'] ?? '' ),
+			'region' => (string) ( $point['region_name'] ?? '' ),
+			'lat' => $point['latitude'] ?? null,
+			'lng' => $point['longitude'] ?? null,
+			'work_time' => $work_time,
+			'description' => '',
+			'dpd_source' => (string) ( $point['source'] ?? '' ),
+		);
+
+		return array(
+			'id' => $snapshot['id'],
+			'carrier' => DpdSettings::CARRIER_KEY,
+			'carrier_key' => DpdSettings::CARRIER_KEY,
+			'service_key' => DpdSettings::SERVICE_KEY,
+			'pickup_family' => $snapshot['pickup_family'],
+			'point_code' => $snapshot['point_code'],
+			'terminal_code' => $snapshot['terminal_code'],
+			'point_type' => $snapshot['point_type'],
+			'point_type_label' => $snapshot['point_type_label'],
+			'point_title' => $snapshot['point_title'],
+			'card_title' => $snapshot['point_title'],
+			'display_code' => $snapshot['display_code'],
+			'display_title' => $snapshot['display_title'],
+			'marker_type' => $snapshot['marker_type'],
+			'title' => $snapshot['point_name'],
+			'point_name' => $snapshot['point_name'],
+			'address' => $snapshot['address'],
+			'point_address' => $snapshot['address'],
+			'city' => $snapshot['city'],
+			'city_name' => $snapshot['city'],
+			'region' => $snapshot['region'],
+			'region_name' => $snapshot['region'],
+			'lat' => $snapshot['lat'],
+			'lng' => $snapshot['lng'],
+			'latitude' => $snapshot['lat'],
+			'longitude' => $snapshot['lng'],
+			'work_time' => $snapshot['work_time'],
+			'schedule' => $snapshot['work_time'],
+			'description' => $snapshot['description'],
+			'dpd_source' => $snapshot['dpd_source'],
+			'source' => $snapshot['dpd_source'],
+			'snapshot' => $snapshot,
+		);
+	}
+
+	public function detail( mixed $request ): mixed {
+		$id = (int) $this->param( $request, 'id' );
+		$row = $this->repository->find_row_by_id( $id );
+		if ( ! is_array( $row ) || 1 !== (int) ( $row['active'] ?? 0 ) ) {
+			return $this->error( 'not_found', 'Pickup point not found.', 404 );
+		}
+		$types = $this->allowed_types( $request );
+		if ( ! in_array( strtoupper( trim( (string) ( $row['point_type'] ?? '' ) ) ), $types, true ) ) {
+			return $this->error( 'not_found', 'Pickup point not found.', 404 );
+		}
+
+		return $this->response( $this->details( $row ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function summary( array $row ): array {
+		$type = strtoupper( (string) ( $row['point_type'] ?? '' ) );
+		$type_label = 'APS' === $type ? 'Почтомат' : 'Пункт выдачи';
+		$point_title = 'APS' === $type ? 'Почтомат Почты России' : 'Отделение Почты России';
+		$marker_type = 'APS' === $type ? 'postamat' : 'pickup';
+		$snapshot = array(
+			'id' => (int) ( $row['id'] ?? 0 ),
+			'carrier_key' => 'russian_post_domestic',
+			'service_key' => 'russian_post_domestic',
+			'pickup_family' => 'russian_post_domestic:pickup',
+			'point_code' => (string) ( $row['point_code'] ?? '' ),
+			'point_type' => $type,
+			'point_type_label' => $type_label,
+			'point_title' => $point_title,
+			'display_code' => (string) ( $row['postcode'] ?? '' ),
+			'display_title' => trim( $point_title . ' ' . (string) ( $row['postcode'] ?? '' ) ),
+			'marker_type' => $marker_type,
+			'point_name' => $this->title( $row ),
+			'postcode' => (string) ( $row['postcode'] ?? '' ),
+			'address' => (string) ( $row['address'] ?? '' ),
+			'city' => (string) ( $row['city_name'] ?? '' ),
+			'region' => (string) ( $row['region_name'] ?? '' ),
+			'fias_location_guid' => (string) ( $row['fias_location_guid'] ?? '' ),
+			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
+			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
+			'work_time' => (string) ( $row['work_time'] ?? '' ),
+			'description' => (string) ( $row['description'] ?? '' ),
+		);
+
+		return array(
+			'id' => $snapshot['id'],
+			'carrier' => 'russian_post',
+			'carrier_key' => $snapshot['carrier_key'],
+			'service_key' => $snapshot['service_key'],
+			'pickup_family' => $snapshot['pickup_family'],
+			'point_code' => $snapshot['point_code'],
+			'point_type' => $snapshot['point_type'],
+			'point_type_label' => $snapshot['point_type_label'],
+			'point_title' => $snapshot['point_title'],
+			'card_title' => $snapshot['point_title'],
+			'display_code' => $snapshot['postcode'],
+			'display_title' => trim( $snapshot['point_title'] . ' ' . $snapshot['postcode'] ),
+			'marker_type' => $snapshot['marker_type'],
+			'title' => $snapshot['point_name'],
+			'point_name' => $snapshot['point_name'],
+			'address' => $snapshot['address'],
+			'point_address' => $snapshot['address'],
+			'city' => $snapshot['city'],
+			'city_name' => $snapshot['city'],
+			'region' => $snapshot['region'],
+			'region_name' => $snapshot['region'],
+			'postal_code' => $snapshot['postcode'],
+			'postcode' => $snapshot['postcode'],
+			'point_postcode' => $snapshot['postcode'],
+			'fias_location_guid' => $snapshot['fias_location_guid'],
+			'lat' => $snapshot['lat'],
+			'lng' => $snapshot['lng'],
+			'work_time' => $snapshot['work_time'],
+			'description' => $snapshot['description'],
+			'snapshot' => $snapshot,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function details( array $row ): array {
+		$detail = $this->summary( $row );
+		$detail['point_code'] = (string) ( $row['point_code'] ?? '' );
+		$detail['description'] = (string) ( $row['description'] ?? '' );
+
+		return $detail;
+	}
+
+	/**
+	 * @return array{min_lng:float,min_lat:float,max_lng:float,max_lat:float}|null
+	 */
+	private function bbox( mixed $request ): ?array {
+		$parts = array_map( 'trim', explode( ',', $this->param( $request, 'bbox' ) ) );
+		if ( 4 !== count( $parts ) ) {
+			return null;
+		}
+		foreach ( $parts as $part ) {
+			if ( '' === $part || ! is_numeric( $part ) ) {
+				return null;
+			}
+		}
+		$min_lng = (float) $parts[0];
+		$min_lat = (float) $parts[1];
+		$max_lng = (float) $parts[2];
+		$max_lat = (float) $parts[3];
+		if ( $min_lng < -180 || $max_lng > 180 || $min_lat < -90 || $max_lat > 90 || $min_lng > $max_lng || $min_lat > $max_lat ) {
+			return null;
+		}
+
+		return compact( 'min_lng', 'min_lat', 'max_lng', 'max_lat' );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function types( mixed $request ): array {
+		$value = $this->param_raw( $request, 'type' );
+		if ( array() === $value ) {
+			$value = $this->param_raw( $request, 'type[]' );
+		}
+		$values = is_array( $value ) ? $value : ( '' !== (string) $value ? array( $value ) : array() );
+
+		return array_values(
+			array_filter(
+				array_map( static fn( mixed $type ): string => strtoupper( sanitize_key( wp_unslash( (string) $type ) ) ), $values ),
+				static fn( string $type ): bool => in_array( $type, array( 'OPS', 'PVZ', 'APS' ), true )
+			)
+		);
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function allowed_types( mixed $request ): array {
+		$requested = $this->types( $request );
+		$type_settings = $this->type_settings ?? new RussianPostPickupPointTypeSettings();
+
+		return $type_settings->allowed_types( $requested );
+	}
+
+	private function carrier( mixed $request ): string {
+		$carrier = sanitize_key( wp_unslash( $this->param( $request, 'carrier' ) ) );
+
+		return '' !== $carrier ? $carrier : 'russian_post';
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function location_context( mixed $request ): array {
+		$keys = array( 'city_code', 'cdek_city_code', 'country_code', 'region_name', 'state_value', 'city_name', 'city_value', 'settlement_name', 'place_name', 'display_name', 'postal_code', 'postcode', 'fias_id', 'city_fias_id', 'gar_id', 'gar_object_id', 'location_id' );
+		$context = array();
+		foreach ( $keys as $key ) {
+			$value = $this->param( $request, $key );
+			if ( '' !== $value ) {
+				$context[ $key ] = $value;
+			}
+		}
+
+		return $context;
+	}
+
+	private function normalize_search_text( string $value ): string {
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+
+		return trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+	}
+
+	private function limit( mixed $request, int $default, int $max ): int {
+		$limit = (int) $this->param( $request, 'limit' );
+
+		return max( 1, min( $max, $limit > 0 ? $limit : $default ) );
+	}
+
+	private function title( array $row ): string {
+		return trim( (string) ( $row['point_type'] ?? '' ) . ' ' . (string) ( $row['postcode'] ?? '' ) );
+	}
+
+	private function param( mixed $request, string $key ): string {
+		$value = $this->param_raw( $request, $key );
+
+		return is_array( $value ) ? '' : sanitize_text_field( wp_unslash( (string) $value ) );
+	}
+
+	private function param_raw( mixed $request, string $key ): mixed {
+		if ( is_array( $request ) ) {
+			return $request[ $key ] ?? '';
+		}
+		if ( is_object( $request ) && method_exists( $request, 'get_param' ) ) {
+			return $request->get_param( $key );
+		}
+
+		return '';
+	}
+
+	private function response( mixed $data ): mixed {
+		return function_exists( 'rest_ensure_response' ) ? rest_ensure_response( $data ) : $data;
+	}
+
+	private function error( string $code, string $message, int $status = 400 ): mixed {
+		if ( class_exists( '\WP_Error' ) ) {
+			return new \WP_Error( $code, $message, array( 'status' => $status ) );
+		}
+
+		return array( 'code' => $code, 'message' => $message, 'status' => $status );
+	}
+}

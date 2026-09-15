@@ -1,0 +1,809 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Carriers\YandexDelivery\Pickup;
+
+defined( 'ABSPATH' ) || exit;
+
+final class YandexDeliveryPickupPointV2Repository {
+	private object $wpdb;
+	private bool $use_staging_table = false;
+
+	public function __construct( ?object $wpdb = null ) {
+		$db = $wpdb;
+		if ( null === $db ) {
+			global $wpdb;
+			$db = $wpdb;
+		}
+
+		$this->wpdb = $db;
+	}
+
+	public function schema(): string {
+		$charset = method_exists( $this->wpdb, 'get_charset_collate' ) ? $this->wpdb->get_charset_collate() : '';
+		$table = $this->table_name();
+
+		return "CREATE TABLE {$table} (
+			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+			platform_station_id varchar(80) NOT NULL,
+			operator_station_id varchar(80) NULL,
+			operator_id varchar(80) NULL,
+			type varchar(64) NOT NULL,
+			name varchar(255) NULL,
+			yandex_geo_id bigint(20) unsigned NULL,
+			country varchar(128) NULL,
+			region varchar(255) NULL,
+			sub_region varchar(255) NULL,
+			locality varchar(255) NULL,
+			street varchar(255) NULL,
+			house varchar(64) NULL,
+			housing varchar(64) NULL,
+			building varchar(64) NULL,
+			apartment varchar(64) NULL,
+			postal_code varchar(32) NULL,
+			full_address text NULL,
+			latitude decimal(10,7) NULL,
+			longitude decimal(10,7) NULL,
+			instruction text NULL,
+			phone varchar(255) NULL,
+			schedule_text text NULL,
+			is_yandex_branded tinyint(1) NOT NULL DEFAULT 0,
+			is_market_partner tinyint(1) NOT NULL DEFAULT 0,
+			is_dark_store tinyint(1) NOT NULL DEFAULT 0,
+			is_post_office tinyint(1) NOT NULL DEFAULT 0,
+			available_for_dropoff tinyint(1) NOT NULL DEFAULT 0,
+			deactivation_date datetime NULL,
+			deactivation_date_predicted_debt datetime NULL,
+			location_details_json longtext NULL,
+			station_contact_json longtext NULL,
+			active tinyint(1) NOT NULL DEFAULT 1,
+			last_seen_at datetime NULL,
+			raw_hash char(40) NOT NULL,
+			created_at datetime NULL,
+			updated_at datetime NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY platform_station_id (platform_station_id),
+			KEY operator_station_id (operator_station_id),
+			KEY operator_id (operator_id),
+			KEY type (type),
+			KEY yandex_geo_id (yandex_geo_id),
+			KEY locality (locality),
+			KEY postal_code (postal_code),
+			KEY active (active),
+			KEY raw_hash (raw_hash)
+		) {$charset};";
+	}
+
+	public function create_schema_if_needed(): void {
+		if ( ! $this->can_create_schema() ) {
+			return;
+		}
+		if ( ! function_exists( 'dbDelta' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+		}
+		dbDelta( $this->schema() );
+	}
+
+	public function truncate(): void {
+		if ( $this->has_test_rows() ) {
+			$this->wpdb->{$this->test_rows_property()} = array();
+			if ( ! $this->use_staging_table && property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2_truncate_count' ) ) {
+				++$this->wpdb->yandex_delivery_pickup_points_v2_truncate_count;
+			}
+			return;
+		}
+
+		$this->create_schema_if_needed();
+		$this->wpdb->query( 'TRUNCATE TABLE ' . $this->table_name() );
+	}
+
+	public function use_staging_table(): void {
+		$this->use_staging_table = true;
+	}
+
+	public function use_live_table(): void {
+		$this->use_staging_table = false;
+	}
+
+	public function prepare_staging_table(): void {
+		$this->use_staging_table();
+		$this->create_schema_if_needed();
+		$this->truncate();
+	}
+
+	public function drop_staging_table(): void {
+		if ( $this->is_test_environment() ) {
+			$this->wpdb->yandex_delivery_pickup_points_v2_staging = array();
+			$this->use_live_table();
+			return;
+		}
+		if ( method_exists( $this->wpdb, 'query' ) ) {
+			$this->wpdb->query( 'DROP TABLE IF EXISTS ' . $this->quote_identifier( $this->staging_table_name() ) );
+		}
+		$this->use_live_table();
+	}
+
+	public function promote_staging_to_live(): void {
+		if ( $this->is_test_environment() ) {
+			$this->wpdb->yandex_delivery_pickup_points_v2 = $this->wpdb->yandex_delivery_pickup_points_v2_staging ?? array();
+			$this->wpdb->yandex_delivery_pickup_points_v2_staging = array();
+			$this->use_live_table();
+			return;
+		}
+		$this->create_schema_if_needed();
+		$live = $this->live_table_name();
+		$staging = $this->staging_table_name();
+		$backup = $live . '_old_' . gmdate( 'YmdHis' );
+		$this->wpdb->query( 'CREATE TABLE IF NOT EXISTS ' . $this->quote_identifier( $live ) . ' LIKE ' . $this->quote_identifier( $staging ) );
+		$this->wpdb->query( 'DROP TABLE IF EXISTS ' . $this->quote_identifier( $backup ) );
+		$this->wpdb->query( 'RENAME TABLE ' . $this->quote_identifier( $live ) . ' TO ' . $this->quote_identifier( $backup ) . ', ' . $this->quote_identifier( $staging ) . ' TO ' . $this->quote_identifier( $live ) );
+		$this->wpdb->query( 'DROP TABLE IF EXISTS ' . $this->quote_identifier( $backup ) );
+		$this->use_live_table();
+	}
+	/**
+	 * @param array<int,array<string,mixed>>|array<string,mixed> $rows
+	 * @return array{received:int,saved:int,skipped_invalid:int}
+	 */
+	public function upsert( array $rows ): array {
+		$this->create_schema_if_needed();
+		$rows = array_is_list( $rows ) ? $rows : array( $rows );
+		$report = array( 'received' => count( $rows ), 'saved' => 0, 'skipped_invalid' => 0 );
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				++$report['skipped_invalid'];
+				continue;
+			}
+			$normalized = $this->normalize_row( $row );
+			if ( null === $normalized ) {
+				++$report['skipped_invalid'];
+				continue;
+			}
+			if ( $this->upsert_one( $normalized ) ) {
+				++$report['saved'];
+			} else {
+				++$report['skipped_invalid'];
+			}
+		}
+
+		return $report;
+	}
+
+	/** @return array<string,mixed>|null */
+	public function find( string $platform_station_id ): ?array {
+		$rows = $this->search( array( 'platform_station_id' => $platform_station_id, 'limit' => 1, 'active' => null ) );
+
+		return $rows[0] ?? null;
+	}
+
+	/** @return array<string,mixed>|null */
+	public function source_dropoff_point_by_platform_station_id( string $platform_station_id ): ?array {
+		$row = $this->find( $platform_station_id );
+
+		return is_array( $row ) && $this->is_source_dropoff_row( $row ) ? $row : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function search_source_dropoff_points( array $filters = array() ): array {
+		$limit = max( 1, min( 2000, (int) ( $filters['limit'] ?? 100 ) ) );
+		$query = $this->source_dropoff_query( (string) ( $filters['query'] ?? '' ) );
+
+		if ( $this->has_test_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->wpdb->{$this->test_rows_property()},
+					fn( array $row ): bool => $this->is_source_dropoff_row( $row )
+						&& $this->has_coordinates( $row )
+						&& $this->source_dropoff_matches_query( $row, $query )
+				)
+			);
+			usort(
+				$rows,
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) )
+			);
+
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$this->create_schema_if_needed();
+		$where = array(
+			'active = 1',
+			'available_for_dropoff = 1',
+			"platform_station_id <> ''",
+			'latitude IS NOT NULL',
+			'longitude IS NOT NULL',
+		);
+		$args = array();
+		if ( '' !== $query ) {
+			$like = '%' . $this->wpdb->esc_like( $query ) . '%';
+			$where[] = '(platform_station_id LIKE %s OR name LIKE %s OR locality LIKE %s OR full_address LIKE %s)';
+			array_push( $args, $like, $like, $like, $like );
+		}
+		$args[] = $limit;
+		$sql = 'SELECT platform_station_id, operator_station_id, operator_id, type, name, yandex_geo_id, region, locality, full_address, latitude, longitude, schedule_text, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY locality ASC, name ASC, platform_station_id ASC LIMIT %d';
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * @param array<int,mixed> $yandex_geo_ids
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function source_dropoff_map_points_by_geo_ids( array $yandex_geo_ids, int $limit = 2000 ): array {
+		$yandex_geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $yandex_geo_ids ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+		sort( $yandex_geo_ids, SORT_NUMERIC );
+		$limit = max( 1, min( 2000, $limit ) );
+		if ( array() === $yandex_geo_ids ) {
+			return array();
+		}
+		if ( $this->has_test_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->wpdb->{$this->test_rows_property()},
+					fn( array $row ): bool => $this->is_source_dropoff_row( $row )
+						&& $this->has_coordinates( $row )
+						&& in_array( (int) ( $row['yandex_geo_id'] ?? 0 ), $yandex_geo_ids, true )
+				)
+			);
+			usort(
+				$rows,
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) )
+			);
+
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$this->create_schema_if_needed();
+		$placeholders = implode( ', ', array_fill( 0, count( $yandex_geo_ids ), '%d' ) );
+		$sql = 'SELECT platform_station_id, operator_station_id, operator_id, type, name, yandex_geo_id, region, locality, full_address, latitude, longitude, schedule_text, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE active = 1 AND available_for_dropoff = 1 AND yandex_geo_id IN (' . $placeholders . ") AND platform_station_id <> %s AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY locality ASC, name ASC, platform_station_id ASC LIMIT %d";
+		$args = array_merge( $yandex_geo_ids, array( '', $limit ) );
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function search_source_dropoff_points_near( float $latitude, float $longitude, float $radius_km, int $limit = 200 ): array {
+		$radius_km = max( 1.0, min( 50.0, $radius_km ) );
+		$limit = max( 1, min( 200, $limit ) );
+		if ( $latitude < -90.0 || $latitude > 90.0 || $longitude < -180.0 || $longitude > 180.0 ) {
+			return array();
+		}
+		$lat_delta = $radius_km / 111.32;
+		$cos = cos( deg2rad( max( -89.999, min( 89.999, $latitude ) ) ) );
+		$lng_delta = $radius_km / max( 0.001, 111.32 * abs( $cos ) );
+		$min_lat = $latitude - $lat_delta;
+		$max_lat = $latitude + $lat_delta;
+		$min_lng = $longitude - $lng_delta;
+		$max_lng = $longitude + $lng_delta;
+
+		if ( $this->has_test_rows() ) {
+			$candidates = array_values(
+				array_filter(
+					$this->wpdb->{$this->test_rows_property()},
+					fn( array $row ): bool => $this->is_source_dropoff_row( $row )
+						&& $this->has_coordinates( $row )
+						&& (float) $row['latitude'] >= $min_lat
+						&& (float) $row['latitude'] <= $max_lat
+						&& (float) $row['longitude'] >= $min_lng
+						&& (float) $row['longitude'] <= $max_lng
+				)
+			);
+		} else {
+			$this->create_schema_if_needed();
+			$sql = 'SELECT platform_station_id, operator_station_id, operator_id, type, name, yandex_geo_id, region, locality, full_address, latitude, longitude, schedule_text, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE active = 1 AND available_for_dropoff = 1 AND platform_station_id <> %s AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude BETWEEN %f AND %f AND longitude BETWEEN %f AND %f';
+			$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, '', $min_lat, $max_lat, $min_lng, $max_lng ), ARRAY_A );
+			$candidates = is_array( $rows ) ? $rows : array();
+		}
+
+		$near = array();
+		foreach ( $candidates as $row ) {
+			$distance = $this->haversine_distance_km( $latitude, $longitude, (float) $row['latitude'], (float) $row['longitude'] );
+			if ( $distance <= $radius_km ) {
+				$row['distance_km'] = round( $distance, 3 );
+				$near[] = $row;
+			}
+		}
+		usort(
+			$near,
+			static fn( array $a, array $b ): int => (float) ( $a['distance_km'] ?? 0 ) <=> (float) ( $b['distance_km'] ?? 0 )
+				?: strcmp( (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['platform_station_id'] ?? '' ) )
+		);
+
+		return array_slice( $near, 0, $limit );
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function search( array $filters = array() ): array {
+		$limit = max( 1, min( 500, (int) ( $filters['limit'] ?? 20 ) ) );
+		if ( $this->has_test_rows() ) {
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->matches_filters( $row, $filters ) ) );
+			usort(
+				$rows,
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) )
+			);
+
+			return $rows;
+		}
+
+		$this->create_schema_if_needed();
+		$where = array();
+		$args = array();
+		$this->append_where( $where, $args, $filters );
+		$where_sql = array() === $where ? '1=1' : implode( ' AND ', $where );
+		$args[] = $limit;
+		$sql = 'SELECT * FROM ' . $this->table_name() . ' WHERE ' . $where_sql . ' ORDER BY locality ASC, name ASC, platform_station_id ASC LIMIT %d';
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+
+	/** @param array<int,mixed> $yandex_geo_ids @return array<string,mixed>|null */
+	public function representative_destination_pickup_point_by_geo_ids( array $yandex_geo_ids ): ?array {
+		$yandex_geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $yandex_geo_ids ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+		sort( $yandex_geo_ids, SORT_NUMERIC );
+		if ( array() === $yandex_geo_ids ) {
+			return null;
+		}
+		if ( $this->has_test_rows() ) {
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->is_destination_candidate_row( $row ) && in_array( (int) ( $row['yandex_geo_id'] ?? 0 ), $yandex_geo_ids, true ) ) );
+			usort( $rows, fn( array $a, array $b ): int => $this->destination_candidate_priority( $a ) <=> $this->destination_candidate_priority( $b ) ?: strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) ) );
+
+			return $rows[0] ?? null;
+		}
+
+		$this->create_schema_if_needed();
+		$placeholders = implode( ', ', array_fill( 0, count( $yandex_geo_ids ), '%d' ) );
+		$priority = "CASE WHEN type = 'pickup_point' AND operator_id = 'market_l4g' THEN 1 WHEN type = 'pickup_point' AND operator_id = '5post' THEN 2 WHEN type = 'terminal' AND operator_id = 'market_l4g' THEN 3 WHEN type = 'terminal' AND operator_id = '5post' THEN 4 WHEN type = 'terminal' THEN 5 ELSE 99 END";
+		$sql = 'SELECT platform_station_id, name, locality, full_address, yandex_geo_id, operator_id, type, active FROM ' . $this->table_name() . ' WHERE active = 1 AND yandex_geo_id IN (' . $placeholders . ") AND platform_station_id <> %s AND type IN ('pickup_point', 'terminal') ORDER BY " . $priority . ' ASC, locality ASC, name ASC, platform_station_id ASC LIMIT 1';
+		$args = array_merge( $yandex_geo_ids, array( '' ) );
+		$row = $this->wpdb->get_row( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $row ) ? $row : null;
+	}
+	/** @param array<int,mixed> $yandex_geo_ids @return array<int,array<string,mixed>> */
+	public function destination_pickup_points_by_geo_ids( array $yandex_geo_ids, int $limit = 0 ): array {
+		$yandex_geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $yandex_geo_ids ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+		sort( $yandex_geo_ids, SORT_NUMERIC );
+		if ( array() === $yandex_geo_ids ) {
+			return array();
+		}
+		if ( $this->has_test_rows() ) {
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->is_destination_candidate_row( $row ) && in_array( (int) ( $row['yandex_geo_id'] ?? 0 ), $yandex_geo_ids, true ) ) );
+			usort( $rows, fn( array $a, array $b ): int => $this->destination_candidate_priority( $a ) <=> $this->destination_candidate_priority( $b ) ?: strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) ) );
+
+			return $rows;
+		}
+
+		$this->create_schema_if_needed();
+		$placeholders = implode( ', ', array_fill( 0, count( $yandex_geo_ids ), '%d' ) );
+		$priority = "CASE WHEN type = 'pickup_point' THEN 1 WHEN type = 'terminal' THEN 2 ELSE 99 END, CASE WHEN operator_id = 'market_l4g' THEN 1 WHEN operator_id = '5post' THEN 2 ELSE 99 END";
+		$sql = 'SELECT platform_station_id, operator_station_id, operator_id, type, name, yandex_geo_id, region, locality, postal_code, full_address, latitude, longitude, instruction, schedule_text, active FROM ' . $this->table_name() . ' WHERE active = 1 AND yandex_geo_id IN (' . $placeholders . ") AND platform_station_id <> %s AND type IN ('pickup_point', 'terminal') ORDER BY " . $priority . ' ASC, locality ASC, name ASC, platform_station_id ASC';
+		$args = array_merge( $yandex_geo_ids, array( '' ) );
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	public function destination_pickup_point_by_platform_station_id( string $platform_station_id ): ?array {
+		$platform_station_id = trim( $platform_station_id );
+		if ( '' === $platform_station_id ) {
+			return null;
+		}
+		$row = $this->find( $platform_station_id );
+
+		return is_array( $row ) && $this->is_destination_candidate_row( $row ) ? $row : null;
+	}	/** @param array<int,mixed> $yandex_geo_ids @return array<int,array<string,mixed>> */
+	public function source_dropoff_points_by_geo_ids( array $yandex_geo_ids ): array {
+		$yandex_geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $yandex_geo_ids ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+		sort( $yandex_geo_ids, SORT_NUMERIC );
+		if ( array() === $yandex_geo_ids ) {
+			return array();
+		}
+		if ( $this->has_test_rows() ) {
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->is_source_dropoff_row( $row ) && in_array( (int) ( $row['yandex_geo_id'] ?? 0 ), $yandex_geo_ids, true ) ) );
+			usort(
+				$rows,
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) )
+			);
+
+			return $rows;
+		}
+
+		$this->create_schema_if_needed();
+		$placeholders = implode( ', ', array_fill( 0, count( $yandex_geo_ids ), '%d' ) );
+		$sql = 'SELECT platform_station_id, name, locality, full_address, yandex_geo_id, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE active = 1 AND available_for_dropoff = 1 AND yandex_geo_id IN (' . $placeholders . ') AND platform_station_id <> %s ORDER BY locality ASC, name ASC, platform_station_id ASC';
+		$args = array_merge( $yandex_geo_ids, array( '' ) );
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function source_dropoff_points_by_geo_id( int $yandex_geo_id ): array {
+		return $this->source_dropoff_points_by_geo_ids( array( $yandex_geo_id ) );
+	}
+
+	/** @param array<string,mixed> $filters */
+	public function count( array $filters = array() ): int {
+		if ( $this->has_test_rows() ) {
+			return count( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->matches_filters( $row, $filters ) ) );
+		}
+
+		$this->create_schema_if_needed();
+		$where = array();
+		$args = array();
+		$this->append_where( $where, $args, $filters );
+		$where_sql = array() === $where ? '1=1' : implode( ' AND ', $where );
+		$sql = 'SELECT COUNT(*) FROM ' . $this->table_name() . ' WHERE ' . $where_sql;
+		if ( array() !== $args ) {
+			$sql = $this->wpdb->prepare( $sql, ...$args );
+		}
+
+		return (int) $this->wpdb->get_var( $sql );
+	}
+
+	public function count_all(): int {
+		return $this->count( array( 'active' => null ) );
+	}
+
+	public function count_active(): int {
+		return $this->count( array( 'active' => 1 ) );
+	}
+
+	/** @return array<string,int> */
+	public function count_by_type(): array {
+		if ( $this->has_test_rows() ) {
+			$counts = array();
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $row ) {
+				$type = trim( (string) ( $row['type'] ?? '' ) );
+				if ( '' !== $type ) {
+					$counts[ $type ] = ( $counts[ $type ] ?? 0 ) + 1;
+				}
+			}
+			return $counts;
+		}
+		$rows = $this->wpdb->get_results( 'SELECT type, COUNT(*) AS total FROM ' . $this->table_name() . ' GROUP BY type', ARRAY_A );
+		$counts = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$counts[ (string) $row['type'] ] = (int) $row['total'];
+		}
+		return $counts;
+	}
+
+	public function count_unique_geo_ids(): int {
+		if ( $this->has_test_rows() ) {
+			$ids = array();
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $row ) {
+				$id = (string) ( $row['yandex_geo_id'] ?? '' );
+				if ( '' !== $id && '0' !== $id ) {
+					$ids[ $id ] = true;
+				}
+			}
+			return count( $ids );
+		}
+		$this->create_schema_if_needed();
+		return (int) $this->wpdb->get_var( 'SELECT COUNT(DISTINCT yandex_geo_id) FROM ' . $this->table_name() . ' WHERE yandex_geo_id IS NOT NULL AND yandex_geo_id > 0' );
+	}
+
+	public function count_active_unique_geo_ids(): int {
+		if ( $this->has_test_rows() ) {
+			$ids = array();
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $row ) {
+				if ( empty( $row['active'] ) ) {
+					continue;
+				}
+				$id = (string) ( $row['yandex_geo_id'] ?? '' );
+				if ( '' !== $id && '0' !== $id ) {
+					$ids[ $id ] = true;
+				}
+			}
+			return count( $ids );
+		}
+		$this->create_schema_if_needed();
+		return (int) $this->wpdb->get_var( 'SELECT COUNT(DISTINCT yandex_geo_id) FROM ' . $this->table_name() . ' WHERE active = 1 AND yandex_geo_id IS NOT NULL AND yandex_geo_id > 0' );
+	}
+	public function latest_seen_at(): string {
+		if ( $this->has_test_rows() ) {
+			$latest = '';
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $row ) {
+				$value = (string) ( $row['last_seen_at'] ?? '' );
+				if ( $value > $latest ) {
+					$latest = $value;
+				}
+			}
+			return $latest;
+		}
+		$this->create_schema_if_needed();
+		return (string) $this->wpdb->get_var( 'SELECT MAX(last_seen_at) FROM ' . $this->table_name() );
+	}
+
+	/** @param array<int,string> $where @param array<int,mixed> $args @param array<string,mixed> $filters */
+	private function append_where( array &$where, array &$args, array $filters ): void {
+		if ( ! array_key_exists( 'active', $filters ) || null !== $filters['active'] ) {
+			$where[] = 'active = %d';
+			$args[] = empty( $filters['active'] ?? 1 ) ? 0 : 1;
+		}
+		foreach ( array( 'platform_station_id', 'operator_station_id', 'operator_id', 'type', 'postal_code' ) as $key ) {
+			if ( isset( $filters[ $key ] ) && '' !== trim( (string) $filters[ $key ] ) ) {
+				$where[] = "{$key} = %s";
+				$args[] = trim( (string) $filters[ $key ] );
+			}
+		}
+		if ( isset( $filters['yandex_geo_id'] ) && '' !== trim( (string) $filters['yandex_geo_id'] ) ) {
+			$where[] = 'yandex_geo_id = %d';
+			$args[] = (int) $filters['yandex_geo_id'];
+		}
+		foreach ( array( 'locality', 'full_address', 'name' ) as $key ) {
+			if ( isset( $filters[ $key ] ) && '' !== trim( (string) $filters[ $key ] ) ) {
+				$where[] = "{$key} LIKE %s";
+				$args[] = '%' . $this->wpdb->esc_like( trim( (string) $filters[ $key ] ) ) . '%';
+			}
+		}
+	}
+
+	/** @param array<string,mixed> $row */
+	private function upsert_one( array $row ): bool {
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $index => $existing ) {
+				if ( (string) ( $existing['platform_station_id'] ?? '' ) === $row['platform_station_id'] ) {
+					$row['id'] = $existing['id'] ?? $index + 1;
+					$row['created_at'] = $existing['created_at'] ?? $row['created_at'];
+					$this->wpdb->{$this->test_rows_property()}[ $index ] = $row;
+					return true;
+				}
+			}
+			$row['id'] = count( $this->wpdb->{$this->test_rows_property()} ) + 1;
+			$this->wpdb->{$this->test_rows_property()}[] = $row;
+			return true;
+		}
+
+		$columns = $this->columns();
+		$values = array();
+		foreach ( $columns as $column ) {
+			$values[] = $this->sql_literal( $row[ $column ] ?? null, $this->column_type( $column ) );
+		}
+		$updates = array();
+		foreach ( array_diff( $columns, array( 'platform_station_id', 'created_at' ) ) as $column ) {
+			$updates[] = $column . '=VALUES(' . $column . ')';
+		}
+		$sql = sprintf(
+			'INSERT INTO %s (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s',
+			$this->table_name(),
+			implode( ',', $columns ),
+			implode( ',', $values ),
+			implode( ', ', $updates )
+		);
+
+		return false !== $this->wpdb->query( $sql );
+	}
+
+	/** @param array<string,mixed> $row @return array<string,mixed>|null */
+	private function normalize_row( array $row ): ?array {
+		$platform_station_id = $this->nullable_string( $row['platform_station_id'] ?? null, 80 );
+		$type = $this->nullable_string( $row['type'] ?? null, 64 );
+		if ( null === $platform_station_id || null === $type ) {
+			return null;
+		}
+		$now = $this->now();
+		$normalized = array();
+		foreach ( $this->columns() as $column ) {
+			$normalized[ $column ] = $row[ $column ] ?? null;
+		}
+		$normalized['platform_station_id'] = $platform_station_id;
+		$normalized['operator_station_id'] = $this->nullable_string( $row['operator_station_id'] ?? null, 80 );
+		$normalized['operator_id'] = $this->nullable_string( $row['operator_id'] ?? null, 80 );
+		$normalized['type'] = $type;
+		foreach ( array( 'name', 'country', 'region', 'sub_region', 'locality', 'street', 'house', 'housing', 'building', 'apartment', 'postal_code', 'phone' ) as $column ) {
+			$normalized[ $column ] = $this->nullable_string( $row[ $column ] ?? null, 255 );
+		}
+		$normalized['yandex_geo_id'] = is_numeric( $row['yandex_geo_id'] ?? null ) ? (int) $row['yandex_geo_id'] : null;
+		foreach ( array( 'full_address', 'instruction', 'schedule_text', 'location_details_json', 'station_contact_json' ) as $column ) {
+			$normalized[ $column ] = $this->nullable_string( $row[ $column ] ?? null, 0 );
+		}
+		$normalized['latitude'] = is_numeric( $row['latitude'] ?? null ) ? round( (float) $row['latitude'], 7 ) : null;
+		$normalized['longitude'] = is_numeric( $row['longitude'] ?? null ) ? round( (float) $row['longitude'], 7 ) : null;
+		foreach ( array( 'is_yandex_branded', 'is_market_partner', 'is_dark_store', 'is_post_office', 'available_for_dropoff', 'active' ) as $column ) {
+			$normalized[ $column ] = empty( $row[ $column ] ) ? 0 : 1;
+		}
+		foreach ( array( 'deactivation_date', 'deactivation_date_predicted_debt', 'last_seen_at' ) as $column ) {
+			$normalized[ $column ] = $this->nullable_string( $row[ $column ] ?? null, 32 );
+		}
+		$normalized['raw_hash'] = $this->nullable_string( $row['raw_hash'] ?? null, 40 ) ?? sha1( $this->json( $row ) );
+		$normalized['created_at'] = $this->nullable_string( $row['created_at'] ?? $now, 32 );
+		$normalized['updated_at'] = $this->nullable_string( $row['updated_at'] ?? $now, 32 );
+
+		return $normalized;
+	}
+
+	/** @return array<int,string> */
+	private function columns(): array {
+		return array( 'platform_station_id', 'operator_station_id', 'operator_id', 'type', 'name', 'yandex_geo_id', 'country', 'region', 'sub_region', 'locality', 'street', 'house', 'housing', 'building', 'apartment', 'postal_code', 'full_address', 'latitude', 'longitude', 'instruction', 'phone', 'schedule_text', 'is_yandex_branded', 'is_market_partner', 'is_dark_store', 'is_post_office', 'available_for_dropoff', 'deactivation_date', 'deactivation_date_predicted_debt', 'location_details_json', 'station_contact_json', 'active', 'last_seen_at', 'raw_hash', 'created_at', 'updated_at' );
+	}
+
+	private function column_type( string $column ): string {
+		if ( in_array( $column, array( 'is_yandex_branded', 'is_market_partner', 'is_dark_store', 'is_post_office', 'available_for_dropoff', 'active', 'yandex_geo_id' ), true ) ) {
+			return 'int';
+		}
+		if ( in_array( $column, array( 'latitude', 'longitude' ), true ) ) {
+			return 'float';
+		}
+
+		return 'string';
+	}
+
+	private function sql_literal( mixed $value, string $type ): string {
+		if ( null === $value ) {
+			return 'NULL';
+		}
+		if ( 'int' === $type ) {
+			return (string) (int) $value;
+		}
+		if ( 'float' === $type ) {
+			return is_numeric( $value ) ? (string) (float) $value : 'NULL';
+		}
+
+		return $this->wpdb->prepare( '%s', (string) $value );
+	}
+
+	private function nullable_string( mixed $value, int $max_length ): ?string {
+		if ( null === $value || is_array( $value ) || is_object( $value ) ) {
+			return null;
+		}
+		$value = trim( (string) $value );
+		if ( '' === $value ) {
+			return null;
+		}
+
+		return $max_length > 0 ? substr( $value, 0, $max_length ) : $value;
+	}
+
+	private function is_source_dropoff_row( array $row ): bool {
+		return ! empty( $row['active'] ) && ! empty( $row['available_for_dropoff'] ) && '' !== trim( (string) ( $row['platform_station_id'] ?? '' ) );
+	}
+
+	private function has_coordinates( array $row ): bool {
+		return is_numeric( $row['latitude'] ?? null ) && is_numeric( $row['longitude'] ?? null );
+	}
+
+	private function source_dropoff_query( string $query ): string {
+		$query = function_exists( 'mb_strtolower' ) ? mb_strtolower( $query ) : strtolower( $query );
+
+		return trim( preg_replace( '/\s+/u', ' ', $query ) ?? $query );
+	}
+
+	private function source_dropoff_matches_query( array $row, string $query ): bool {
+		if ( '' === $query ) {
+			return true;
+		}
+		$haystack = $this->source_dropoff_query(
+			implode(
+				' ',
+				array(
+					(string) ( $row['platform_station_id'] ?? '' ),
+					(string) ( $row['name'] ?? '' ),
+					(string) ( $row['locality'] ?? '' ),
+					(string) ( $row['full_address'] ?? '' ),
+				)
+			)
+		);
+
+		return str_contains( $haystack, $query );
+	}
+
+	private function haversine_distance_km( float $lat1, float $lon1, float $lat2, float $lon2 ): float {
+		$earth_radius_km = 6371.0088;
+		$d_lat = deg2rad( $lat2 - $lat1 );
+		$d_lon = deg2rad( $lon2 - $lon1 );
+		$a = sin( $d_lat / 2 ) ** 2 + cos( deg2rad( $lat1 ) ) * cos( deg2rad( $lat2 ) ) * sin( $d_lon / 2 ) ** 2;
+
+		return 2 * $earth_radius_km * atan2( sqrt( $a ), sqrt( max( 0.0, 1 - $a ) ) );
+	}
+
+	private function is_destination_candidate_row( array $row ): bool {
+		return ! empty( $row['active'] )
+			&& '' !== trim( (string) ( $row['platform_station_id'] ?? '' ) )
+			&& in_array( (string) ( $row['type'] ?? '' ), array( 'pickup_point', 'terminal' ), true );
+	}
+
+	private function destination_candidate_priority( array $row ): int {
+		$type = (string) ( $row['type'] ?? '' );
+		$operator = (string) ( $row['operator_id'] ?? '' );
+		if ( 'pickup_point' === $type && 'market_l4g' === $operator ) {
+			return 1;
+		}
+		if ( 'pickup_point' === $type && '5post' === $operator ) {
+			return 2;
+		}
+		if ( 'terminal' === $type && 'market_l4g' === $operator ) {
+			return 3;
+		}
+		if ( 'terminal' === $type && '5post' === $operator ) {
+			return 4;
+		}
+		if ( 'terminal' === $type ) {
+			return 5;
+		}
+
+		return 99;
+	}
+	/** @param array<string,mixed> $row @param array<string,mixed> $filters */
+	private function matches_filters( array $row, array $filters ): bool {
+		if ( ( ! array_key_exists( 'active', $filters ) || null !== $filters['active'] ) && ( ! empty( $row['active'] ) ? 1 : 0 ) !== ( empty( $filters['active'] ?? 1 ) ? 0 : 1 ) ) {
+			return false;
+		}
+		foreach ( array( 'platform_station_id', 'operator_station_id', 'operator_id', 'type', 'postal_code' ) as $key ) {
+			if ( isset( $filters[ $key ] ) && '' !== trim( (string) $filters[ $key ] ) && (string) ( $row[ $key ] ?? '' ) !== trim( (string) $filters[ $key ] ) ) {
+				return false;
+			}
+		}
+		if ( isset( $filters['yandex_geo_id'] ) && '' !== trim( (string) $filters['yandex_geo_id'] ) && (int) ( $row['yandex_geo_id'] ?? 0 ) !== (int) $filters['yandex_geo_id'] ) {
+			return false;
+		}
+		foreach ( array( 'locality', 'full_address', 'name' ) as $key ) {
+			if ( isset( $filters[ $key ] ) && '' !== trim( (string) $filters[ $key ] ) && false === stripos( (string) ( $row[ $key ] ?? '' ), trim( (string) $filters[ $key ] ) ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private function table_name(): string {
+		return $this->use_staging_table ? $this->staging_table_name() : $this->live_table_name();
+	}
+
+	private function live_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_yandex_delivery_pickup_points_v2';
+	}
+
+	private function staging_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_yandex_delivery_pickup_points_v2_staging';
+	}
+
+	private function has_test_rows(): bool {
+		$property = $this->test_rows_property();
+		if ( $this->use_staging_table && ! property_exists( $this->wpdb, $property ) && property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2' ) ) {
+			$this->wpdb->{$property} = array();
+		}
+		return property_exists( $this->wpdb, $property ) && is_array( $this->wpdb->{$property} );
+	}
+
+	private function is_test_environment(): bool {
+		return property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2' ) || property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2_staging' );
+	}
+
+	private function test_rows_property(): string {
+		return $this->use_staging_table ? 'yandex_delivery_pickup_points_v2_staging' : 'yandex_delivery_pickup_points_v2';
+	}
+
+	private function quote_identifier( string $identifier ): string {
+		$quote = chr( 96 );
+		return $quote . str_replace( $quote, $quote . $quote, $identifier ) . $quote;
+	}
+
+	private function can_create_schema(): bool {
+		return defined( 'ABSPATH' )
+			&& is_string( ABSPATH )
+			&& '' !== ABSPATH
+			&& method_exists( $this->wpdb, 'get_charset_collate' )
+			&& file_exists( ABSPATH . 'wp-admin/includes/upgrade.php' );
+	}
+
+	private function json( mixed $value ): string {
+		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $value, JSON_UNESCAPED_UNICODE ) : json_encode( $value, JSON_UNESCAPED_UNICODE );
+
+		return is_string( $json ) ? $json : '';
+	}
+
+	private function now(): string {
+		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+}

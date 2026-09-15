@@ -1,0 +1,53 @@
+.wdc-address-autocomplete-field { position: relative; }
+.wdc-address-autocomplete {
+	display: none;
+	position: absolute;
+	top: 100%;
+	left: 0;
+	width: 100%;
+	max-height: min(340px, 45vh);
+	overflow-y: auto;
+	box-sizing: border-box;
+	z-index: 100;
+	background: #fff;
+	border: 1px solid #ccc;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, .12);
+}
+.wdc-address-autocomplete.is-open { display: block; }
+.wdc-address-autocomplete-option,
+.wdc-address-autocomplete-helper,
+.wdc-address-autocomplete-row {
+	display: block;
+	width: 100%;
+	padding: 10px 12px;
+	border: 0;
+	border-radius: 0;
+	background: #fff;
+	color: #333;
+	text-align: left;
+	white-space: normal;
+	overflow-wrap: anywhere;
+	font: inherit;
+	box-sizing: border-box;
+}
+.wdc-address-autocomplete-option:hover,
+.wdc-address-autocomplete-option.is-active,
+.wdc-address-autocomplete-helper:hover { background: #edf4f5; }
+.wdc-address-autocomplete-primary,
+.wdc-address-autocomplete-secondary { display: block; }
+.wdc-address-autocomplete-secondary { font-size: .85em; color: #666; }
+
+.wdc-address-autocomplete-row.is-loading { display: flex; align-items: center; gap: 10px; }
+.wdc-address-autocomplete-spinner {
+	width: 18px;
+	height: 18px;
+	flex: 0 0 18px;
+	border: 2px solid #c3c4c7;
+	border-top-color: #2271b1;
+	border-radius: 50%;
+	animation: wdc-address-autocomplete-spin .8s linear infinite;
+}
+@keyframes wdc-address-autocomplete-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+	.wdc-address-autocomplete-spinner { animation: none; }
+}

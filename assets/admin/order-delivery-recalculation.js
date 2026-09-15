@@ -1,0 +1,2254 @@
+( function () {
+	'use strict';
+
+	const config = window.wdcOrderDeliveryRecalculation || {};
+	const activeRequests = new WeakSet();
+	const selectedLocations = new WeakMap();
+	const selectedRates = new WeakMap();
+	const selectedPickupPoints = new WeakMap();
+	const normalizedShippingAddresses = new WeakMap();
+	const courierAddressStates = new WeakMap();
+	const activeSaveRequests = new WeakSet();
+	const searchTimers = new WeakMap();
+	const courierAddressTimers = new WeakMap();
+	const viewStates = new WeakMap();
+	let compactLayoutFrame = 0;
+
+	function closestBox( element ) {
+		return element ? element.closest( '[data-wdc-order-delivery-recalculation]' ) : null;
+	}
+
+	function modal( box ) {
+		return box ? box.querySelector( '[data-wdc-order-delivery-modal]' ) : null;
+	}
+
+	function modalDialog( box ) {
+		const node = modal( box );
+		return node ? node.querySelector( '.wdc-order-delivery-modal__dialog' ) : null;
+	}
+
+	function modalContent( box ) {
+		const node = modal( box );
+		return node ? node.querySelector( '[data-wdc-order-delivery-modal-content]' ) : null;
+	}
+
+	function modalPreviewButton( box ) {
+		const node = modal( box );
+		return node ? node.querySelector( '[data-wdc-order-delivery-modal-preview]' ) : null;
+	}
+
+	function currentLocationNode( box ) {
+		const node = modal( box );
+		return node ? node.querySelector( '[data-wdc-order-delivery-location-current]' ) : null;
+	}
+
+	function jsonScriptPayload( box, selector ) {
+		const script = box ? box.querySelector( selector ) : null;
+		if ( ! script ) {
+			return {};
+		}
+		try {
+			return JSON.parse( script.textContent || '{}' ) || {};
+		} catch ( error ) {
+			return {};
+		}
+	}
+
+	function setStatus( box, message, type ) {
+		const node = modal( box );
+		const status = node && node.querySelector( '[data-wdc-order-delivery-modal-status]' );
+		if ( ! status ) {
+			return;
+		}
+		status.textContent = message || '';
+		status.dataset.status = type || '';
+	}
+
+	function setLoading( button, loading ) {
+		if ( ! button ) {
+			return;
+		}
+		button.disabled = !! loading;
+		button.dataset.originalText = button.dataset.originalText || button.textContent;
+		button.textContent = loading ? 'Расчет...' : button.dataset.originalText;
+	}
+
+	function setPreviewButtonsLoading( box, loading ) {
+		if ( ! box ) {
+			return;
+		}
+		box.querySelectorAll( '[data-wdc-order-delivery-recalculate], [data-wdc-order-delivery-modal-preview]' ).forEach( function ( button ) {
+			setLoading( button, loading );
+		} );
+		updateLocationGate( box );
+	}
+
+	function openModal( box ) {
+		const node = modal( box );
+		if ( ! node ) {
+			return;
+		}
+		const wasHidden = node.hidden;
+		ensureInitialLocation( box );
+		if ( wasHidden ) {
+			setDeliveryView( box, 'full' );
+		}
+		node.hidden = false;
+		document.body.classList.add( 'wdc-order-delivery-modal-open' );
+		window.setTimeout( function () {
+			const close = node.querySelector( '[data-wdc-order-delivery-modal-close]' );
+			if ( close && close.focus ) {
+				close.focus();
+				return;
+			}
+			const dialog = modalDialog( box );
+			if ( dialog && dialog.focus ) {
+				dialog.focus();
+			}
+		}, 0 );
+	}
+
+	function closeModal( box ) {
+		const node = modal( box );
+		if ( ! node ) {
+			return;
+		}
+		node.hidden = true;
+		setDeliveryView( box, 'full' );
+		if ( ! document.querySelector( '[data-wdc-order-delivery-modal]:not([hidden])' ) ) {
+			document.body.classList.remove( 'wdc-order-delivery-modal-open' );
+		}
+	}
+
+	function setDeliveryView( box, view ) {
+		const node = modal( box );
+		const nextView = view === 'compact' ? 'compact' : 'full';
+		if ( ! node ) {
+			return;
+		}
+		viewStates.set( box, nextView );
+		node.dataset.view = nextView;
+		const toggle = node.querySelector( '[data-wdc-order-delivery-view-toggle]' );
+		if ( toggle ) {
+			const expanded = nextView !== 'compact';
+			toggle.textContent = expanded ? 'Свернуть' : 'Развернуть';
+			toggle.setAttribute( 'aria-expanded', expanded ? 'true' : 'false' );
+		}
+		if ( 'compact' === nextView ) {
+			scheduleCompactLayout( box );
+		}
+	}
+
+	function toggleDeliveryView( button ) {
+		const box = closestBox( button );
+		const current = viewStates.get( box ) || ( modal( box ) && modal( box ).dataset.view ) || 'full';
+		setDeliveryView( box, current === 'compact' ? 'full' : 'compact' );
+	}
+
+	function openDeliveryRecalculationModal( box ) {
+		if ( ! box ) {
+			return;
+		}
+		ensureInitialLocation( box );
+		resetModal( box );
+		openModal( box );
+		setStatus( box, '', '' );
+		updateLocationGate( box, { focusInvalid: true } );
+	}
+
+	function selectedLocationId( box ) {
+		const location = selectedLocations.get( box ) || {};
+		return positiveLocationId( location.id || location.location_id );
+	}
+
+	function hasCanonicalLocation( box ) {
+		return selectedLocationId( box ) > 0;
+	}
+
+	function setLocationSearchOpen( box, open ) {
+		const search = box && box.querySelector( '[data-wdc-order-delivery-location-search]' );
+		if ( ! search ) {
+			return;
+		}
+		search.hidden = ! open;
+	}
+
+	function focusLocationSearch( box ) {
+		const input = box && box.querySelector( '[data-wdc-order-delivery-location-input]' );
+		if ( input && input.focus ) {
+			window.setTimeout( function () {
+				input.focus();
+			}, 0 );
+		}
+	}
+
+	function updateLocationGate( box, options ) {
+		options = options || {};
+		const previewButton = modalPreviewButton( box );
+		if ( ! previewButton ) {
+			return false;
+		}
+		const valid = hasCanonicalLocation( box );
+		previewButton.disabled = ! valid || activeRequests.has( box );
+		if ( valid ) {
+			return true;
+		}
+		setLocationSearchOpen( box, true );
+		setStatus( box, 'Выберите населенный пункт из базы перед расчетом доставки.', 'error' );
+		if ( options.focusInvalid ) {
+			focusLocationSearch( box );
+		}
+		return false;
+	}
+
+	function scheduleCompactLayout( box ) {
+		if ( compactLayoutFrame && window.cancelAnimationFrame ) {
+			window.cancelAnimationFrame( compactLayoutFrame );
+		}
+		if ( ! window.requestAnimationFrame ) {
+			updateCompactLayout( box );
+			return;
+		}
+		compactLayoutFrame = window.requestAnimationFrame( function () {
+			compactLayoutFrame = 0;
+			updateCompactLayout( box );
+		} );
+	}
+
+	function updateCompactLayout( box ) {
+		const content = modalContent( box );
+		const rates = content ? content.querySelector( '.wdc-order-delivery-rates' ) : null;
+		if ( ! rates ) {
+			return;
+		}
+		let titleWidth = 0;
+		let priceWidth = 0;
+		rates.querySelectorAll( '[data-wdc-order-delivery-compact-summary]' ).forEach( function ( summary ) {
+			const title = summary.querySelector( '.wdc-order-delivery-rate__compact-title' );
+			const prices = summary.querySelector( '.wdc-order-delivery-rate__prices' );
+			if ( title && title.getBoundingClientRect ) {
+				titleWidth = Math.max( titleWidth, Math.ceil( title.getBoundingClientRect().width ) );
+			}
+			if ( prices && prices.getBoundingClientRect ) {
+				priceWidth = Math.max( priceWidth, Math.ceil( prices.getBoundingClientRect().width ) );
+			}
+		} );
+		if ( titleWidth > 0 ) {
+			rates.style.setProperty( '--wdc-order-compact-title-width', titleWidth + 'px' );
+		}
+		if ( priceWidth > 0 ) {
+			rates.style.setProperty( '--wdc-order-compact-price-width', priceWidth + 'px' );
+		}
+	}
+
+	function resetModal( box ) {
+		const content = modalContent( box );
+		if ( content ) {
+			content.innerHTML = '';
+		}
+		selectedRates.delete( box );
+		selectedPickupPoints.delete( box );
+		normalizedShippingAddresses.delete( box );
+		updatePickupSelectors( box );
+		updateCourierAddressBlocks( box );
+		updateSaveButton( box );
+		updateLocationGate( box );
+	}
+
+	function renderPreview( box, html ) {
+		const content = modalContent( box );
+		if ( ! content ) {
+			return;
+		}
+		content.innerHTML = html || '';
+		selectedRates.delete( box );
+		selectedPickupPoints.delete( box );
+		normalizedShippingAddresses.delete( box );
+		updatePickupSelectors( box );
+		updateCourierAddressBlocks( box );
+		updateSaveButton( box );
+		updateLocationGate( box );
+		if ( 'compact' === ( viewStates.get( box ) || ( modal( box ) && modal( box ).dataset.view ) ) ) {
+			scheduleCompactLayout( box );
+		}
+	}
+
+	function updatePickupSelectors( box ) {
+		if ( ! box ) {
+			return;
+		}
+		const selectedRate = selectedRates.get( box );
+		const selectedPickup = selectedPickupPoints.get( box );
+		box.querySelectorAll( '[data-wdc-pickup-selector]' ).forEach( function ( node ) {
+			const rate = node.closest( '[data-wdc-order-delivery-rate]' );
+			const visible = !! ( selectedRate && rate && rate.dataset.rateId === selectedRate.id );
+			node.hidden = ! visible;
+			const label = node.querySelector( '[data-wdc-selected-pickup-label]' );
+			const button = node.querySelector( '[data-wdc-open-pickup-picker]' );
+			if ( label ) {
+				label.textContent = visible && selectedPickup ? 'ПВЗ: ' + pickupPointLabel( selectedPickup ) : 'ПВЗ не выбран';
+			}
+			if ( button ) {
+				button.textContent = visible && selectedPickup ? 'Изменить ПВЗ' : 'Выбрать ПВЗ';
+			}
+		} );
+		updateCourierAddressBlocks( box );
+		updateSaveButton( box );
+	}
+
+	function updateCourierAddressBlocks( box ) {
+		if ( ! box ) {
+			return;
+		}
+		const selectedRate = selectedRates.get( box );
+		box.querySelectorAll( '[data-wdc-order-delivery-rate]' ).forEach( function ( rateNode ) {
+			const visible = !! ( selectedRate && rateRequiresAdminAddress( selectedRate ) && rateNode.dataset.rateId === selectedRate.id );
+			let block = rateNode.querySelector( '[data-wdc-courier-address-block]' );
+			if ( visible && ! block ) {
+				block = document.createElement( 'div' );
+				block.className = 'wdc-order-delivery-courier-address';
+				block.setAttribute( 'data-wdc-courier-address-block', '1' );
+				block.innerHTML = [
+					'<strong>Адрес доставки</strong>',
+					'<input type="text" class="widefat" data-wdc-courier-address-line placeholder="Улица, дом, квартира">',
+					'<button type="button" class="button" data-wdc-use-manual-courier-address disabled="disabled">Использовать этот адрес</button>',
+					'<div class="wdc-order-delivery-courier-address__suggestions" data-wdc-courier-address-suggestions></div>',
+					'<div class="wdc-order-delivery-courier-address__status" data-wdc-courier-address-status></div>',
+					'<div class="wdc-order-delivery-courier-address__result" data-wdc-courier-address-result></div>'
+				].join( '' );
+				rateNode.appendChild( block );
+			}
+			if ( ! block ) {
+				return;
+			}
+			block.hidden = ! visible;
+			if ( visible ) {
+				const input = block.querySelector( '[data-wdc-courier-address-line]' );
+				if ( input && ! input.value ) {
+					input.value = shippingAddressLine( currentShippingAddress( box ) );
+				}
+				const normalized = normalizedShippingAddresses.get( box );
+				const status = block.querySelector( '[data-wdc-courier-address-status]' );
+				const result = block.querySelector( '[data-wdc-courier-address-result]' );
+				const manualButton = block.querySelector( '[data-wdc-use-manual-courier-address]' );
+				if ( status ) {
+					status.textContent = normalized ? ( normalized.fallback ? 'Адрес будет сохранен без нормализации.' : 'Адрес нормализован.' ) : 'Проверьте адрес перед сохранением.';
+				}
+				if ( result ) {
+					result.textContent = normalized ? String( normalized.full_address || normalized.address_1 || '' ) : '';
+				}
+				if ( manualButton && normalized ) {
+					manualButton.disabled = true;
+				}
+			}
+		} );
+	}
+
+	function updateSaveButton( box ) {
+		const button = box ? box.querySelector( '[data-wdc-order-delivery-save]' ) : null;
+		if ( ! button ) {
+			return;
+		}
+		const rate = selectedRates.get( box );
+		let enabled = !! rate;
+		if ( enabled && rate.requires_pickup_point ) {
+			enabled = !! selectedPickupPoints.get( box );
+		} else if ( enabled && rateRequiresAdminAddress( rate ) ) {
+			enabled = isValidCourierAddress( normalizedShippingAddresses.get( box ) );
+		} else if ( enabled ) {
+			enabled = true;
+		}
+		button.disabled = ! enabled || activeSaveRequests.has( box );
+		updateCourierLocationWarning( box );
+	}
+
+	function isValidCourierAddress( address ) {
+		if ( ! address ) {
+			return false;
+		}
+		const addressLine = String( address.address_1 || address.full_address || '' ).trim();
+		return addressLine !== '' && ( ( !! address.normalized && ! address.fallback ) || ( !! address.fallback && address.source === 'admin_manual' ) );
+	}
+
+	function updateCourierLocationWarning( box ) {
+		const node = box ? box.querySelector( '[data-wdc-order-delivery-save-warning]' ) : null;
+		if ( ! node ) {
+			return;
+		}
+		const rate = selectedRates.get( box );
+		const address = normalizedShippingAddresses.get( box );
+		if ( ! rate || ! rateRequiresAdminAddress( rate ) || ! isValidCourierAddress( address ) ) {
+			node.hidden = true;
+			node.textContent = '';
+			node.dataset.status = '';
+			return;
+		}
+		const warning = courierLocationWarning( selectedLocations.get( box ) || {}, address || {} );
+		if ( '' === warning ) {
+			node.hidden = true;
+			node.textContent = '';
+			node.dataset.status = '';
+			return;
+		}
+		node.hidden = false;
+		node.textContent = warning;
+		node.dataset.status = 'warning';
+	}
+
+	function courierLocationWarning( location, address ) {
+		if ( ! address || address.fallback || address.source === 'admin_manual' ) {
+			return 'Не удалось подтвердить, что населенный пункт адреса совпадает с расчетом тарифа.';
+		}
+		if ( courierLocationsMatch( location || {}, address || {} ) ) {
+			return '';
+		}
+		const rateLabel = locationLabel( location ) || 'не указан';
+		const addressLabel = addressLocationLabel( address ) || 'не указан';
+		return 'Внимание: населенный пункт в адресе доставки отличается от населенного пункта, для которого рассчитан тариф. Расчет: ' + rateLabel + '. Адрес: ' + addressLabel + '.';
+	}
+
+	function courierLocationsMatch( location, address ) {
+		const locationIds = [
+			location.fias_id,
+			location.location_fias_id,
+			location.city_fias_id,
+			location.settlement_fias_id,
+			location.gar_object_id,
+			location.gar_id
+		].map( normalizeId ).filter( Boolean );
+		const addressIds = [
+			address.location_fias_id,
+			address.city_fias_id,
+			address.settlement_fias_id,
+			address.city_kladr_id,
+			address.settlement_kladr_id,
+			address.location_gar_id,
+			address.gar_object_id,
+			address.gar_id
+		].map( normalizeId ).filter( Boolean );
+		if ( locationIds.length && addressIds.length && locationIds.some( function ( id ) {
+			return addressIds.indexOf( id ) !== -1;
+		} ) ) {
+			return true;
+		}
+		const locationCity = normalizePlaceName( location.city_value || location.place_name || location.city_name || location.display_name || location.label || '' );
+		const addressCity = normalizePlaceName( address.city || address.city_value || address.settlement || '' );
+		const locationRegion = normalizeRegionName( location.region_name || location.state_value || location.display_name || '' );
+		const addressRegion = normalizeRegionName( address.region || address.region_name || '' );
+		return '' !== locationCity && '' !== addressCity && locationCity === addressCity && ( '' === locationRegion || '' === addressRegion || locationRegion === addressRegion );
+	}
+
+	function normalizeId( value ) {
+		return String( value || '' ).trim().toLowerCase();
+	}
+
+	function normalizePlaceName( value ) {
+		return String( value || '' )
+			.toLowerCase()
+			.replace( /ё/g, 'е' )
+			.replace( /\b(город|г|село|с|поселок|посёлок|пгт|деревня|д|станица|ст)\b\.?/g, ' ' )
+			.replace( /[^a-zа-я0-9]+/g, ' ' )
+			.trim();
+	}
+
+	function normalizeRegionName( value ) {
+		return String( value || '' )
+			.toLowerCase()
+			.replace( /ё/g, 'е' )
+			.replace( /\b(область|обл|край|республика|респ|ао|автономный округ|округ)\b\.?/g, ' ' )
+			.replace( /[^a-zа-я0-9]+/g, ' ' )
+			.trim();
+	}
+
+	function addressLocationLabel( address ) {
+		return [ address.region || address.region_name || '', address.city || address.city_value || '' ].filter( function ( part ) {
+			return '' !== String( part || '' ).trim();
+		} ).join( ', ' );
+	}
+
+	function clearCourierAddressSuggestions( block ) {
+		const suggestions = block ? block.querySelector( '[data-wdc-courier-address-suggestions]' ) : null;
+		if ( suggestions ) {
+			suggestions.innerHTML = '';
+		}
+	}
+
+	function renderCourierAddressSuggestions( box, block, items ) {
+		const suggestions = block ? block.querySelector( '[data-wdc-courier-address-suggestions]' ) : null;
+		if ( ! suggestions ) {
+			return;
+		}
+		if ( ! Array.isArray( items ) || items.length === 0 ) {
+			suggestions.innerHTML = '';
+			return;
+		}
+		suggestions.innerHTML = items.map( function ( item ) {
+			return '<button type="button" class="button-link wdc-order-delivery-courier-address__suggestion" data-wdc-courier-address-suggestion data-item="' + escapeAttribute( JSON.stringify( item || {} ) ) + '">' +
+				'<span>' + escapeHtml( item.label || item.value || '' ) + '</span>' +
+				( item.subLabel ? '<small>' + escapeHtml( item.subLabel ) + '</small>' : '' ) +
+				'</button>';
+		} ).join( '' );
+		updateSaveButton( box );
+	}
+
+	function courierAddressState( block ) {
+		if ( ! courierAddressStates.has( block ) ) {
+			courierAddressStates.set( block, {
+				selectedHouseItem: null,
+				selectedHouseBaseQuery: '',
+				selectedHouseDisplayBase: '',
+				selectedHouseContext: {},
+				awaitingFlatSelection: false
+			} );
+		}
+		return courierAddressStates.get( block );
+	}
+
+	function clearCourierAddressState( block ) {
+		if ( block ) {
+			courierAddressStates.delete( block );
+		}
+	}
+
+	function lowerLevelCourierItems( items ) {
+		return items.filter( function ( item ) {
+			return item && ( item.level === 'flat' || item.level === 'room' || item.level === 'premise' );
+		} );
+	}
+
+	function ensureTrailingComma( value ) {
+		const text = String( value || '' ).replace( /\s+/g, ' ' ).replace( /\s*,\s*$/g, '' ).trim();
+		return text ? text + ', ' : '';
+	}
+
+	function normalizeHouseBaseForCompare( value ) {
+		return String( value || '' ).toLowerCase().replace( /\s+/g, ' ' ).replace( /\s*,\s*/g, ', ' ).trim();
+	}
+
+	function startsWithHouseBase( query, base ) {
+		const normalizedQuery = normalizeHouseBaseForCompare( query );
+		const normalizedBase = normalizeHouseBaseForCompare( base );
+		const remainder = normalizedQuery.slice( normalizedBase.length );
+		return !! normalizedBase && normalizedQuery.slice( 0, normalizedBase.length ) === normalizedBase && ( remainder === '' || /^[\s,]+/.test( remainder ) );
+	}
+
+	function queryMatchesCourierHouseBase( query, state ) {
+		return startsWithHouseBase( query, state.selectedHouseBaseQuery ) || startsWithHouseBase( query, state.selectedHouseDisplayBase );
+	}
+
+	function courierAddressPayload( item ) {
+		return item && item.address ? item.address : {};
+	}
+
+	function houseLevelCourierItem( item ) {
+		const clone = JSON.parse( JSON.stringify( item || {} ) );
+		const data = clone.data || {};
+		[
+			'flat',
+			'flat_type',
+			'flat_type_full',
+			'room',
+			'room_number',
+			'room_type',
+			'room_type_full',
+			'premise',
+			'premise_type',
+			'premise_type_full'
+		].forEach( function ( key ) {
+			delete data[ key ];
+		} );
+		data.flat = '';
+		clone.data = data;
+		clone.level = 'house';
+		if ( clone.address ) {
+			clone.address = Object.assign( {}, clone.address, { flat: '', address_2: '', normalized: true, fallback: false, source: 'dadata' } );
+		}
+		return clone;
+	}
+
+	function showCourierFlatHint( block ) {
+		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
+		if ( ! status ) {
+			return;
+		}
+		status.innerHTML = '<span>Уточните квартиру, помещение или офис (если номера нет - </span><button type="button" class="button-link wdc-order-delivery-courier-address__house-finalize" data-wdc-courier-address-house-finalize>нажмите здесь</button><span>)</span>';
+	}
+
+	function finalizeCourierAddress( box, block, item ) {
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
+		const result = block ? block.querySelector( '[data-wdc-courier-address-result]' ) : null;
+		const manualButton = block ? block.querySelector( '[data-wdc-use-manual-courier-address]' ) : null;
+		const address = courierAddressPayload( item );
+		normalizedShippingAddresses.set( box, address );
+		if ( input ) {
+			input.value = String( address.full_address || item.unrestrictedValue || item.value || item.label || address.address_1 || '' );
+		}
+		if ( status ) {
+			status.textContent = 'Адрес нормализован.';
+		}
+		if ( result ) {
+			result.textContent = String( address.full_address || address.address_1 || '' );
+		}
+		if ( manualButton ) {
+			manualButton.disabled = true;
+		}
+		clearCourierAddressSuggestions( block );
+		clearCourierAddressState( block );
+		updateSaveButton( box );
+	}
+
+	function requestCourierLowerLevelAfterHouse( box, block, item ) {
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		const data = item && item.data ? item.data : {};
+		const query = String( item.unrestrictedValue || item.value || item.label || '' );
+		const state = courierAddressState( block );
+		state.selectedHouseItem = item;
+		state.selectedHouseBaseQuery = query;
+		state.selectedHouseDisplayBase = String( item.label || query );
+		state.selectedHouseContext = {
+			selected_level: 'house',
+			desired_level: 'flat',
+			house_fias_id: String( data.house_fias_id || '' ),
+			house_kladr_id: String( data.house_kladr_id || '' ),
+			city_fias_id: String( data.city_fias_id || data.settlement_fias_id || '' ),
+			city_kladr_id: String( data.city_kladr_id || data.settlement_kladr_id || '' )
+		};
+		state.awaitingFlatSelection = true;
+		if ( input ) {
+			input.value = ensureTrailingComma( query );
+			input.focus();
+		}
+		showCourierFlatHint( block );
+		requestCourierAddressSuggestions( box, block, 'address_next', query, state.selectedHouseContext )
+			.then( function ( items ) {
+				const lower = lowerLevelCourierItems( items );
+				if ( lower.length ) {
+					renderCourierAddressSuggestions( box, block, lower );
+					showCourierFlatHint( block );
+					return;
+				}
+				finalizeCourierAddress( box, block, item );
+			} )
+			.catch( function () {
+				finalizeCourierAddress( box, block, item );
+			} );
+	}
+
+	function chooseCourierAddressSuggestion( button ) {
+		const box = closestBox( button );
+		const block = button ? button.closest( '[data-wdc-courier-address-block]' ) : null;
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		if ( ! box || ! block ) {
+			return;
+		}
+		let item = {};
+		try {
+			item = JSON.parse( button.dataset.item || '{}' ) || {};
+		} catch ( error ) {
+			item = {};
+		}
+		if ( item.level === 'street' ) {
+			clearCourierAddressState( block );
+			if ( input ) {
+				input.value = ensureTrailingComma( item.unrestrictedValue || item.value || item.label || '' );
+				input.focus();
+			}
+			runCourierAddressSuggest( box, block, 'address', input ? input.value : '', {} );
+			return;
+		}
+		if ( item.level === 'house' ) {
+			requestCourierLowerLevelAfterHouse( box, block, item );
+			return;
+		}
+		if ( item.level === 'flat' || item.level === 'room' || item.level === 'premise' ) {
+			finalizeCourierAddress( box, block, item );
+		}
+	}
+
+	function selectedRateChanged( input ) {
+		const box = closestBox( input );
+		if ( ! box ) {
+			return;
+		}
+		const rate = input.closest( '[data-wdc-order-delivery-rate]' );
+		if ( ! rate ) {
+			return;
+		}
+		const payload = parseJson( rate.dataset.ratePayload || '{}' );
+		payload.id = rate.dataset.rateId || payload.id || input.value || '';
+		payload.delivery_type = rate.dataset.deliveryType || payload.delivery_type || '';
+		payload.requires_pickup_point = '1' === String( rate.dataset.requiresPickup || '' ) || true === payload.requires_pickup_point;
+		payload.order_recalculation_requires_address = '1' === String( rate.dataset.requiresAdminAddress || '' ) || true === payload.order_recalculation_requires_address;
+		payload.carrier_key = rate.dataset.carrierKey || payload.carrier_key || '';
+		payload.service_key = rate.dataset.serviceKey || payload.service_key || '';
+		payload.selected_tariff = selectedTariffPayload( rate );
+		selectedRates.set( box, payload );
+		if ( payload.requires_pickup_point ) {
+			if ( selectedPickupPoints.has( box ) && ! pickupMatchesRate( selectedPickupPoints.get( box ), payload ) ) {
+				selectedPickupPoints.delete( box );
+			}
+			prefillCurrentPickupIfAvailable( box );
+			normalizedShippingAddresses.delete( box );
+		} else {
+			selectedPickupPoints.delete( box );
+			normalizedShippingAddresses.delete( box );
+		}
+		updatePickupSelectors( box );
+		updateCourierAddressBlocks( box );
+	}
+
+	function prefillCurrentPickupIfAvailable( box ) {
+		if ( selectedPickupPoints.has( box ) || locationChanged( box ) ) {
+			return;
+		}
+		const rate = selectedRates.get( box );
+		const pickup = normalizePickupPoint( jsonScriptPayload( box, '[data-wdc-order-delivery-current-pickup]' ) );
+		if ( pickupMatchesRate( pickup, rate ) ) {
+			selectedPickupPoints.set( box, pickup );
+		}
+	}
+
+	function carrierFromRate( rate ) {
+		return String( rate && ( rate.carrier_key || rate.service_key || '' ) || '' ).toLowerCase();
+	}
+
+	function carrierFromPickup( pickup ) {
+		return String( pickup && ( pickup.carrier_key || pickup.carrier || pickup.service_key || '' ) || '' ).toLowerCase();
+	}
+
+	function familyFromPickup( pickup ) {
+		return String( pickup && pickup.pickup_family || '' ).toLowerCase();
+	}
+
+	function pickupCodeForCarrier( pickup, carrier ) {
+		if ( 'dpd' === carrier ) {
+			return String( pickup && ( pickup.terminal_code || pickup.point_code || '' ) || '' ).trim();
+		}
+		if ( 'cdek' === carrier ) {
+			return String( pickup && ( pickup.cdek_code || pickup.point_code || pickup.delivery_point || '' ) || '' ).trim();
+		}
+		return String( pickup && ( pickup.point_code || pickup.point_postcode || pickup.postcode || pickup.postal_code || '' ) || '' ).trim();
+	}
+
+	function pickupMatchesRate( pickup, rate ) {
+		const carrier = carrierFromRate( rate );
+		if ( ! carrier || ! pickup ) {
+			return false;
+		}
+		const pickupCarrier = carrierFromPickup( pickup );
+		const pickupFamily = familyFromPickup( pickup );
+		if ( 'dpd' === carrier ) {
+			return pickupCodeForCarrier( pickup, carrier ) !== '' && ( 'dpd' === pickupCarrier || 'dpd:pickup' === pickupFamily || String( pickup.terminal_code || '' ).trim() !== '' );
+		}
+		if ( 'cdek' === carrier ) {
+			return pickupCodeForCarrier( pickup, carrier ) !== '' && ( 'cdek' === pickupCarrier || 'cdek:pickup' === pickupFamily || String( pickup.cdek_code || pickup.delivery_point || '' ).trim() !== '' );
+		}
+		if ( carrier.indexOf( 'russian_post' ) === 0 || 'russian_post' === carrier ) {
+			return pickupCodeForCarrier( pickup, carrier ) !== '' && pickupCarrier !== 'dpd' && pickupCarrier !== 'cdek' && pickupFamily !== 'dpd:pickup' && pickupFamily !== 'cdek:pickup' && ( ! pickupCarrier || pickupCarrier.indexOf( 'russian_post' ) === 0 || 'russian_post' === pickupCarrier );
+		}
+		return pickupCodeForCarrier( pickup, carrier ) !== '' && pickupCarrier === carrier;
+	}
+
+	function rateIdentity( rate ) {
+		return {
+			id: String( rate && rate.id || '' ),
+			carrierKey: String( rate && rate.carrier_key || '' ).toLowerCase(),
+			deliveryType: String( rate && rate.delivery_type || '' ).toLowerCase(),
+			pickupFamily: ratePickupFamily( rate ),
+			tariffCode: String( rate && rate.selected_tariff && rate.selected_tariff.object_code || '' )
+		};
+	}
+
+	function ratePickupFamily( rate ) {
+		return String( rate && ( rate.pickup_family || rate.rate_family || rate.family || ( rate.rate_meta && rate.rate_meta.pickup_family ) || ( rate.rate_meta && rate.rate_meta.pickup_provider_query && rate.rate_meta.pickup_provider_query.pickup_family ) || ( rate.carrier_key ? rate.carrier_key + ':pickup' : '' ) ) || '' ).toLowerCase();
+	}
+
+	function selectedTariffPayload( rate ) {
+		const explicit = rate.querySelector( '.wdc-order-delivery-tariff input[type="radio"]:checked' );
+		const fallback = rate.querySelector( '.wdc-order-delivery-tariff input[type="radio"]' );
+		const input = explicit || fallback;
+		if ( ! input ) {
+			return null;
+		}
+		const payload = parseJson( input.dataset.tariffPayload || '{}' );
+		payload.object_code = payload.object_code || input.value || '';
+		return payload;
+	}
+
+	function rateRequiresAdminAddress( rate ) {
+		const value = rate && rate.order_recalculation_requires_address;
+		return true === value || '1' === String( value || '' ) || 'true' === String( value || '' ) || 'yes' === String( value || '' );
+	}
+
+	function parseJson( text ) {
+		try {
+			return JSON.parse( text || '{}' ) || {};
+		} catch ( error ) {
+			return {};
+		}
+	}
+
+	function ensureInitialLocation( box ) {
+		if ( selectedLocations.has( box ) ) {
+			return;
+		}
+		const location = jsonScriptPayload( box, '[data-wdc-order-delivery-current-location]' );
+		selectedLocations.set( box, location );
+		updateLocationSummary( box, location );
+	}
+
+	function locationChanged( box ) {
+		const current = jsonScriptPayload( box, '[data-wdc-order-delivery-current-location]' );
+		const selected = selectedLocations.get( box ) || {};
+		return locationSignature( current ) !== locationSignature( selected );
+	}
+
+	function locationSignature( location ) {
+		if ( ! location ) {
+			return '';
+		}
+		return [
+			location.location_id || location.id || '',
+			location.fias_id || '',
+			location.gar_object_id || location.gar_id || '',
+			location.postal_code || location.postcode || '',
+			locationLabel( location )
+		].map( function ( value ) {
+			return String( value || '' ).trim().toLowerCase();
+		} ).join( '|' );
+	}
+
+	function updateLocationSummary( box, location ) {
+		const current = currentLocationNode( box );
+		if ( current ) {
+			current.textContent = locationLabel( location ) || 'Не указан';
+		}
+		const input = box.querySelector( '[data-wdc-order-delivery-location-input]' );
+		if ( input && locationLabel( location ) ) {
+			input.value = locationLabel( location );
+		}
+	}
+
+	function locationLabel( location ) {
+		if ( ! location ) {
+			return '';
+		}
+		return String( location.display_name || location.label || location.option_label || location.city_value || location.city_name || location.place_name || '' );
+	}
+
+	function positiveLocationId( value ) {
+		const id = parseInt( value, 10 );
+		return Number.isFinite( id ) && id > 0 ? id : 0;
+	}
+
+	function mergeMeaningfulFields( base, extra ) {
+		const merged = Object.assign( {}, base || {} );
+		Object.keys( extra || {} ).forEach( function ( key ) {
+			const value = extra[ key ];
+			if ( value !== null && value !== undefined && value !== '' ) {
+				merged[ key ] = value;
+			}
+		} );
+		return merged;
+	}
+
+	function syncPreviewLocation( box, previewLocation ) {
+		if ( ! box || ! previewLocation || typeof previewLocation !== 'object' || Array.isArray( previewLocation ) ) {
+			return;
+		}
+		const currentLocation = selectedLocations.get( box ) || {};
+		const mergedLocation = mergeMeaningfulFields( previewLocation, currentLocation );
+		const currentId = positiveLocationId( currentLocation.id || currentLocation.location_id );
+		const previewId = positiveLocationId( previewLocation.id || previewLocation.location_id );
+		const resolvedId = currentId || previewId;
+		if ( resolvedId > 0 ) {
+			mergedLocation.id = resolvedId;
+			mergedLocation.location_id = resolvedId;
+		}
+		selectedLocations.set( box, mergedLocation );
+		updateLocationSummary( box, mergedLocation );
+	}
+
+	function requestPreview( box, button, options ) {
+		options = options || {};
+		if ( ! box ) {
+			return;
+		}
+		ensureInitialLocation( box );
+		const openButton = box ? box.querySelector( '[data-wdc-order-delivery-recalculate]' ) : null;
+		const orderId = openButton ? String( openButton.dataset.orderId || '' ) : '';
+		if ( ! box || ! orderId || activeRequests.has( box ) ) {
+			return;
+		}
+		openModal( box );
+		if ( ! updateLocationGate( box, { focusInvalid: true } ) ) {
+			return;
+		}
+
+		const form = new FormData();
+		form.append( 'action', config.action || 'wdc_order_delivery_recalculate_preview' );
+		form.append( 'nonce', config.nonce || '' );
+		form.append( 'order_id', orderId );
+		form.append( 'selected_location', JSON.stringify( selectedLocations.get( box ) || {} ) );
+		if ( options.selectedPickupPoint ) {
+			form.append( 'selected_pickup_point', JSON.stringify( options.selectedPickupPoint ) );
+		}
+
+		activeRequests.add( box );
+		resetModal( box );
+		setStatus( box, 'Считаем доступные варианты доставки...', 'loading' );
+		setPreviewButtonsLoading( box, true );
+
+		window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: form
+		} )
+			.then( function ( response ) {
+				return response.json();
+			} )
+			.then( function ( payload ) {
+				if ( ! payload || ! payload.success ) {
+					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось пересчитать доставку.' );
+				}
+				renderPreview( box, payload.data && payload.data.html ? payload.data.html : '' );
+				syncPreviewLocation( box, payload.data && payload.data.location );
+				if ( options.restoreDpdPickup && options.selectedPickupPoint ) {
+					restoreDpdPickupPreview( box, options.selectedPickupPoint, options.selectedTariffCode || '' );
+				}
+				if ( options.restoreYandexPickup && options.selectedPickupPoint ) {
+					restoreYandexPickupPreview( box, options.selectedPickupPoint );
+				}
+				if ( options.restorePekPickup && options.selectedPickupPoint ) {
+					restorePekPickupPreview( box, options.selectedPickupPoint );
+				}
+				if ( options.restorePickupSelection && options.selectedPickupPoint && ! selectedPickupPoints.has( box ) ) {
+					restorePickupPreview( box, options.selectedRateIdentity || {}, options.selectedPickupPoint );
+				}
+				if ( payload.data && payload.data.location && payload.data.location.label ) {
+					setStatus( box, 'Расчет выполнен для: ' + payload.data.location.label, 'success' );
+				} else {
+					setStatus( box, 'Preview рассчитан. Сохранение доставки будет добавлено следующим шагом.', 'success' );
+				}
+				if ( 'compact' === ( viewStates.get( box ) || ( modal( box ) && modal( box ).dataset.view ) ) ) {
+					scheduleCompactLayout( box );
+				}
+			} )
+			.catch( function ( error ) {
+				setStatus( box, error && error.message ? error.message : 'Не удалось пересчитать доставку.', 'error' );
+			} )
+			.finally( function () {
+				activeRequests.delete( box );
+				setPreviewButtonsLoading( box, false );
+			} );
+	}
+
+	function restoreDpdPickupPreview( box, point, tariffCode ) {
+		const content = modalContent( box );
+		if ( ! content ) {
+			return;
+		}
+		const rate = content.querySelector( '[data-wdc-order-delivery-rate][data-carrier-key="dpd"][data-delivery-type="pickup"]' );
+		if ( ! rate ) {
+			return;
+		}
+		const rateInput = rate.querySelector( 'input[name="wdc_order_delivery_preview_rate"]' );
+		if ( rateInput ) {
+			rateInput.checked = true;
+		}
+		if ( tariffCode ) {
+			const tariff = rate.querySelector( '.wdc-order-delivery-tariff input[value="' + cssEscape( tariffCode ) + '"]' );
+			if ( tariff ) {
+				tariff.checked = true;
+			}
+		}
+		selectedRateChanged( rateInput || rate );
+		selectedPickupPoints.set( box, point );
+		updatePickupSelectors( box );
+		updateSaveButton( box );
+	}
+
+	function restorePickupPreview( box, identity, point ) {
+		const rate = findEquivalentPickupRate( box, identity, point );
+		const input = rate && rate.querySelector( 'input[name="wdc_order_delivery_preview_rate"]' );
+		if ( ! input ) {
+			return false;
+		}
+		input.checked = true;
+		restoreSelectedTariff( rate, identity );
+		selectedRateChanged( input );
+		const freshRate = selectedRates.get( box );
+		if ( ! pickupMatchesRate( point, freshRate ) ) {
+			selectedPickupPoints.delete( box );
+			updatePickupSelectors( box );
+			updateSaveButton( box );
+			return false;
+		}
+		selectedPickupPoints.set( box, point );
+		updatePickupSelectors( box );
+		updateSaveButton( box );
+		return true;
+	}
+
+	function findEquivalentPickupRate( box, identity, point ) {
+		const content = modalContent( box );
+		if ( ! content ) {
+			return null;
+		}
+		const candidates = Array.prototype.slice.call( content.querySelectorAll( '[data-wdc-order-delivery-rate][data-delivery-type="pickup"]' ) );
+		const pointCarrier = carrierFromPickup( point );
+		const pointFamily = familyFromPickup( point );
+		let fallback = null;
+		for ( let i = 0; i < candidates.length; i += 1 ) {
+			const candidate = candidates[ i ];
+			const payload = parseJson( candidate.dataset.ratePayload || '{}' );
+			payload.id = candidate.dataset.rateId || payload.id || '';
+			payload.delivery_type = candidate.dataset.deliveryType || payload.delivery_type || '';
+			payload.requires_pickup_point = '1' === String( candidate.dataset.requiresPickup || '' ) || true === payload.requires_pickup_point;
+			payload.order_recalculation_requires_address = '1' === String( candidate.dataset.requiresAdminAddress || '' ) || true === payload.order_recalculation_requires_address;
+			payload.carrier_key = candidate.dataset.carrierKey || payload.carrier_key || '';
+			payload.service_key = candidate.dataset.serviceKey || payload.service_key || '';
+			payload.selected_tariff = selectedTariffPayload( candidate );
+			if ( ! payload.requires_pickup_point || ! pickupMatchesRate( point, payload ) ) {
+				continue;
+			}
+			if ( identity.id && payload.id === identity.id ) {
+				return candidate;
+			}
+			if (
+				identity.carrierKey
+				&& identity.carrierKey === String( payload.carrier_key || '' ).toLowerCase()
+				&& ( ! identity.pickupFamily || identity.pickupFamily === ratePickupFamily( payload ) || identity.pickupFamily === pointFamily )
+				&& ( ! identity.tariffCode || identity.tariffCode === String( payload.selected_tariff && payload.selected_tariff.object_code || '' ) )
+			) {
+				fallback = fallback || candidate;
+			} else if ( ! identity.carrierKey && pointCarrier && pointCarrier === String( payload.carrier_key || '' ).toLowerCase() ) {
+				fallback = fallback || candidate;
+			}
+		}
+
+		return fallback;
+	}
+
+	function restoreSelectedTariff( rate, identity ) {
+		const tariffCode = String( identity && identity.tariffCode || '' );
+		if ( ! tariffCode ) {
+			return;
+		}
+		const tariff = rate.querySelector( '.wdc-order-delivery-tariff input[value="' + cssEscape( tariffCode ) + '"]' );
+		if ( tariff ) {
+			tariff.checked = true;
+		}
+	}
+
+	function restoreYandexPickupPreview( box, point ) {
+		const content = modalContent( box );
+		const rate = content && content.querySelector( '[data-wdc-order-delivery-rate][data-carrier-key="yandex_delivery"][data-delivery-type="pickup"]' );
+		const input = rate && rate.querySelector( 'input[name="wdc_order_delivery_preview_rate"]' );
+		if ( ! input ) { return; }
+		input.checked = true;
+		selectedRateChanged( input );
+		selectedPickupPoints.set( box, point );
+		updatePickupSelectors( box );
+		updateSaveButton( box );
+	}
+
+	function restorePekPickupPreview( box, point ) {
+		const content = modalContent( box );
+		const rate = content && content.querySelector( '[data-wdc-order-delivery-rate][data-carrier-key="pek"][data-delivery-type="pickup"]' );
+		const input = rate && rate.querySelector( 'input[name="wdc_order_delivery_preview_rate"]' );
+		if ( ! input ) { return; }
+		input.checked = true;
+		selectedRateChanged( input );
+		selectedPickupPoints.set( box, point );
+		updatePickupSelectors( box );
+		updateSaveButton( box );
+	}
+
+	function cssEscape( value ) {
+		if ( window.CSS && window.CSS.escape ) {
+			return window.CSS.escape( String( value || '' ) );
+		}
+		return String( value || '' ).replace( /["\\]/g, '\\$&' );
+	}
+
+	function searchLocations( box, query ) {
+		const results = box.querySelector( '[data-wdc-order-delivery-location-results]' );
+		const location = selectedLocations.get( box ) || {};
+		if ( ! results ) {
+			return;
+		}
+		if ( query.trim().length < 3 ) {
+			results.innerHTML = '<p class="description">Введите минимум 3 символа.</p>';
+			return;
+		}
+
+		const form = new FormData();
+		form.append( 'action', config.locationSearchAction || 'wdc_order_delivery_recalculate_location_search' );
+		form.append( 'nonce', config.nonce || '' );
+		form.append( 'query', query );
+		form.append( 'country_code', location.country_code || 'RU' );
+		results.innerHTML = '<p class="description">Идет поиск...</p>';
+
+		window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: form
+		} )
+			.then( function ( response ) {
+				return response.json();
+			} )
+			.then( function ( payload ) {
+				if ( ! payload || ! payload.success ) {
+					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось найти населенный пункт.' );
+				}
+				renderLocationResults( box, payload.data || {} );
+			} )
+			.catch( function ( error ) {
+				results.innerHTML = '<p class="description">' + escapeHtml( error && error.message ? error.message : 'Не удалось найти населенный пункт.' ) + '</p>';
+			} );
+	}
+
+	function renderLocationResults( box, payload ) {
+		const results = box.querySelector( '[data-wdc-order-delivery-location-results]' );
+		if ( ! results ) {
+			return;
+		}
+		const items = [];
+		( payload.groups || [] ).forEach( function ( group ) {
+			( group.items || group.locations || [] ).forEach( function ( item ) {
+				items.push( item );
+			} );
+		} );
+		if ( ! items.length ) {
+			results.innerHTML = '<p class="description">Населенные пункты не найдены.</p>';
+			return;
+		}
+		results.innerHTML = items.slice( 0, 20 ).map( function ( item ) {
+			return '<button type="button" class="button-link wdc-order-delivery-location__result" data-wdc-order-delivery-location-option data-location="' + escapeAttribute( JSON.stringify( item ) ) + '">' + escapeHtml( locationLabel( item ) ) + '</button>';
+		} ).join( '' );
+	}
+
+	function escapeHtml( value ) {
+		return String( value ).replace( /[&<>"']/g, function ( char ) {
+			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ char ];
+		} );
+	}
+
+	function escapeAttribute( value ) {
+		return escapeHtml( value );
+	}
+
+	function orderId( box ) {
+		const openButton = box ? box.querySelector( '[data-wdc-order-delivery-recalculate]' ) : null;
+		return openButton ? String( openButton.dataset.orderId || '' ) : '';
+	}
+
+	function currentShippingAddress( box ) {
+		return jsonScriptPayload( box, '[data-wdc-order-delivery-current-shipping-address]' );
+	}
+
+	function shippingAddressLine( address ) {
+		return [
+			address.postcode || '',
+			address.region || '',
+			address.city || '',
+			address.address_1 || '',
+			address.address_2 || ''
+		].map( function ( part ) {
+			return String( part || '' ).trim();
+		} ).filter( Boolean ).join( ', ' );
+	}
+
+	function pickupPointLabel( point ) {
+		if ( isYandexPickupPoint( point ) ) {
+			return String( point.point_address || point.address || point.full_address || point.point_name || point.name || '' );
+		}
+		return String( point.point_address || point.address || point.point_name || point.point_code || '' );
+	}
+
+	function pickupPointDisplayCode( point ) {
+		if ( isYandexPickupPoint( point ) ) {
+			return '';
+		}
+		if ( isDpdPickupPoint( point ) ) {
+			return String( point.terminal_code || point.point_code || '' );
+		}
+		return String( point.point_code || point.cdek_code || point.point_postcode || point.postcode || point.postal_code || '' );
+	}
+
+	function pickupPointTitle( point ) {
+		const carrier = String( point.carrier_key || point.carrier || '' );
+		if ( isYandexPickupPoint( point ) ) {
+			return firstMeaningfulText( point.point_title, point.card_title, point.display_title ) || 'Выдача посылок Яндекс.Доставки';
+		}
+		if ( isDpdPickupPoint( point ) ) {
+			const type = String( point.marker_type || point.point_type || point.type || '' ).toLowerCase();
+			return 'terminal' === type || 'terminal_self_delivery' === type ? 'Терминал DPD' : 'Пункт выдачи DPD';
+		}
+		if ( 'cdek' === carrier ) {
+			const type = String( point.marker_type || point.point_type || point.cdek_type || point.type || '' ).toLowerCase();
+			return ( 'postamat' === type || 'postomat' === type || 'locker' === type ) ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
+		}
+		if ( point.point_title || point.card_title || point.point_type_label ) {
+			return String( point.point_title || point.card_title || point.point_type_label );
+		}
+		return String( point.point_type || '' ).toUpperCase() === 'APS' ? 'Почтомат Почты России' : 'Отделение Почты России';
+	}
+
+	function pickupPointCodeLabel( point ) {
+		return isDpdPickupPoint( point ) ? 'Код пункта:' : 'Код/индекс:';
+	}
+
+	function isDpdPickupPoint( point ) {
+		const carrier = String( point && ( point.carrier_key || point.carrier || point.service_key || '' ) || '' ).toLowerCase();
+		const family = String( point && point.pickup_family || '' ).toLowerCase();
+		return 'dpd' === carrier || 'dpd:pickup' === family || String( point && point.terminal_code || '' ).trim() !== '';
+	}
+
+	function isYandexPickupPoint( point ) {
+		const carrier = String( point && ( point.carrier_key || point.carrier || point.service_key || '' ) || '' ).toLowerCase();
+		const family = String( point && point.pickup_family || '' ).toLowerCase();
+		return 'yandex_delivery' === carrier || 'yandex_delivery:pickup' === family;
+	}
+
+	function pickupPointStorageNotice( point ) {
+		const notice = meaningfulText( point && point.storage_notice );
+		if ( notice ) {
+			return notice;
+		}
+		return '';
+	}
+
+	function pickupPointPresentationComment( point ) {
+		return meaningfulText( point && point.presentation_comment );
+	}
+
+	function meaningfulText( value ) {
+		if ( value === null || value === undefined || Array.isArray( value ) || typeof value === 'object' ) {
+			return '';
+		}
+		const text = String( value ).trim();
+		if ( ! text ) {
+			return '';
+		}
+		const normalized = text.replace( ',', '.' );
+		if ( normalized !== '' && ! Number.isNaN( Number( normalized ) ) && Number( normalized ) === 0 ) {
+			return '';
+		}
+		return text;
+	}
+
+	function firstMeaningfulText() {
+		for ( let i = 0; i < arguments.length; i++ ) {
+			const text = meaningfulText( arguments[ i ] );
+			if ( text ) {
+				return text;
+			}
+		}
+		return '';
+	}
+
+	function saveDelivery( button ) {
+		const box = closestBox( button );
+		const rate = box ? selectedRates.get( box ) : null;
+		if ( ! box || ! rate || activeSaveRequests.has( box ) ) {
+			return;
+		}
+		if ( rate.requires_pickup_point && ! selectedPickupPoints.get( box ) ) {
+			setStatus( box, 'Для pickup-варианта выберите ПВЗ.', 'error' );
+			updateSaveButton( box );
+			return;
+		}
+		const form = new FormData();
+		form.append( 'action', config.saveAction || 'wdc_order_delivery_recalculate_save' );
+		form.append( 'nonce', config.nonce || '' );
+		form.append( 'order_id', orderId( box ) );
+		form.append( 'selected_location', JSON.stringify( selectedLocations.get( box ) || {} ) );
+		form.append( 'selected_rate', JSON.stringify( rate ) );
+		form.append( 'selected_tariff', JSON.stringify( rate.selected_tariff || {} ) );
+		form.append( 'selected_pickup_point', JSON.stringify( selectedPickupPoints.get( box ) || {} ) );
+		form.append( 'normalized_shipping_address', JSON.stringify( rateRequiresAdminAddress( rate ) ? ( normalizedShippingAddresses.get( box ) || {} ) : {} ) );
+		activeSaveRequests.add( box );
+		setLoading( button, true );
+		setStatus( box, 'Сохраняем новый вариант доставки...', 'loading' );
+		updateSaveButton( box );
+		window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: form
+		} )
+			.then( function ( response ) {
+				return response.json();
+			} )
+			.then( function ( payload ) {
+				if ( ! payload || ! payload.success ) {
+					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось сохранить доставку.' );
+				}
+				setStatus( box, payload.data && payload.data.message ? payload.data.message : 'Новый вариант доставки сохранен.', 'success' );
+				window.setTimeout( function () {
+					window.location.reload();
+				}, 250 );
+			} )
+			.catch( function ( error ) {
+				setStatus( box, error && error.message ? error.message : 'Не удалось сохранить доставку.', 'error' );
+			} )
+			.finally( function () {
+				activeSaveRequests.delete( box );
+				setLoading( button, false );
+				updateSaveButton( box );
+			} );
+	}
+
+	function requestCourierAddressSuggestions( box, block, stage, query, context ) {
+		const form = new FormData();
+		form.append( 'action', config.addressSuggestAction || 'wdc_order_delivery_recalculate_address_suggest' );
+		form.append( 'nonce', config.nonce || '' );
+		form.append( 'order_id', orderId( box ) );
+		form.append( 'selected_location', JSON.stringify( selectedLocations.get( box ) || {} ) );
+		form.append( 'stage', stage );
+		form.append( 'query', query );
+		form.append( 'context', JSON.stringify( context || {} ) );
+		return window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: form
+		} )
+			.then( function ( response ) {
+				return response.json();
+			} )
+			.then( function ( payload ) {
+				if ( ! payload || ! payload.success ) {
+					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Подсказки адреса недоступны.' );
+				}
+				return Array.isArray( payload.data && payload.data.items ) ? payload.data.items : [];
+			} );
+	}
+
+	function runCourierAddressSuggest( box, block, stage, query, context ) {
+		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
+		const result = block ? block.querySelector( '[data-wdc-courier-address-result]' ) : null;
+		const manualButton = block ? block.querySelector( '[data-wdc-use-manual-courier-address]' ) : null;
+		if ( ! box || ! block || String( query || '' ).trim() === '' ) {
+			return;
+		}
+		normalizedShippingAddresses.delete( box );
+		if ( result ) {
+			result.textContent = '';
+		}
+		if ( status ) {
+			status.textContent = 'Ищем подсказки адреса...';
+		}
+		requestCourierAddressSuggestions( box, block, stage, query, context )
+			.then( function ( items ) {
+				const state = courierAddressState( block );
+				if ( state.awaitingFlatSelection ) {
+					const lower = lowerLevelCourierItems( items );
+					if ( lower.length ) {
+						renderCourierAddressSuggestions( box, block, lower );
+						showCourierFlatHint( block );
+						return;
+					}
+					clearCourierAddressSuggestions( block );
+					showCourierFlatHint( block );
+					return;
+				}
+				renderCourierAddressSuggestions( box, block, items );
+				if ( status ) {
+					status.textContent = items.length ? 'Выберите адрес из подсказок.' : 'Адрес не удалось нормализовать. Можно использовать введенный адрес вручную.';
+				}
+				if ( manualButton ) {
+					manualButton.disabled = items.length ? true : String( query || '' ).trim() === '';
+				}
+			} )
+			.catch( function ( error ) {
+				clearCourierAddressSuggestions( block );
+				clearCourierAddressState( block );
+				if ( status ) {
+					status.textContent = error && error.message ? error.message : 'Адрес не удалось нормализовать. Можно использовать введенный адрес вручную.';
+				}
+				if ( manualButton ) {
+					manualButton.disabled = String( query || '' ).trim() === '';
+				}
+				updateSaveButton( box );
+			} );
+	}
+
+	function geocodeAddress( box, value ) {
+		const form = new FormData();
+		form.append( 'action', config.geocodeAddressAction || 'wdc_order_delivery_recalculate_geocode_address' );
+		form.append( 'nonce', config.nonce || '' );
+		form.append( 'order_id', orderId( box ) );
+		form.append( 'selected_location', JSON.stringify( selectedLocations.get( box ) || {} ) );
+		form.append( 'address_line', value );
+		return window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: form
+		} )
+			.then( function ( response ) {
+				return response.json();
+			} )
+			.then( function ( payload ) {
+				if ( ! payload || ! payload.success || ! payload.data || payload.data.lat === null || payload.data.lng === null ) {
+					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Адрес не найден или геокодинг недоступен.' );
+				}
+			return {
+				lat: parseFloat( payload.data.lat ),
+					lng: parseFloat( payload.data.lng ),
+					label: String( payload.data.formatted_address || payload.data.address || value )
+				};
+			} );
+	}
+
+	function useManualCourierAddress( button ) {
+		const box = closestBox( button );
+		const block = button ? button.closest( '[data-wdc-courier-address-block]' ) : null;
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
+		const result = block ? block.querySelector( '[data-wdc-courier-address-result]' ) : null;
+		const value = input ? String( input.value || '' ).trim() : '';
+		if ( ! box || ! value ) {
+			return;
+		}
+		const location = selectedLocations.get( box ) || {};
+		const currentAddress = currentShippingAddress( box );
+		const payload = {
+			country: String( location.country_code || currentAddress.country || 'RU' ),
+			region: String( location.region_name || location.state_value || currentAddress.region || '' ),
+			city: String( location.city_value || location.city_name || location.display_name || currentAddress.city || '' ),
+			postcode: String( location.postal_code || location.postcode || currentAddress.postcode || '' ),
+			street: value,
+			house: '',
+			flat: '',
+			address_1: value,
+			address_2: '',
+			full_address: value,
+			fias_id: String( location.fias_id || '' ),
+			gar_id: String( location.gar_object_id || location.gar_id || '' ),
+			normalized: false,
+			fallback: true,
+			source: 'admin_manual',
+			message: ''
+		};
+		normalizedShippingAddresses.set( box, payload );
+		clearCourierAddressState( block );
+		button.disabled = true;
+		if ( status ) {
+			status.textContent = 'Адрес будет сохранен без нормализации.';
+		}
+		if ( result ) {
+			result.textContent = value;
+		}
+		updateSaveButton( box );
+	}
+
+	function booleanValue( value ) {
+		if ( true === value || 1 === value ) { return true; }
+		if ( false === value || 0 === value || value === null || value === undefined ) { return false; }
+		const normalized = String( value ).trim().toLowerCase();
+		return '1' === normalized || 'true' === normalized;
+	}
+
+	function normalizePickupPoint( point ) {
+		point = point || {};
+		const lat = point.lat !== null && point.lat !== undefined ? parseFloat( point.lat ) : null;
+		const lng = point.lng !== null && point.lng !== undefined ? parseFloat( point.lng ) : null;
+		const postcode = String( point.point_postcode || point.postcode || point.postal_code || '' );
+		const terminalCode = String( point.terminal_code || point.terminalCode || point.delivery_point || '' );
+		const pointCode = String( point.point_code || terminalCode || '' );
+		const address = String( point.point_address || point.address || point.full_address || '' );
+		const snapshot = point.snapshot || {};
+		const requiresRateRefresh = Object.prototype.hasOwnProperty.call( point, 'requires_rate_refresh' )
+			? booleanValue( point.requires_rate_refresh )
+			: booleanValue( snapshot.requires_rate_refresh );
+		return {
+			id: String( point.id || pointCode || postcode || address || '' ),
+			carrier_key: String( point.carrier_key || point.carrier || '' ),
+			service_key: String( point.service_key || point.carrier_key || point.carrier || '' ),
+			pickup_family: String( point.pickup_family || ( point.carrier_key ? point.carrier_key + ':pickup' : '' ) ),
+			point_code: pointCode,
+			platform_station_id: String( point.platform_station_id || pointCode || '' ),
+			terminal_code: terminalCode,
+			point_type: String( point.point_type || 'OPS' ),
+			point_type_label: String( point.point_type_label || '' ),
+			point_title: String( point.point_title || point.card_title || '' ),
+			card_title: String( point.card_title || '' ),
+			display_title: String( point.display_title || '' ),
+			display_code: String( point.display_code || '' ),
+			marker_type: String( point.marker_type || '' ),
+			point_name: String( point.point_name || point.name || postcode || point.point_code || '' ),
+			name: String( point.name || point.point_name || '' ),
+			point_address: address,
+			full_address: String( point.full_address || address || '' ),
+			point_postcode: postcode,
+			postcode: postcode,
+			postal_code: postcode,
+			address: address,
+			city_name: String( point.city_name || point.city || '' ),
+			region_name: String( point.region_name || '' ),
+			lat: Number.isFinite( lat ) ? lat : null,
+			lng: Number.isFinite( lng ) ? lng : null,
+			work_time: firstMeaningfulText( point.work_time ),
+			description: firstMeaningfulText( point.description, point.point_comment, point.cdek_note ),
+			presentation_comment: meaningfulText( point.presentation_comment ),
+			storage_notice: meaningfulText( point.storage_notice ),
+			raw_sanitized: point.raw_sanitized || point.raw || {},
+			cdek_code: String( point.cdek_code || '' ),
+			cdek_uuid: String( point.cdek_uuid || '' ),
+			cdek_type: String( point.cdek_type || '' ),
+			cdek_owner_code: String( point.cdek_owner_code || '' ),
+			cdek_nearest_station: String( point.cdek_nearest_station || '' ),
+			cdek_note: String( point.cdek_note || '' ),
+			dpd_source: String( point.dpd_source || point.source || '' ),
+			operator_id: String( point.operator_id || '' ),
+			requires_rate_refresh: requiresRateRefresh,
+			snapshot: snapshot,
+			point_raw: point
+		};
+	}
+
+	function openPickupPicker( box ) {
+		const rate = selectedRates.get( box );
+		if ( ! rate || ! rate.requires_pickup_point ) {
+			return;
+		}
+		const location = selectedLocations.get( box ) || {};
+		const root = document.createElement( 'div' );
+		root.className = 'wdc-order-delivery-pickup-picker';
+		root.innerHTML = [
+			'<div class="wdc-order-delivery-pickup-picker__overlay" data-wdc-pickup-picker-close></div>',
+			'<div class="wdc-order-delivery-pickup-picker__dialog" role="dialog" aria-modal="true" aria-label="Выбор ПВЗ">',
+			'<button type="button" class="button-link wdc-order-delivery-pickup-picker__close" data-wdc-pickup-picker-close aria-label="Закрыть">×</button>',
+			'<h2>Выбор ПВЗ</h2>',
+			'<div class="wdc-order-delivery-pickup-picker__search"><input type="search" data-wdc-pickup-picker-query placeholder="Поиск адреса или индекса"><button type="button" class="button" data-wdc-pickup-picker-search>Найти</button></div>',
+			'<div class="wdc-order-delivery-pickup-picker__status" data-wdc-pickup-picker-status></div>',
+			'<div class="wdc-order-delivery-pickup-picker__layout">',
+			'<div class="wdc-order-delivery-pickup-picker__map" data-wdc-pickup-picker-map></div>',
+			'<div class="wdc-order-delivery-pickup-picker__side">',
+			'<div class="wdc-order-delivery-pickup-picker__list" data-wdc-pickup-picker-list></div>',
+			'<div class="wdc-order-delivery-pickup-picker__footer"><button type="button" class="button button-primary" data-wdc-pickup-picker-confirm disabled>Выбрать этот ПВЗ</button></div>',
+			'</div>',
+			'</div>',
+			'</div>'
+		].join( '' );
+		document.body.appendChild( root );
+		const query = root.querySelector( '[data-wdc-pickup-picker-query]' );
+		const status = root.querySelector( '[data-wdc-pickup-picker-status]' );
+		const mapElement = root.querySelector( '[data-wdc-pickup-picker-map]' );
+		const list = root.querySelector( '[data-wdc-pickup-picker-list]' );
+		const confirmButton = root.querySelector( '[data-wdc-pickup-picker-confirm]' );
+		const providerName = config.mapProvider === 'yandex' ? 'yandex' : 'leaflet';
+		const providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[ providerName ];
+		let provider = null;
+		let points = [];
+		let previewPoint = selectedPickupPoints.get( box ) || null;
+		let searchMarker = null;
+		let pointsGeneration = 0;
+		let boundsGeneration = -1;
+		let currentBounds = null;
+		let statusPrefix = '';
+		let boundsRenderFrame = null;
+		let providerBoundsSyncFrame = null;
+		let providerBoundsSyncTimer = null;
+
+		function close() {
+			if ( boundsRenderFrame && window.cancelAnimationFrame ) {
+				window.cancelAnimationFrame( boundsRenderFrame );
+			}
+			if ( providerBoundsSyncFrame && window.cancelAnimationFrame ) {
+				window.cancelAnimationFrame( providerBoundsSyncFrame );
+			}
+			if ( providerBoundsSyncTimer ) {
+				window.clearTimeout( providerBoundsSyncTimer );
+			}
+			if ( provider && provider.destroy ) {
+				provider.destroy();
+			}
+			root.remove();
+		}
+
+		function pointId( point ) {
+			return String( point && ( point.id || point.point_code || point.postcode || point.address ) || '' );
+		}
+
+		function findPoint( id ) {
+			id = String( id || '' );
+			return points.find( function ( point ) {
+				return pointId( point ) === id;
+			} ) || null;
+		}
+
+		function normalizeBounds( bbox ) {
+			if ( bbox && typeof bbox === 'object' && ! Array.isArray( bbox ) ) {
+				const westValue = parseFloat( bbox.west );
+				const southValue = parseFloat( bbox.south );
+				const eastValue = parseFloat( bbox.east );
+				const northValue = parseFloat( bbox.north );
+				if ( [ westValue, southValue, eastValue, northValue ].some( function ( value ) { return Number.isNaN( value ); } ) ) {
+					return null;
+				}
+				return { west: westValue, south: southValue, east: eastValue, north: northValue };
+			}
+			const values = Array.isArray( bbox ) ? bbox : String( bbox || '' ).split( ',' );
+			if ( values.length < 4 ) {
+				return null;
+			}
+			const west = parseFloat( values[0] );
+			const south = parseFloat( values[1] );
+			const east = parseFloat( values[2] );
+			const north = parseFloat( values[3] );
+			if ( [ west, south, east, north ].some( function ( value ) { return Number.isNaN( value ); } ) ) {
+				return null;
+			}
+			return { west: west, south: south, east: east, north: north };
+		}
+
+		function validPointCoordinates( point ) {
+			return point && point.lat !== null && point.lng !== null && Number.isFinite( parseFloat( point.lat ) ) && Number.isFinite( parseFloat( point.lng ) );
+		}
+
+		function pointCoordinates( value ) {
+			if ( ! value ) {
+				return null;
+			}
+			const lat = value.lat !== undefined && value.lat !== null ? parseFloat( value.lat ) : parseFloat( value.latitude );
+			const lng = value.lng !== undefined && value.lng !== null ? parseFloat( value.lng ) : parseFloat( value.longitude );
+			if ( ! Number.isFinite( lat ) || ! Number.isFinite( lng ) ) {
+				return null;
+			}
+			return { lat: lat, lng: lng };
+		}
+
+		function initialMapCenter() {
+			const selectedPoint = pointCoordinates( selectedPickupPoints.get( box ) );
+			if ( selectedPoint ) {
+				return { lat: selectedPoint.lat, lng: selectedPoint.lng, zoom: 15 };
+			}
+			const restoredPoint = pointCoordinates( previewPoint );
+			if ( restoredPoint ) {
+				return { lat: restoredPoint.lat, lng: restoredPoint.lng, zoom: 15 };
+			}
+			const selectedLocation = pointCoordinates( location );
+			if ( selectedLocation ) {
+				return { lat: selectedLocation.lat, lng: selectedLocation.lng, zoom: 12 };
+			}
+			return { lat: 55.0302, lng: 82.9204, zoom: 11 };
+		}
+
+		function pointInsideBounds( point, bounds ) {
+			bounds = normalizeBounds( bounds );
+			if ( ! bounds || ! validPointCoordinates( point ) ) {
+				return false;
+			}
+			const lat = parseFloat( point.lat );
+			const lng = parseFloat( point.lng );
+			return lng >= bounds.west && lng <= bounds.east && lat >= bounds.south && lat <= bounds.north;
+		}
+
+		function visiblePickupPoints() {
+			if ( ! currentBounds || boundsGeneration !== pointsGeneration ) {
+				return points;
+			}
+			return points.filter( function ( point ) {
+				return pointInsideBounds( point, currentBounds );
+			} );
+		}
+
+		function viewportCountMessage( visibleCount, totalCount ) {
+			if ( totalCount > 0 && currentBounds && boundsGeneration === pointsGeneration && visibleCount <= 0 ) {
+				return 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.';
+			}
+			return 'Показано ' + visibleCount + ' из ' + totalCount + ' ПВЗ.';
+		}
+
+		function updateViewportStatus() {
+			if ( ! points.length ) {
+				return;
+			}
+			const visibleCount = visiblePickupPoints().length;
+			const parts = [];
+			if ( statusPrefix ) {
+				parts.push( statusPrefix );
+			}
+			parts.push( viewportCountMessage( visibleCount, points.length ) );
+			if ( ( ! currentBounds || boundsGeneration !== pointsGeneration ) && points.some( function ( point ) { return ! validPointCoordinates( point ); } ) ) {
+				parts.push( 'Часть ПВЗ без координат доступна только в списке.' );
+			}
+			if ( searchMarker ) {
+				parts.push( 'Булавка показывает найденный адрес.' );
+			}
+			status.textContent = parts.join( ' ' );
+		}
+
+		function scheduleBoundsRender( bounds ) {
+			const normalizedBounds = normalizeBounds( bounds );
+			if ( ! normalizedBounds ) {
+				return;
+			}
+			currentBounds = normalizedBounds;
+			boundsGeneration = pointsGeneration;
+			if ( boundsRenderFrame && window.cancelAnimationFrame ) {
+				window.cancelAnimationFrame( boundsRenderFrame );
+			}
+			const render = function () {
+				boundsRenderFrame = null;
+				renderPickupPoints();
+			};
+			if ( window.requestAnimationFrame ) {
+				boundsRenderFrame = window.requestAnimationFrame( render );
+			} else {
+				window.setTimeout( render, 0 );
+			}
+		}
+
+		function syncCurrentProviderBounds() {
+			if ( ! provider || typeof provider.getBounds !== 'function' ) {
+				return false;
+			}
+			const providerBounds = normalizeBounds( provider.getBounds() );
+			if ( ! providerBounds ) {
+				return false;
+			}
+			currentBounds = providerBounds;
+			boundsGeneration = pointsGeneration;
+			renderPickupPoints();
+			return true;
+		}
+
+		function scheduleProviderBoundsSync() {
+			const sync = function () {
+				providerBoundsSyncFrame = null;
+				if ( syncCurrentProviderBounds() ) {
+					return;
+				}
+				if ( providerBoundsSyncTimer ) {
+					window.clearTimeout( providerBoundsSyncTimer );
+				}
+				providerBoundsSyncTimer = window.setTimeout( function () {
+					providerBoundsSyncTimer = null;
+					syncCurrentProviderBounds();
+				}, 50 );
+			};
+			if ( providerBoundsSyncFrame && window.cancelAnimationFrame ) {
+				window.cancelAnimationFrame( providerBoundsSyncFrame );
+			}
+			if ( window.requestAnimationFrame ) {
+				providerBoundsSyncFrame = window.requestAnimationFrame( sync );
+			} else {
+				window.setTimeout( sync, 0 );
+			}
+		}
+
+		function renderPopup( point ) {
+			const displayCode = pickupPointDisplayCode( point );
+			const presentationComment = pickupPointPresentationComment( point );
+			const rows = [
+				'<div class="wdc-pickup-popup">',
+				'<h3 class="wdc-pickup-popup__title">' + escapeHtml( [ pickupPointTitle( point ), displayCode ].filter( Boolean ).join( ' ' ) ) + '</h3>'
+			];
+			if ( presentationComment ) {
+				rows.push( '<div class="wdc-pickup-popup__title-comment">' + escapeHtml( presentationComment ) + '</div>' );
+			}
+			if ( displayCode ) {
+				rows.push( '<div class="wdc-pickup-popup__section"><strong>' + escapeHtml( pickupPointCodeLabel( point ) ) + '</strong><span>' + escapeHtml( displayCode ) + '</span></div>' );
+			}
+			rows.push(
+				'<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span></div>'
+			);
+			if ( point.description ) {
+				rows.push( '<div class="wdc-pickup-popup__section"><strong>Описание:</strong><span>' + escapeHtml( point.description ) + '</span></div>' );
+			}
+			if ( pickupPointStorageNotice( point ) ) {
+				rows.push( '<div class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</div>' );
+			}
+			rows.push( '</div>' );
+			return rows.join( '' );
+		}
+
+		function preview( point ) {
+			previewPoint = point;
+			updateConfirmButton();
+			if ( provider && provider.setActivePoint ) {
+				provider.setActivePoint( pointId( point ) );
+			}
+			if ( provider && provider.focusPoint ) {
+				provider.focusPoint( point );
+			}
+			if ( provider && provider.openPointPopup ) {
+				provider.openPointPopup( point, renderPopup( point ), { forceReopen: true } );
+			}
+			renderPickupPoints();
+			scrollActivePickupRow();
+		}
+
+		function updateConfirmButton() {
+			if ( ! confirmButton ) {
+				return;
+			}
+			confirmButton.disabled = ! previewPoint;
+			confirmButton.textContent = previewPoint ? 'Выбрать этот ПВЗ' : 'Выберите ПВЗ';
+		}
+
+		function choosePoint( point ) {
+			const rate = selectedRates.get( box ) || {};
+			const tariffCode = rate.selected_tariff && rate.selected_tariff.object_code ? String( rate.selected_tariff.object_code ) : '';
+			const carrier = String( point.carrier_key || point.carrier || rate.carrier_key || '' );
+			const requiresRateRefresh = true === point.requires_rate_refresh || 'true' === String( point.requires_rate_refresh || '' ) || [ 'dpd', 'yandex_delivery' ].indexOf( carrier ) !== -1;
+			const identity = rateIdentity( rate );
+			selectedPickupPoints.set( box, point );
+			normalizedShippingAddresses.delete( box );
+			updatePickupSelectors( box );
+			close();
+			if ( requiresRateRefresh ) {
+				requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ), {
+					selectedPickupPoint: point,
+					restoreDpdPickup: 'dpd' === carrier,
+					restoreYandexPickup: 'yandex_delivery' === carrier,
+					restorePekPickup: 'pek' === carrier,
+					restorePickupSelection: true,
+					selectedRateIdentity: identity,
+					selectedTariffCode: tariffCode
+				} );
+			}
+		}
+
+		function runSearch( mode ) {
+			mode = mode === 'location' ? 'location' : 'search';
+			const value = mode === 'location' ? '' : String( query.value || '' ).trim();
+			if ( 'search' === mode ) {
+				if ( ! value ) {
+					status.textContent = 'Введите адрес для поиска.';
+					return;
+				}
+				status.textContent = 'Ищем адрес...';
+				geocodeAddress( box, value )
+					.then( function ( marker ) {
+						searchMarker = marker;
+						if ( points.length ) {
+							renderSearchResults( 'address', value, 'Адрес найден.' );
+							return;
+						}
+						return loadPickupPointsForLocation().then( function () {
+							renderSearchResults( 'address', value, 'Адрес найден.' );
+						} );
+					} )
+					.catch( function ( error ) {
+						searchMarker = null;
+						const message = error && error.message ? error.message : 'Адрес не найден.';
+						if ( points.length ) {
+							renderSearchResults( 'address', value, message );
+							return;
+						}
+						loadPickupPointsForLocation()
+							.then( function () {
+								renderSearchResults( 'address', value, message );
+							} )
+							.catch( function () {
+								status.textContent = message;
+							} );
+					} );
+				return;
+			}
+
+			searchMarker = null;
+			status.textContent = 'Загружаем ПВЗ выбранного населенного пункта...';
+			list.innerHTML = '';
+			loadPickupPointsForLocation()
+				.then( function () {
+					renderSearchResults( 'location', value, '' );
+				} )
+				.catch( function ( error ) {
+					status.textContent = error && error.message ? error.message : 'Не удалось найти ПВЗ.';
+				} );
+		}
+
+		function loadPickupPointsForLocation( modeOverride, queryOverride ) {
+			const form = new FormData();
+			form.append( 'action', config.pickupSearchAction || 'wdc_order_delivery_recalculate_pickup_search' );
+			form.append( 'nonce', config.nonce || '' );
+			form.append( 'order_id', orderId( box ) );
+			form.append( 'selected_location', JSON.stringify( location ) );
+			form.append( 'selected_rate', JSON.stringify( rate ) );
+			form.append( 'mode', modeOverride || 'location' );
+			form.append( 'query', queryOverride || '' );
+			form.append( 'limit', String( 'cdek' === String( rate.carrier_key || rate.service_key || '' ) ? 1000 : 2000 ) );
+			return window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+				method: 'POST',
+				credentials: 'same-origin',
+				body: form
+			} )
+				.then( function ( response ) {
+					return response.json();
+				} )
+				.then( function ( payload ) {
+					if ( ! payload || ! payload.success ) {
+						throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось найти ПВЗ.' );
+					}
+					pointsGeneration += 1;
+					currentBounds = null;
+					boundsGeneration = -1;
+					points = Array.isArray( payload.data && payload.data.points ) ? payload.data.points.map( normalizePickupPoint ) : [];
+					previewPoint = matchSelectedPickup( points, previewPoint || selectedPickupPoints.get( box ) );
+					updateConfirmButton();
+				} );
+		}
+
+		function renderSearchResults( mode, value, geocodeMessage ) {
+					if ( points.length ) {
+						statusPrefix = 'address' === mode && geocodeMessage ? geocodeMessage : '';
+					} else {
+						statusPrefix = '';
+						status.textContent = 'ПВЗ для выбранного населенного пункта не найдены. Попробуйте другой населенный пункт.';
+						if ( 'address' === mode && geocodeMessage ) {
+							status.textContent = geocodeMessage + ' ' + status.textContent;
+						}
+					}
+					if ( provider && provider.renderMarkers ) {
+						provider.renderMarkers( points, { activePointId: previewPoint ? pointId( previewPoint ) : null, searchMarker: searchMarker } );
+						if ( searchMarker && provider.setCenter ) {
+							provider.setCenter( searchMarker.lat, searchMarker.lng, 15 );
+						} else if ( previewPoint && provider.focusPoint ) {
+							provider.focusPoint( previewPoint );
+						} else if ( provider.fitToMarkers ) {
+							provider.fitToMarkers();
+						}
+						scheduleProviderBoundsSync();
+					}
+					renderPickupPoints();
+					updateConfirmButton();
+					if ( previewPoint && ! searchMarker ) {
+						preview( previewPoint );
+					} else if ( 'search' === mode && value && ! searchMarker ) {
+						status.textContent += ' ' + ( geocodeMessage || 'Геокодинг адреса недоступен, выберите ПВЗ из списка.' );
+					}
+		}
+
+		function renderPickupPoints() {
+			if ( ! points.length ) {
+				list.innerHTML = '<p class="description">ПВЗ не найдены.</p>';
+				updateConfirmButton();
+				return;
+			}
+			const visiblePoints = visiblePickupPoints();
+			updateViewportStatus();
+			if ( ! visiblePoints.length ) {
+				list.innerHTML = '<p class="description">' + escapeHtml( viewportCountMessage( 0, points.length ) ) + '</p>';
+				updateConfirmButton();
+				return;
+			}
+			list.innerHTML = [
+				'<div class="wdc-order-delivery-pickup-picker__items">',
+				visiblePoints.map( function ( point, index ) {
+					const active = previewPoint && pointId( previewPoint ) === pointId( point ) ? ' class="is-active"' : '';
+					const displayCode = pickupPointDisplayCode( point );
+					const presentationComment = pickupPointPresentationComment( point );
+					const title = escapeHtml( [ pickupPointTitle( point ), displayCode ].filter( Boolean ).join( ' ' ) );
+					const commentHtml = presentationComment ? '<em class="wdc-pickup-list__title-comment">' + escapeHtml( presentationComment ) + '</em>' : '';
+					const storageHtml = pickupPointStorageNotice( point ) ? '<em class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</em>' : '';
+					if ( isYandexPickupPoint( point ) ) {
+						return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span class="wdc-order-delivery-pickup-picker__heading"><strong>' + title + '</strong>' + commentHtml + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + storageHtml + '</button>';
+					}
+					return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span class="wdc-order-delivery-pickup-picker__heading"><strong>' + title + '</strong>' + commentHtml + storageHtml + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + '</button>';
+				} ).join( '' ),
+				'</div>'
+			].join( '' );
+			updateConfirmButton();
+		}
+
+		function matchSelectedPickup( list, pickup ) {
+			const id = pointId( pickup );
+			if ( ! id ) {
+				return null;
+			}
+			return list.find( function ( point ) {
+				return pointId( point ) === id || ( pickup.point_code && point.point_code === pickup.point_code );
+			} ) || normalizePickupPoint( pickup );
+		}
+
+		function scrollActivePickupRow() {
+			const active = list.querySelector( '.is-active[data-wdc-pickup-picker-row]' );
+			if ( active && active.scrollIntoView ) {
+				active.scrollIntoView( { block: 'nearest' } );
+			}
+		}
+
+		root.addEventListener( 'click', function ( event ) {
+			if ( event.target.closest( '[data-wdc-pickup-picker-close]' ) ) {
+				close();
+				return;
+			}
+			if ( event.target.closest( '[data-wdc-pickup-picker-search]' ) ) {
+				runSearch( 'search' );
+				return;
+			}
+			const chooseButton = event.target.closest( '[data-wdc-pickup-picker-confirm]' );
+			if ( chooseButton ) {
+				if ( previewPoint ) {
+					choosePoint( previewPoint );
+				}
+				return;
+			}
+			const row = event.target.closest( '[data-wdc-pickup-picker-row]' );
+			if ( row ) {
+				const point = findPoint( row.getAttribute( 'data-wdc-point-id' ) );
+				if ( point ) {
+					preview( point );
+				}
+			}
+		} );
+		query.addEventListener( 'keydown', function ( event ) {
+			if ( 'Enter' === event.key ) {
+				event.preventDefault();
+				runSearch( 'search' );
+			}
+		} );
+		window.wdcPickupCheckout = Object.assign( {}, window.wdcPickupCheckout || {}, {
+			mapProvider: providerName,
+			yandexApiKeyPresent: !! config.yandexApiKeyPresent,
+			yandexApiKey: config.yandexApiKey || '',
+			pickupPointTypes: config.pickupPointTypes || {}
+		} );
+		if ( ! providerFactory || typeof providerFactory.create !== 'function' ) {
+			status.textContent = 'Карта недоступна, выберите ПВЗ из списка.';
+		} else if ( providerName === 'yandex' && ! config.yandexApiKeyPresent ) {
+			status.textContent = 'Карта недоступна: для Яндекс.Карт не задан API key. Выберите ПВЗ из списка.';
+		} else {
+			provider = providerFactory.create( mapElement, {
+				center: initialMapCenter(),
+				yandexApiKey: config.yandexApiKey || '',
+				onBoundsChange: function ( bounds ) {
+					scheduleBoundsRender( bounds );
+				}
+			} );
+			if ( provider && provider.onPointClick ) {
+				provider.onPointClick( function ( point ) {
+					preview( point );
+				} );
+			}
+			if ( provider && provider.onPopupSelect ) {
+				provider.onPopupSelect( function ( point ) {
+					choosePoint( point );
+				} );
+			}
+			window.setTimeout( function () {
+				if ( provider && provider.invalidateSize ) {
+					provider.invalidateSize();
+				}
+			}, 50 );
+		}
+		query.value = String( location.display_name || location.city_value || location.city_name || '' );
+		query.focus();
+		runSearch( 'location' );
+	}
+
+	document.addEventListener( 'click', function ( event ) {
+		const openButton = event.target && event.target.closest( '[data-wdc-order-delivery-recalculate]' );
+		if ( openButton ) {
+			event.preventDefault();
+			openDeliveryRecalculationModal( closestBox( openButton ) );
+			return;
+		}
+
+		const previewButton = event.target && event.target.closest( '[data-wdc-order-delivery-modal-preview]' );
+		if ( previewButton ) {
+			event.preventDefault();
+			requestPreview( closestBox( previewButton ), previewButton );
+			return;
+		}
+
+		const viewToggle = event.target && event.target.closest( '[data-wdc-order-delivery-view-toggle]' );
+		if ( viewToggle ) {
+			event.preventDefault();
+			toggleDeliveryView( viewToggle );
+			return;
+		}
+
+		const editButton = event.target && event.target.closest( '[data-wdc-order-delivery-location-edit]' );
+		if ( editButton ) {
+			event.preventDefault();
+			const box = closestBox( editButton );
+			const search = box && box.querySelector( '[data-wdc-order-delivery-location-search]' );
+			if ( search ) {
+				search.hidden = ! search.hidden;
+				const input = search.querySelector( '[data-wdc-order-delivery-location-input]' );
+				if ( ! search.hidden && input && input.focus ) {
+					input.focus();
+				}
+			}
+			return;
+		}
+
+		const option = event.target && event.target.closest( '[data-wdc-order-delivery-location-option]' );
+		if ( option ) {
+			event.preventDefault();
+			const box = closestBox( option );
+			let location = {};
+			try {
+				location = JSON.parse( option.dataset.location || '{}' ) || {};
+			} catch ( error ) {
+				location = {};
+			}
+			if ( box ) {
+				selectedLocations.set( box, location );
+				updateLocationSummary( box, location );
+				const search = box.querySelector( '[data-wdc-order-delivery-location-search]' );
+				if ( search ) {
+					search.hidden = true;
+				}
+				resetModal( box );
+				setStatus( box, '', '' );
+				updateLocationGate( box );
+			}
+			return;
+		}
+
+		const pickupButton = event.target && event.target.closest( '[data-wdc-open-pickup-picker]' );
+		if ( pickupButton ) {
+			event.preventDefault();
+			openPickupPicker( closestBox( pickupButton ) );
+			return;
+		}
+
+		const courierSuggestionButton = event.target && event.target.closest( '[data-wdc-courier-address-suggestion]' );
+		if ( courierSuggestionButton ) {
+			event.preventDefault();
+			chooseCourierAddressSuggestion( courierSuggestionButton );
+			return;
+		}
+
+		const courierHouseFinalizeButton = event.target && event.target.closest( '[data-wdc-courier-address-house-finalize]' );
+		if ( courierHouseFinalizeButton ) {
+			event.preventDefault();
+			const box = closestBox( courierHouseFinalizeButton );
+			const block = courierHouseFinalizeButton.closest( '[data-wdc-courier-address-block]' );
+			const state = block ? courierAddressState( block ) : null;
+			if ( box && block && state && state.selectedHouseItem ) {
+				const input = block.querySelector( '[data-wdc-courier-address-line]' );
+				if ( input ) {
+					input.value = String( state.selectedHouseBaseQuery || state.selectedHouseDisplayBase || input.value || '' ).replace( /\s*,\s*$/g, '' ).trim();
+				}
+				finalizeCourierAddress( box, block, houseLevelCourierItem( state.selectedHouseItem ) );
+			}
+			return;
+		}
+
+		const manualCourierButton = event.target && event.target.closest( '[data-wdc-use-manual-courier-address]' );
+		if ( manualCourierButton ) {
+			event.preventDefault();
+			useManualCourierAddress( manualCourierButton );
+			return;
+		}
+
+		const saveButton = event.target && event.target.closest( '[data-wdc-order-delivery-save]' );
+		if ( saveButton ) {
+			event.preventDefault();
+			saveDelivery( saveButton );
+			return;
+		}
+
+		const closeButton = event.target && event.target.closest( '[data-wdc-order-delivery-modal-close]' );
+		if ( closeButton ) {
+			event.preventDefault();
+			const box = closestBox( closeButton );
+			if ( box ) {
+				closeModal( box );
+			}
+		}
+	} );
+
+	document.addEventListener( 'input', function ( event ) {
+		const input = event.target;
+		if ( input && input.matches && input.matches( '[data-wdc-courier-address-line]' ) ) {
+			const box = closestBox( input );
+			if ( box ) {
+				normalizedShippingAddresses.delete( box );
+				const block = input.closest( '[data-wdc-courier-address-block]' );
+				const status = block && block.querySelector( '[data-wdc-courier-address-status]' );
+				const result = block && block.querySelector( '[data-wdc-courier-address-result]' );
+				const manualButton = block && block.querySelector( '[data-wdc-use-manual-courier-address]' );
+				let stage = 'address';
+				let context = {};
+				let query = String( input.value || '' );
+				let state = block ? courierAddressState( block ) : null;
+				if ( status ) {
+					status.textContent = 'Проверьте адрес перед сохранением.';
+				}
+				if ( result ) {
+					result.textContent = '';
+				}
+				clearCourierAddressSuggestions( block );
+				if ( manualButton ) {
+					manualButton.disabled = true;
+				}
+				if ( state && state.awaitingFlatSelection ) {
+					if ( queryMatchesCourierHouseBase( query, state ) ) {
+						stage = 'address_next';
+						context = state.selectedHouseContext;
+					} else {
+						clearCourierAddressState( block );
+						state = courierAddressState( block );
+					}
+				}
+				if ( courierAddressTimers.has( input ) ) {
+					window.clearTimeout( courierAddressTimers.get( input ) );
+				}
+				courierAddressTimers.set( input, window.setTimeout( function () {
+					runCourierAddressSuggest( box, block, stage, query, context );
+				}, 300 ) );
+				updateSaveButton( box );
+			}
+			return;
+		}
+		if ( ! input || ! input.matches || ! input.matches( '[data-wdc-order-delivery-location-input]' ) ) {
+			return;
+		}
+		const box = closestBox( input );
+		if ( ! box ) {
+			return;
+		}
+		if ( searchTimers.has( input ) ) {
+			window.clearTimeout( searchTimers.get( input ) );
+		}
+		searchTimers.set( input, window.setTimeout( function () {
+			searchLocations( box, String( input.value || '' ) );
+		}, 300 ) );
+	} );
+
+	document.addEventListener( 'change', function ( event ) {
+		const input = event.target;
+		if ( ! input ) {
+			return;
+		}
+		if ( 'wdc_order_delivery_preview_rate' === input.name ) {
+			selectedRateChanged( input );
+			return;
+		}
+		if ( input.name && input.name.indexOf( 'wdc_order_delivery_preview_tariff_' ) === 0 ) {
+			const rate = input.closest( '[data-wdc-order-delivery-rate]' );
+			const box = closestBox( input );
+			if ( rate && box && selectedRates.get( box ) && selectedRates.get( box ).id === rate.dataset.rateId ) {
+				selectedRateChanged( rate.querySelector( 'input[name="wdc_order_delivery_preview_rate"]' ) );
+			}
+		}
+	} );
+
+	document.addEventListener( 'keydown', function ( event ) {
+		if ( 'Escape' !== event.key ) {
+			return;
+		}
+		document.querySelectorAll( '[data-wdc-order-delivery-modal]:not([hidden])' ).forEach( function ( node ) {
+			const box = closestBox( node );
+			if ( box ) {
+				closeModal( box );
+			}
+		} );
+	} );
+
+	window.addEventListener( 'resize', function () {
+		document.querySelectorAll( '[data-wdc-order-delivery-modal]:not([hidden])[data-view="compact"]' ).forEach( function ( node ) {
+			scheduleCompactLayout( closestBox( node ) );
+		} );
+	} );
+} )();

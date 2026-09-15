@@ -1,0 +1,6 @@
+{
+  "access_token": "fake-private-token",
+  "token_type": "Bearer",
+  "expires_in": "2030-01-01Z00:00:00",
+  "expires_in_unix": "1893456000"
+}

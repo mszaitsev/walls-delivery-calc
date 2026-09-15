@@ -1,0 +1,561 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Carriers\Pek;
+
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+
+defined( 'ABSPATH' ) || exit;
+
+final class PekSettings {
+	public const CARRIER_KEY = 'pek';
+	public const SERVICE_KEY = 'pek';
+	public const TITLE = 'ПЭК';
+	public const PUBLIC_TITLE = 'ПЭК';
+	public const PICKUP_RATE_ID = 'pek:pickup';
+	public const COURIER_RATE_ID = 'pek:courier';
+	public const PICKUP_FAMILY = 'pek:pickup';
+	public const PICKUP_TARIFF_KEY = 'pek_ltl_pickup';
+	public const COURIER_TARIFF_KEY = 'pek_ltl_courier';
+	public const PICKUP_TARIFF_NAME = 'До терминала';
+	public const COURIER_TARIFF_NAME = 'Курьером';
+	public const LTL_PRODUCT_TYPE = 3;
+	public const PLANNED_COUNTRIES = array( 'RU', 'AM', 'BY', 'KG', 'KZ' );
+	public const INITIAL_COUNTRIES = array( 'RU' );
+	public const COUNTRY_CLASSIFIER_CODES = array(
+		'RU' => '643',
+		'AM' => '051',
+		'BY' => '112',
+		'KG' => '417',
+		'KZ' => '398',
+	);
+	public const LEGAL_FORM_LEGAL_ENTITY = 1;
+	public const LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR = 2;
+	public const DEFAULT_SMS_RELEASE_LIMIT_RUB = 500000;
+	public const DEFAULT_CARGO_DESCRIPTION = 'Товары';
+	public const BASE_URL = 'https://kabinet.pecom.ru/api/v1';
+
+	public const LOGIN_KEY = 'pek_login';
+	public const API_KEY_ENCRYPTED_KEY = 'pek_api_key_encrypted';
+	public const REQUEST_TIMEOUT_KEY = 'pek_http_timeout';
+	public const REQUESTS_PER_MINUTE_KEY = 'pek_requests_per_minute';
+	public const SENDER_WAREHOUSE_KEY = 'pek_sender_warehouse';
+	public const SENDER_LEGAL_FORM_KEY = 'pek_sender_legal_form';
+	public const SENDER_FS_KEY = 'pek_sender_fs';
+	public const SENDER_FULL_NAME_KEY = 'pek_sender_full_name';
+	public const SENDER_INN_KEY = 'pek_sender_inn';
+	public const SENDER_KPP_KEY = 'pek_sender_kpp';
+	public const SENDER_REGISTRATION_COUNTRY_KEY = 'pek_sender_registration_country';
+	public const SENDER_CONTACT_NAME_KEY = 'pek_sender_contact_name';
+	public const SENDER_PHONE_KEY = 'pek_sender_phone';
+	public const SENDER_EMAIL_KEY = 'pek_sender_email';
+	public const CLIENT_CARD_KEY = 'pek_client_card';
+	public const SENDER_COUNTERPART_GUID_KEY = 'pek_sender_counterpart_guid';
+	public const SENDER_COUNTERPART_SNAPSHOT_KEY = 'pek_sender_counterpart_snapshot';
+	public const DEFAULT_CARGO_DESCRIPTION_KEY = 'pek_default_cargo_description';
+	public const WAREHOUSE_SEARCH_RADIUS_KEY = 'pek_warehouse_search_radius';
+	public const WAREHOUSE_SEARCH_LIMIT_KEY = 'pek_warehouse_search_limit';
+	public const DESTINATION_TERMINAL_SEARCH_RADIUS_KEY = 'pek_destination_terminal_search_radius';
+	public const DESTINATION_TERMINAL_SEARCH_LIMIT_KEY = 'pek_destination_terminal_search_limit';
+	public const DESTINATION_TERMINAL_CACHE_TTL_KEY = 'pek_destination_terminal_cache_ttl';
+	public const LOCATION_MAPPING_TTL_DAYS_KEY = 'pek_location_mapping_ttl_days';
+	public const SMS_RELEASE_LIMIT_RUB_KEY = 'pek_sms_release_limit_rub';
+	public const LIGHT_CARGO_BAG_PRICE_RUB_KEY = 'pek_light_cargo_bag_price_rub';
+	public const LIGHT_CARGO_SEALING_PRICE_RUB_KEY = 'pek_light_cargo_sealing_price_rub';
+	public const LIGHT_CARGO_WEIGHT_LIMIT_G_KEY = 'pek_light_cargo_weight_limit_g';
+	public const LAST_DIAGNOSTIC_KEY = 'pek_last_diagnostic';
+
+	private PekRuPhoneNormalizer $phones;
+
+	public function __construct( private SettingsRepository $settings, PekRuPhoneNormalizer $phones ) {
+		$this->phones = $phones;
+	}
+
+	/** @return array<string,mixed> */
+	public static function defaults(): array {
+		return array(
+			self::LOGIN_KEY => '',
+			self::API_KEY_ENCRYPTED_KEY => '',
+			self::REQUEST_TIMEOUT_KEY => 15,
+			self::REQUESTS_PER_MINUTE_KEY => 90,
+			self::SENDER_WAREHOUSE_KEY => array(),
+			self::SENDER_LEGAL_FORM_KEY => self::LEGAL_FORM_LEGAL_ENTITY,
+			self::SENDER_FS_KEY => '',
+			self::SENDER_FULL_NAME_KEY => '',
+			self::SENDER_INN_KEY => '',
+			self::SENDER_KPP_KEY => '',
+			self::SENDER_REGISTRATION_COUNTRY_KEY => 'RU',
+			self::SENDER_CONTACT_NAME_KEY => '',
+			self::SENDER_PHONE_KEY => '',
+			self::SENDER_EMAIL_KEY => '',
+			self::CLIENT_CARD_KEY => '',
+			self::SENDER_COUNTERPART_GUID_KEY => '',
+			self::SENDER_COUNTERPART_SNAPSHOT_KEY => array(),
+			self::DEFAULT_CARGO_DESCRIPTION_KEY => self::DEFAULT_CARGO_DESCRIPTION,
+			self::WAREHOUSE_SEARCH_RADIUS_KEY => 50,
+			self::WAREHOUSE_SEARCH_LIMIT_KEY => 5,
+			self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY => 50,
+			self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY => 50,
+			self::DESTINATION_TERMINAL_CACHE_TTL_KEY => 600,
+			self::LOCATION_MAPPING_TTL_DAYS_KEY => 30,
+			self::SMS_RELEASE_LIMIT_RUB_KEY => self::DEFAULT_SMS_RELEASE_LIMIT_RUB,
+			self::LIGHT_CARGO_BAG_PRICE_RUB_KEY => '70',
+			self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY => '20',
+			self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY => 3000,
+			self::LAST_DIAGNOSTIC_KEY => array(),
+		);
+	}
+
+	public function request_timeout(): int {
+		return $this->clamp_int( self::REQUEST_TIMEOUT_KEY, 15, 1, 60 );
+	}
+
+	public function request_soft_limit_per_minute(): int {
+		return $this->clamp_int( self::REQUESTS_PER_MINUTE_KEY, 90, 1, 100 );
+	}
+
+	public function sender_legal_form(): int {
+		$value = $this->settings->get_int( self::SENDER_LEGAL_FORM_KEY, self::LEGAL_FORM_LEGAL_ENTITY );
+
+		return self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $value ? self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR : self::LEGAL_FORM_LEGAL_ENTITY;
+	}
+
+	public function sender_fs(): string {
+		return $this->sanitize_text( $this->settings->get_string( self::SENDER_FS_KEY, '' ) );
+	}
+
+	public function sender_full_name(): string {
+		return $this->sanitize_text( $this->settings->get_string( self::SENDER_FULL_NAME_KEY, '' ) );
+	}
+
+	public function sender_inn(): string {
+		$value = trim( $this->settings->get_string( self::SENDER_INN_KEY, '' ) );
+		if ( self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $this->sender_legal_form() ) {
+			return 1 === preg_match( '/^\d{12}$/', $value ) ? $value : '';
+		}
+
+		return 1 === preg_match( '/^\d{10}$/', $value ) ? $value : '';
+	}
+
+	public function sender_kpp(): string {
+		$value = trim( $this->settings->get_string( self::SENDER_KPP_KEY, '' ) );
+		if ( self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $this->sender_legal_form() && '' === $value ) {
+			return '';
+		}
+
+		return 1 === preg_match( '/^\d{9}$/', $value ) ? $value : '';
+	}
+
+	public function sender_registration_country(): string {
+		$country = strtoupper( $this->sanitize_key( $this->settings->get_string( self::SENDER_REGISTRATION_COUNTRY_KEY, 'RU' ) ) );
+
+		return array_key_exists( $country, self::COUNTRY_CLASSIFIER_CODES ) ? $country : 'RU';
+	}
+
+	public function sender_registration_classifier_code(): string {
+		return self::COUNTRY_CLASSIFIER_CODES[ $this->sender_registration_country() ];
+	}
+
+	public function sender_contact_name(): string {
+		return $this->sanitize_text( $this->settings->get_string( self::SENDER_CONTACT_NAME_KEY, '' ) );
+	}
+
+	public function sender_phone(): string {
+		return trim( $this->settings->get_string( self::SENDER_PHONE_KEY, '' ) );
+	}
+
+	public function sender_email(): string {
+		$email = $this->settings->get_string( self::SENDER_EMAIL_KEY, '' );
+
+		return function_exists( 'sanitize_email' ) ? sanitize_email( $email ) : trim( $email );
+	}
+
+	public function client_card(): string {
+		return $this->sanitize_text( $this->settings->get_string( self::CLIENT_CARD_KEY, '' ) );
+	}
+
+	public function sender_counterpart_guid(): string {
+		return $this->sanitize_text( $this->settings->get_string( self::SENDER_COUNTERPART_GUID_KEY, '' ) );
+	}
+
+	/** @return array<string,mixed> */
+	public function sender_counterpart_snapshot(): array {
+		$value = $this->settings->get_array( self::SENDER_COUNTERPART_SNAPSHOT_KEY, array() );
+
+		return $this->sanitize_counterpart_snapshot( $value );
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	public function save_sender_counterpart( string $guid, array $snapshot ): void {
+		$guid = $this->sanitize_text( $guid );
+		$this->settings->set( self::SENDER_COUNTERPART_GUID_KEY, $guid );
+		$this->settings->set( self::SENDER_COUNTERPART_SNAPSHOT_KEY, '' !== $guid ? $this->sanitize_counterpart_snapshot( $snapshot ) : array() );
+	}
+
+	public function sender_identity_hash(): string {
+		return hash(
+			'sha256',
+			implode(
+				'|',
+				array(
+					(string) $this->sender_legal_form(),
+					$this->sender_inn(),
+					$this->sender_kpp(),
+					$this->client_card(),
+					$this->sender_registration_country(),
+				)
+			)
+		);
+	}
+
+	public function default_cargo_description(): string {
+		$value = $this->sanitize_text( $this->settings->get_string( self::DEFAULT_CARGO_DESCRIPTION_KEY, self::DEFAULT_CARGO_DESCRIPTION ) );
+
+		return '' !== $value ? $value : self::DEFAULT_CARGO_DESCRIPTION;
+	}
+
+	public function warehouse_search_radius(): int {
+		return $this->clamp_int( self::WAREHOUSE_SEARCH_RADIUS_KEY, 50, 1, 500 );
+	}
+
+	public function warehouse_search_limit(): int {
+		return $this->clamp_int( self::WAREHOUSE_SEARCH_LIMIT_KEY, 5, 1, 50 );
+	}
+
+	public function pek_destination_terminal_search_radius(): int {
+		return $this->clamp_int( self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY, 50, 1, 500 );
+	}
+
+	public function pek_destination_terminal_search_limit(): int {
+		return $this->clamp_int( self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY, 50, 1, 100 );
+	}
+
+	public function pek_destination_terminal_cache_ttl(): int {
+		return $this->clamp_int( self::DESTINATION_TERMINAL_CACHE_TTL_KEY, 600, 60, 3600 );
+	}
+
+	public function pek_location_mapping_ttl_days(): int {
+		return $this->clamp_int( self::LOCATION_MAPPING_TTL_DAYS_KEY, 30, 1, 365 );
+	}
+
+	public function sms_release_limit_rub(): int {
+		return $this->clamp_int( self::SMS_RELEASE_LIMIT_RUB_KEY, self::DEFAULT_SMS_RELEASE_LIMIT_RUB, 1, 999999999 );
+	}
+
+	public function light_cargo_bag_price_rub(): string {
+		return $this->rub_string( self::LIGHT_CARGO_BAG_PRICE_RUB_KEY, '70' );
+	}
+
+	public function light_cargo_sealing_price_rub(): string {
+		return $this->rub_string( self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY, '20' );
+	}
+
+	public function light_cargo_bag_price_kopecks(): int {
+		return $this->rub_string_to_kopecks( $this->light_cargo_bag_price_rub() );
+	}
+
+	public function light_cargo_sealing_price_kopecks(): int {
+		return $this->rub_string_to_kopecks( $this->light_cargo_sealing_price_rub() );
+	}
+
+	public function light_cargo_weight_limit_g(): int {
+		return $this->clamp_int( self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY, 3000, 1, 1000000 );
+	}
+
+	/** @return array<string,mixed> */
+	public function sender_warehouse(): array {
+		return $this->sanitize_snapshot( $this->settings->get_array( self::SENDER_WAREHOUSE_KEY, array() ) );
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	public function save_sender_warehouse( array $snapshot ): void {
+		$this->settings->set( self::SENDER_WAREHOUSE_KEY, $this->sanitize_snapshot( $snapshot ) );
+	}
+
+	/** @return array<string,mixed> */
+	public function last_diagnostic(): array {
+		return $this->settings->get_array( self::LAST_DIAGNOSTIC_KEY, array() );
+	}
+
+	/** @param array<string,mixed> $result */
+	public function save_diagnostic_result( array $result ): void {
+		$this->settings->set( self::LAST_DIAGNOSTIC_KEY, $this->sanitize_report( $result ) );
+	}
+
+	/** @param array<string,mixed> $input */
+	public function save_from_admin( array $input ): void {
+		$old_identity_hash = $this->sender_identity_hash();
+		$candidate = array(
+			self::REQUEST_TIMEOUT_KEY => $this->bounded_raw_int( $input[ self::REQUEST_TIMEOUT_KEY ] ?? 15, 1, 60 ),
+			self::REQUESTS_PER_MINUTE_KEY => $this->bounded_raw_int( $input[ self::REQUESTS_PER_MINUTE_KEY ] ?? 90, 1, 100 ),
+			self::SENDER_LEGAL_FORM_KEY => self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === (int) ( $input[ self::SENDER_LEGAL_FORM_KEY ] ?? 1 ) ? 2 : 1,
+		);
+		foreach ( array( self::SENDER_FS_KEY, self::SENDER_FULL_NAME_KEY, self::SENDER_CONTACT_NAME_KEY, self::CLIENT_CARD_KEY, self::DEFAULT_CARGO_DESCRIPTION_KEY ) as $key ) {
+			$candidate[ $key ] = $this->sanitize_text( (string) ( $input[ $key ] ?? '' ) );
+		}
+		$inn = trim( (string) ( $input[ self::SENDER_INN_KEY ] ?? '' ) );
+		$kpp = trim( (string) ( $input[ self::SENDER_KPP_KEY ] ?? '' ) );
+		if ( self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $candidate[ self::SENDER_LEGAL_FORM_KEY ] ) {
+			if ( 1 !== preg_match( '/^\d{12}$/', $inn ) ) {
+				throw new \InvalidArgumentException( 'Некорректный ИНН отправителя ПЭК.' );
+			}
+			if ( '' !== $kpp && 1 !== preg_match( '/^\d{9}$/', $kpp ) ) {
+				throw new \InvalidArgumentException( 'Некорректный КПП отправителя ПЭК.' );
+			}
+		} else {
+			if ( 1 !== preg_match( '/^\d{10}$/', $inn ) ) {
+				throw new \InvalidArgumentException( 'Некорректный ИНН отправителя ПЭК.' );
+			}
+			if ( 1 !== preg_match( '/^\d{9}$/', $kpp ) ) {
+				throw new \InvalidArgumentException( 'Некорректный КПП отправителя ПЭК.' );
+			}
+		}
+		$candidate[ self::SENDER_INN_KEY ] = $inn;
+		$candidate[ self::SENDER_KPP_KEY ] = $kpp;
+		$country = strtoupper( $this->sanitize_key( (string) ( $input[ self::SENDER_REGISTRATION_COUNTRY_KEY ] ?? 'RU' ) ) );
+		$candidate[ self::SENDER_REGISTRATION_COUNTRY_KEY ] = array_key_exists( $country, self::COUNTRY_CLASSIFIER_CODES ) ? $country : 'RU';
+		$candidate[ self::SENDER_PHONE_KEY ] = array_key_exists( self::SENDER_PHONE_KEY, $input )
+			? $this->normalize_sender_phone_input( $input[ self::SENDER_PHONE_KEY ] )
+			: $this->sender_phone();
+		$email = trim( (string) ( $input[ self::SENDER_EMAIL_KEY ] ?? '' ) );
+		if ( '' !== $email && ( function_exists( 'is_email' ) ? false === is_email( $email ) : 1 !== preg_match( '/^[^@\s]+@[^@\s]+\.[^@\s]+$/', $email ) ) ) {
+			throw new \InvalidArgumentException( 'Некорректный email отправителя ПЭК.' );
+		}
+		$candidate[ self::SENDER_EMAIL_KEY ] = function_exists( 'sanitize_email' ) ? sanitize_email( $email ) : $email;
+		$candidate[ self::WAREHOUSE_SEARCH_RADIUS_KEY ] = $this->bounded_raw_int( $input[ self::WAREHOUSE_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 );
+		$candidate[ self::WAREHOUSE_SEARCH_LIMIT_KEY ] = $this->bounded_raw_int( $input[ self::WAREHOUSE_SEARCH_LIMIT_KEY ] ?? 5, 1, 50 );
+		$candidate[ self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY ] = $this->bounded_raw_int( $input[ self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 );
+		$candidate[ self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY ] = $this->bounded_raw_int( $input[ self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY ] ?? 50, 1, 100 );
+		$candidate[ self::DESTINATION_TERMINAL_CACHE_TTL_KEY ] = $this->bounded_raw_int( $input[ self::DESTINATION_TERMINAL_CACHE_TTL_KEY ] ?? 600, 60, 3600 );
+		$candidate[ self::LOCATION_MAPPING_TTL_DAYS_KEY ] = $this->bounded_raw_int( $input[ self::LOCATION_MAPPING_TTL_DAYS_KEY ] ?? 30, 1, 365 );
+		$candidate[ self::SMS_RELEASE_LIMIT_RUB_KEY ] = $this->bounded_raw_int( $input[ self::SMS_RELEASE_LIMIT_RUB_KEY ] ?? self::DEFAULT_SMS_RELEASE_LIMIT_RUB, 1, 999999999 );
+		$candidate[ self::LIGHT_CARGO_BAG_PRICE_RUB_KEY ] = $this->sanitize_rub_setting_strict( $input[ self::LIGHT_CARGO_BAG_PRICE_RUB_KEY ] ?? $this->light_cargo_bag_price_rub(), '70' );
+		$candidate[ self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ] = $this->sanitize_rub_setting_strict( $input[ self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ] ?? $this->light_cargo_sealing_price_rub(), '20' );
+		$candidate[ self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ] = $this->bounded_raw_int( $input[ self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ] ?? $this->light_cargo_weight_limit_g(), 1, 1000000 );
+		$new_identity_hash = $this->sender_identity_hash_for_values( $candidate );
+		foreach ( $candidate as $key => $value ) {
+			$this->settings->set( $key, $value );
+		}
+		if ( $old_identity_hash !== $new_identity_hash ) {
+			$this->save_sender_counterpart( '', array() );
+		}
+	}
+
+	/** @param array<string,mixed> $values */
+	private function sender_identity_hash_for_values( array $values ): string {
+		return hash(
+			'sha256',
+			implode(
+				'|',
+				array(
+					(string) ( $values[ self::SENDER_LEGAL_FORM_KEY ] ?? 1 ),
+					(string) ( $values[ self::SENDER_INN_KEY ] ?? '' ),
+					(string) ( $values[ self::SENDER_KPP_KEY ] ?? '' ),
+					(string) ( $values[ self::CLIENT_CARD_KEY ] ?? '' ),
+					(string) ( $values[ self::SENDER_REGISTRATION_COUNTRY_KEY ] ?? 'RU' ),
+				)
+			)
+		);
+	}
+
+	private function normalize_sender_phone_input( mixed $value ): string {
+		try {
+			return $this->phones->normalize( $value );
+		} catch ( \InvalidArgumentException ) {
+			throw new \InvalidArgumentException( 'Некорректный телефон отправителя ПЭК.' );
+		}
+	}
+
+	/** @param array<string,mixed> $value */
+	private function sanitize_snapshot( array $value ): array {
+		if ( '' === trim( (string) ( $value['warehouseId'] ?? '' ) ) ) {
+			return array();
+		}
+		$limits = is_array( $value['limits'] ?? null ) ? $value['limits'] : array();
+		$availability = is_array( $value['availability'] ?? null ) ? $value['availability'] : array();
+
+		return array(
+			'warehouseId' => $this->sanitize_text( (string) $value['warehouseId'] ),
+			'branchId' => $this->sanitize_text( (string) ( $value['branchId'] ?? '' ) ),
+			'branchName' => $this->sanitize_text( (string) ( $value['branchName'] ?? '' ) ),
+			'divisionName' => $this->sanitize_text( (string) ( $value['divisionName'] ?? '' ) ),
+			'departmentTypeId' => (int) ( $value['departmentTypeId'] ?? 0 ),
+			'departmentType' => $this->sanitize_text( (string) ( $value['departmentType'] ?? '' ) ),
+			'address' => $this->sanitize_text( (string) ( $value['address'] ?? '' ) ),
+			'coordinates' => array(
+				'latitude' => (string) ( $value['coordinates']['latitude'] ?? '' ),
+				'longitude' => (string) ( $value['coordinates']['longitude'] ?? '' ),
+			),
+			'source' => $this->sanitize_warehouse_source( $value['source'] ?? '' ),
+			'branchTimezone' => $this->snapshot_nullable_string( $value['branchTimezone'] ?? null ),
+			'limits' => array(
+				'maxWeight' => $this->numeric_or_null( $limits['maxWeight'] ?? null ),
+				'maxVolume' => $this->numeric_or_null( $limits['maxVolume'] ?? null ),
+				'maxDimension' => $this->numeric_or_null( $limits['maxDimension'] ?? null ),
+				'maxWeightOnePlace' => $this->numeric_or_null( $limits['maxWeightOnePlace'] ?? null ),
+				'maxCount' => $this->numeric_or_null( $limits['maxCount'] ?? null ),
+			),
+			'availability' => array(
+				'endOfAvailabilityBeforeClosing' => $this->snapshot_nullable_string( $availability['endOfAvailabilityBeforeClosing'] ?? null ),
+				'endOfCostCalculationAvailability' => $this->snapshot_nullable_string( $availability['endOfCostCalculationAvailability'] ?? null ),
+				'departmentClosingDate' => $this->snapshot_nullable_string( $availability['departmentClosingDate'] ?? null ),
+			),
+			'checked_at' => $this->sanitize_text( (string) ( $value['checked_at'] ?? '' ) ),
+		);
+	}
+
+	/** @param array<string,mixed> $value @return array<string,mixed> */
+	private function sanitize_counterpart_snapshot( array $value ): array {
+		$guid = $this->sanitize_text( (string) ( $value['guid'] ?? '' ) );
+		if ( '' === $guid ) {
+			return array();
+		}
+
+		return array(
+			'guid' => $guid,
+			'legalForm' => (int) ( $value['legalForm'] ?? 0 ),
+			'title' => $this->sanitize_text( (string) ( $value['title'] ?? '' ) ),
+			'inn_masked' => $this->sanitize_text( (string) ( $value['inn_masked'] ?? '' ) ),
+			'kpp_masked' => $this->sanitize_text( (string) ( $value['kpp_masked'] ?? '' ) ),
+			'client_card_present' => ! empty( $value['client_card_present'] ),
+			'identity_hash' => 1 === preg_match( '/^[a-f0-9]{64}$/', (string) ( $value['identity_hash'] ?? '' ) ) ? (string) $value['identity_hash'] : '',
+			'account_login_hash' => 1 === preg_match( '/^[a-f0-9]{64}$/', (string) ( $value['account_login_hash'] ?? '' ) ) ? (string) $value['account_login_hash'] : '',
+			'checked_at' => $this->sanitize_text( (string) ( $value['checked_at'] ?? '' ) ),
+		);
+	}
+
+	private function clamp_int( string $key, int $default, int $min, int $max ): int {
+		return max( $min, min( $max, $this->settings->get_int( $key, $default ) ) );
+	}
+
+	private function clamp_raw_int( mixed $value, int $min, int $max ): int {
+		return max( $min, min( $max, is_numeric( $value ) ? (int) $value : $min ) );
+	}
+
+	private function bounded_raw_int( mixed $value, int $min, int $max ): int {
+		if ( is_bool( $value ) || is_array( $value ) || is_object( $value ) || ( ! is_int( $value ) && ! ( is_string( $value ) && 1 === preg_match( '/^\d+$/', trim( $value ) ) ) ) ) {
+			throw new \InvalidArgumentException( 'Некорректное числовое значение настройки ПЭК.' );
+		}
+		$number = (int) $value;
+
+		return max( $min, min( $max, $number ) );
+	}
+
+	private function sanitize_text( string $value ): string {
+		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
+
+		return trim( function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : $value );
+	}
+
+	private function snapshot_nullable_string( mixed $value ): ?string {
+		if ( null === $value ) {
+			return null;
+		}
+		$value = function_exists( 'wp_unslash' ) ? wp_unslash( (string) $value ) : (string) $value;
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? $value;
+
+		return substr( trim( $value ), 0, 120 );
+	}
+
+	private function sanitize_warehouse_source( mixed $value ): string {
+		$value = trim( (string) $value );
+
+		return in_array( $value, array( 'free', 'paid', 'branches_all', 'nearest_cached_selection', 'nearest_fresh_revalidation' ), true ) ? $value : '';
+	}
+
+	private function sanitize_key( string $value ): string {
+		return function_exists( 'sanitize_key' ) ? sanitize_key( $value ) : strtolower( preg_replace( '/[^a-z0-9_\-]/i', '', $value ) ?? '' );
+	}
+
+	private function rub_string( string $key, string $default ): string {
+		return $this->sanitize_rub_setting( $this->settings->get_string( $key, $default ), $default );
+	}
+
+	private function sanitize_rub_setting( mixed $value, string $default ): string {
+		if ( is_array( $value ) || is_object( $value ) ) {
+			return $default;
+		}
+		$value = trim( str_replace( ',', '.', (string) $value ) );
+		if ( 1 !== preg_match( '/^\d+(?:\.\d{1,2})?$/', $value ) ) {
+			return $default;
+		}
+		$kopecks = $this->rub_string_to_kopecks( $value );
+		if ( $kopecks < 0 || $kopecks > 10000000 ) {
+			return $default;
+		}
+		$rubles = intdiv( $kopecks, 100 );
+		$cents = $kopecks % 100;
+
+		return 0 === $cents ? (string) $rubles : (string) $rubles . '.' . str_pad( (string) $cents, 2, '0', STR_PAD_LEFT );
+	}
+
+	private function sanitize_rub_setting_strict( mixed $value, string $default ): string {
+		if ( is_array( $value ) || is_object( $value ) ) {
+			throw new \InvalidArgumentException( 'Некорректное рублёвое значение настройки ПЭК.' );
+		}
+		$raw = trim( str_replace( ',', '.', (string) $value ) );
+		if ( '' === $raw ) {
+			return $default;
+		}
+		if ( 1 !== preg_match( '/^\d+(?:\.\d{1,2})?$/', $raw ) ) {
+			throw new \InvalidArgumentException( 'Некорректное рублёвое значение настройки ПЭК.' );
+		}
+		$kopecks = $this->rub_string_to_kopecks( $raw );
+		if ( $kopecks < 0 || $kopecks > 10000000 ) {
+			throw new \InvalidArgumentException( 'Некорректное рублёвое значение настройки ПЭК.' );
+		}
+
+		return $this->sanitize_rub_setting( $raw, $default );
+	}
+
+	private function rub_string_to_kopecks( string $value ): int {
+		$value = trim( str_replace( ',', '.', $value ) );
+		if ( 1 !== preg_match( '/^(\d+)(?:\.(\d{1,2}))?$/', $value, $matches ) ) {
+			return 0;
+		}
+		$rubles = (int) $matches[1];
+		$kopecks = isset( $matches[2] ) ? (int) str_pad( $matches[2], 2, '0', STR_PAD_RIGHT ) : 0;
+
+		return $rubles * 100 + $kopecks;
+	}
+
+	/** @param array<string,mixed> $result */
+	private function sanitize_report( array $result ): array {
+		return $this->sanitize_report_value( $result );
+	}
+
+	private function sanitize_report_value( mixed $value ): mixed {
+		if ( is_array( $value ) ) {
+			$out = array();
+			foreach ( $value as $key => $item ) {
+				$key_text = strtolower( (string) $key );
+				if ( str_contains( $key_text, 'authorization' ) || str_contains( $key_text, 'api_key' ) || str_contains( $key_text, 'password' ) || str_contains( $key_text, 'login' ) ) {
+					$out[ $key ] = '[redacted]';
+					continue;
+				}
+				$out[ $key ] = $this->sanitize_report_value( $item );
+			}
+			return $out;
+		}
+		if ( is_string( $value ) ) {
+			if ( $this->is_machine_datetime( $value ) ) {
+				return $value;
+			}
+			$value = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $value ) ?? $value;
+			$value = preg_replace( '/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', '[redacted-email]', $value ) ?? $value;
+			$value = preg_replace( '/(?:\+?\d[\d\s().-]{8,}\d)/', '[redacted-phone]', $value ) ?? $value;
+			return strlen( $value ) > 1000 ? substr( $value, 0, 1000 ) . '...' : $value;
+		}
+
+		return $value;
+	}
+
+	private function is_machine_datetime( string $value ): bool {
+		return 1 === preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $value )
+			|| 1 === preg_match( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:\d{2})?$/', $value );
+	}
+
+	private function numeric_or_null( mixed $value ): int|float|null {
+		return is_numeric( $value ) ? ( $value + 0 ) : null;
+	}
+}

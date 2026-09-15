@@ -1,0 +1,108 @@
+# Plugin Architecture
+
+Version: 1.0.25
+
+`Plugin.php` is the composition root. It registers infrastructure and activation ownership first, runs the single fresh-install schema migration, and only then registers services whose hooks may access plugin tables. The shared `ActionScheduler` adapter owns readiness coordination; scheduler owners attach callbacks during bootstrap and defer datastore inspection or schedule creation until `action_scheduler_init`.
+
+The Yandex full pickup/geography WP-Cron callback is a carrier-owned bounded worker: one callback processes independently checkpointed local units for at most 18 seconds, 25 units, and 80% of a finite PHP memory limit. A session-and-token option lease excludes overlapping callbacks, continuations carry the outer `session_id`, and bootstrap only repairs a missing continuation. The full JSON download remains one heavy unit and always ends its slice.
+
+The Ozon pickup Action Scheduler callback follows the same bounded-worker contract with carrier-specific limits of 18 seconds, 10 network-heavy units, and 80% of finite memory. Its existing generation transactions remain the atomic boundaries; the carrier-owned lease and exact continuation identity protect overlap, cancellation, and bootstrap self-heal. Repository persistence uses bounded bulk SQL without changing schema or the published-generation snapshot contract.
+
+WooCommerce checkout, order administration, Shipment Framework, carrier catalogs, locations, rules, calendars, pickup providers, REST/AJAX controllers, and background jobs remain separated by their documented subsystem boundaries. The production composition root contains no prepared-FIAS or automatic GAR/SPAS runtime.
+
+Checkout order creation has a final fail-closed pickup invariant at `woocommerce_checkout_create_order` priority 19, immediately before WDC order metadata persistence at priority 20. `CurrentWdcRateResolver` is the single session-owned authority used by both the guard and `OrderShippingMetaPersister`; a current pickup rate that requires customer selection cannot proceed without a matching family/carrier/current-destination selection unless the rate explicitly disables selection or carries a fixed pickup snapshot. The ordinary POST-authoritative `woocommerce_after_checkout_validation` path remains unchanged for immediate checkout feedback.
+
+## One-Click GAR Update
+
+`LocationIncrementalUpdateService` owns the automatic state machine and candidate persistence. `LocationIncrementalCandidateEnricher` resolves one NEW RU row through existing postcode, coordinate and courier services without a live repository write. `LocationsAdminPage` exposes start/status/step/resume/cancel; the dedicated admin runner polls one bounded step at a time. `LocationMaintenanceJobGuard` defines active maintenance jobs, and `LocationWriteLock` checks incremental ownership after acquiring the existing named lock. Rate sorting, checkout and shipment composition are unchanged.
+
+Locations backup composition: `LocationDatabaseBackupAdmin` owns capability/nonce checks, POST redirects, UI and fixed-path script download; `LocationDatabaseBackupService` owns locations-only discovery, copying, schema verification and atomic restore. `LocationWriteLock` is the shared fail-fast MySQL named lock for administrative Locations mutations and DPD import start/batches (which can save foreign locations). `LocationMaintenanceJobGuard` protects the unfinished incremental-update lifecycle between requests. `LocationsAdminPage` defers terminating AJAX responses via `LocationAdminJsonResponse` so `finally` releases the database lock before WordPress exits.
+
+The generic presentation extension for non-selectable fulfillment locations is `fixed_pickup_point_snapshot` on rate/order metadata. Checkout and order persistence/rendering consume that snapshot without carrier-specific branches. The generic Shipment admin extension for intentionally non-shipment deliveries is `non_shipment_state`, which carries a static informational message and false action capabilities; `OrderShipmentsMetabox`, AJAX payloads, and shipment JS must remain free of `self_pickup` branches.
+
+Manual delivery services are dynamic DeliveryService rows, not per-service PHP carriers. The platform registers one generic `manual` runtime carrier in the composition root, and each manual row is selected by its trusted `service_key` from the existing checkout service pipeline. New custom Delivery Services admin entries are normalized to `service_type=manual` and `carrier_key=manual`, while legacy `fixed`/`weight_based` values remain storage compatibility values rather than runtime carrier types. This stage does not change Shipment Framework contracts and does not register manual document providers, modal extensions, persistence mappers, or shipment create/cancel/status behavior.
+
+The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
+
+| Layer | Path | Owns |
+| --- | --- | --- |
+| Bootstrap | `walls-delivery-calc.php`, `src/Core/bootstrap.php` | plugin constants, autoloading, initial boot |
+| Composition root | `src/Core/Plugin.php` | service registration, WordPress hooks, carrier implementation registration |
+| Container | `src/Core/Container.php` | lazy singleton factories |
+| Domain | `src/Domain` | immutable value objects and status concepts |
+| Application | `src/*/Application`, `src/*/Services` | use cases and orchestration |
+| Infrastructure | `src/Infrastructure`, storage classes | database, settings, logging, queue, encryption |
+| Admin | `src/*/Admin`, `assets/admin` | admin screens, AJAX controllers, shipment metabox UI |
+| Checkout | `src/Checkout`, `assets/frontend` | WooCommerce rates, checkout selection, frontend pickup UI |
+| Carriers | `src/Carriers`, `src/Shipments/{Cdek,Dpd,RussianPost,YandexDelivery}` | carrier APIs, quote adapters, shipment adapters, carrier persistence mapping |
+| Tests | `tests` | smoke/regression contracts |
+
+## Dependency Direction
+
+Generic layers may depend on domain contracts and registries. Carrier implementations depend on generic contracts. Generic Shipment Framework services must not depend on carrier implementations except in the composition root (`Plugin.php`) where concrete implementations are registered.
+
+Jet Logistic follows the same boundary: `Plugin.php` wires its runtime carrier, API transport, API diagnostic service, geography/status repositories, admin pages, and shipment adapter. Jet is not registered in document providers, modal extensions, lifecycle continuation, or shipment creation persistence mappers because the carrier supports quote, manual attach, status update, local remove, and autosync only. Jet API integration uses only the support-issued `access_token`; web cabinet login/password/session automation, refresh tokens, shipment creation, cancellation, and documents remain out of scope.
+
+PEK follows the carrier-owned boundary as a checkout runtime carrier. `Plugin.php` wires its settings, credentials, transport, quote, pickup, diagnostics, and Shipment Framework services through the composition root. `CheckoutOrchestrator` remains carrier-agnostic. Public pickup REST reconstructs trusted provider queries only from server-stored rate snapshots loaded through the WooCommerce session bootstrapper; browser input cannot become cargo, location, coordinate, or destination authority. Selected terminals are fresh-validated before persistence, and recovered preliminary rates carry only transient rejection metadata. Customer-facing point titles are source-driven while internal warehouse UUIDs remain technical point codes.
+
+The generic pickup provider extension point lives under `src/Pickup/Providers` and is intentionally minimal: immutable query objects, cargo constraints in canonical project units, provider interface, duplicate-protected registry, and a checkout query resolver that reconstructs trusted `CarrierPickupPointQuery` values from stored production `rate_meta` metadata. Top-level session rate fields identify the carrier/service/family and whether the rate is pickup; nested carrier meta supplies the provider query snapshot. `Plugin.php` registers the registry with `PekPickupPointProvider`; existing CDEK, DPD, Russian Post, Yandex Delivery, and Jet Logistic provider paths are not migrated into this registry. PEK uses the registry both for closed admin diagnostics and for checkout pickup map/search/save flows, while browser requests remain limited to nonce, shipping method, pickup family, and point code.
+
+The PEK quote foundation remains carrier-owned. `src/Carriers/Pek/Quote` contains the PEK-only options, cargo builder, calculator payload builder, response parser, result object, message sanitizer, store light-cargo surcharge policy, plannedDateTime resolver, and quote service; `src/Carriers/Pek/Admin` owns the quote diagnostic service/store. `PekCarrier` converts successful pickup/courier `PekQuoteResult` objects into canonical `DeliveryRate` objects using final adjusted `price_kopecks`, DateRange calendar days, safe branch metadata, and separate carrier/surcharge meta. It does not rebuild calculator payloads, sum services, match service text, add undocumented bag parameters, or touch Shipment Framework. Rules remain on the existing delivery-service pipeline, so store surcharges are part of the base price before rules.
+
+For PEK checkout/order snapshots, the generic `api_base_price_rub` field is the adjusted base before rules and therefore includes configured store light-cargo surcharges. The carrier-only PEK `costTotal` remains under PEK-prefixed fields such as `pek_carrier_base_price_rub` and `pek_carrier_price_kopecks`. `DeliveryCalculationDataBuilder` may render a formula note for the bag/plombing base adjustment, but it does not add a fake rule or recompute PEK surcharges from service text.
+
+PEK geography mappings carry an internal mapping contract revision inside their fingerprint, separate from the plugin version, and persisted rows are structurally validated before fresh hits or stale fallback. This lazily invalidates legacy mappings that stored address `warehousePoint` coordinates or lacked `mainWarehouseId`, while avoiding destructive migrations and mass PEK API calls. PEK destination terminal cache uses format `2`; format `1` transients are deleted as misses because they predate the safe `PickupPoint` projection.
+
+PEK geography and destination pickup remain carrier-owned under `src/Carriers/Pek`. `PekLocationResolver` reads canonical locations, computes an address fingerprint, resolves PEK zones/branches with coordinates first and address fallback, and persists compact mappings in `wdc_pek_location_mappings` without mutating `wp_wdc_locations`. Mapping coordinates are canonical destination coordinates only; `warehousePoint` is not a destination coordinate source. Partial or invalid canonical coordinates are ignored for PEK coordinates calls and use address fallback. Zone response normalization is method-specific and typed: coordinate responses must be a list with zero or one object for the single coordinate request, critical zone IDs/text fields must be strings, address responses must be objects, `GeoData` and `GeoData.Address` are strict objects when present, `GeoData.Address.formatted` must be a string when present, precision is read only from documented `GeoData.precision`, and top-level address aliases are ignored. Address `exact`/`near` mappings require `zoneId`, `branchUID`, and `mainWarehouseId`; coordinate mappings do not require `mainWarehouseId`. Business unsupported results (`precision=bad`, empty valid response, valid ISO2 mismatch) may persist as unsupported mappings; malformed roots, critical field types, malformed non-empty countries, missing/unknown/non-string address precision, malformed `GeoData`/`Address`/`formatted`, and non-empty incomplete contract rows throw safe `PekApiException` errors and do not overwrite working mappings. Stale mapping fallback is allowed only for the same fingerprint, and freshness compares Unix instants from WordPress-timezone `checked_at` values. `PekApiClient` validates destination `/branches/nearestdepartments/` responses at the typed boundary and requires both documented terminal collections to be JSON lists. `PekTerminalService` calls that endpoint with `departmentOperation=3` and `type=3`, always sends the non-empty mapping destination address, adds canonical coordinates as decimal strings when the mapping has a usable coordinate pair, sends address only otherwise, checks query country against mapping country, strictly normalizes `freeDepartments`/`paidDepartments` rows and schedule/holiday data, leaves `PickupPoint::city` empty instead of using organizational `branchName`, treats malformed terminal IDs/text/coordinates/limits/schedules as invalid rows, enforces positive terminal limits against total cargo values, rejects all-invalid non-empty collections as API contract failures, persists safe terminal snapshots in `wdc_pek_terminals`, caches only contract-valid successful results through a format-versioned safe `PickupPoint` projection, and treats repository/cache data as optimization rather than selection authority. `resolve_selection()` performs fresh server validation with no opt-out flag and still does not touch checkout session, orders, shipments, or public REST. PEK destination diagnostic reports are cleared before a new explicit run and recursively sanitized. PEK 0048/0049 schemas are installed only by migrations; runtime repositories do not call `dbDelta`.
+
+PEK destination terminal diagnostics expose operation-level evidence without expanding runtime scope. `PekApiException` context and `PekTerminalService::last_report()` carry stable failure stages, endpoint, method, HTTP status, safe response shape, query fingerprint, preserved mapping context, and rejection reason counters. The admin report renders those fields as named sections instead of positional arrays, and failed explicit diagnostic runs write one project logger event with allowlisted context only. Raw responses, headers, request bodies, credentials, terminal rows, and terminal addresses are not stored or logged by the diagnostic path.
+
+The 1.0 database baseline is `database/migrations/0001_initial_schema.php`. It creates the current physical schema directly through `dbDelta()` and seeds immutable framework defaults. PEK mapping uses physical `mapping_precision`, while repository payloads expose the domain key `precision`; MySQL reserved identifiers do not appear in the schema. `MigrationManager` catches failures before advancing its applied-file/version options, and `Plugin` reports a safe admin error instead of allowing an uncaught bootstrap fatal. Schema creation does not run on checkout, public REST, ordinary diagnostics, or repository read/write paths.
+
+Allowed carrier references in generic code are limited to:
+
+- composition root registration;
+- generic admin request helpers that map existing carrier-specific UI inputs until those inputs have a registry-backed extension;
+- tests that assert known carrier registrations.
+
+Forbidden ownership:
+
+- carrier business logic in `OrderShipmentsMetabox`;
+- carrier persistence inside `ShipmentCreationService`;
+- document action metadata inside shipment adapters;
+- document download inside shipment adapters;
+- carrier UI selectors in generic JS;
+- new lifecycle AJAX endpoints outside the shared lifecycle contract.
+
+## Runtime Flow
+
+1. `walls-delivery-calc.php` defines `WDC_VERSION` and boots `src/Core/bootstrap.php`.
+2. `Plugin` registers services in `Container`.
+3. `Plugin::register_hooks()` connects WooCommerce, admin pages, AJAX, REST, cron, and document download hooks.
+4. `Plugin::boot_modules()` runs migrations and startup tasks on `plugins_loaded`.
+5. Checkout uses `CarrierRegistry`, rules, packaging, and runtime carriers to calculate rates.
+6. Admin shipment creation uses `ShipmentCreationService`, carrier shipment adapters, persistence mappers, registries, and AJAX controllers.
+
+## Storage
+
+Storage is owned by repositories and mappers. Shipment carrier data must be persisted through `OrderShipmentRepository` plus the matching `CarrierShipmentPersistenceMapperInterface`. Settings are accessed through settings classes and `SettingsRepository`; credentials use `EncryptionService` where applicable.
+
+Shipment cost analytics uses a dedicated read-model table, `{$wpdb->prefix}wdc_shipment_cost_analytics`, owned by `ShipmentCostAnalyticsRepository`. The canonical source remains WooCommerce order metadata and `_wdc_shipments`; the indexer rebuilds one order row after canonical mutations. The analytics admin page must query this table only and must not scan WooCommerce orders for filters, sorting, pagination, or totals.
+
+## Admin And AJAX
+
+`AdminMenu::CAPABILITY` is the canonical boundary for the standalone WDC configuration console and equals `manage_options`; its pages, POST handlers, imports, diagnostics, and administrative AJAX endpoints must use that boundary. WooCommerce order operational UI is a separate boundary: order recalculation and shipment actions use their explicit `manage_woocommerce` constants so Shop Managers can continue normal order work without access to plugin configuration.
+
+Admin controllers live in `src/Shipments/Admin/Ajax`. They must perform capability checks, nonce checks, order resolution, request sanitization, and carrier validation before calling application services. Generic controllers may call registries and payload builders; they must not embed carrier creation or document download behavior.
+
+## JS
+
+Generic shipment JS lives in `assets/admin/shipments/*.js`. Carrier extensions live in `assets/admin/shipments/extensions/*.js`. Generic JS owns shared state, rendering, polling, document action buttons, and event dispatch. Carrier extensions own carrier-only UI details.
+
+## Regression
+
+The unified shipment runner is `tests/shipments/run-shipment-regression-profile.php`. Its manifest is `tests/shipments/regression/shipment-regression-manifest.php`. The default profile is mandatory except explicit `baseline` and `optional` entries documented in [operations/technical-debt.md](../operations/technical-debt.md).
+
+`tests/architecture/run-plugin-architecture-smoke.php` protects bounded architecture invariants for adapters, document providers, registries, composition-root wiring, canonical payloads, generic shipment JS boundaries, canonical docs, and version consistency.
+
+The smoke uses Reflection to discover production adapter and document-provider implementations. Adapter public API is allowed only from implemented interfaces, a real parent class, and a small documented exception list for existing guarded hooks; production `method_exists()` call sites do not expand the whitelist. Providers are not instantiated without constructors, so duplicate production provider keys are not inferred from uninitialized objects; duplicate registration behavior is checked at the registry contract level. The composition-root check guards the current `Container::register()` wiring pattern outside `Plugin.php`, not every possible future way to create objects. Generic shipment JS is checked for carrier-key branching, with a narrow pickup exception for the existing pickup context helpers in `assets/admin/shipments/shipment-picker.js`.

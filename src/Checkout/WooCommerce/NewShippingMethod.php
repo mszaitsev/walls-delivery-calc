@@ -1,0 +1,612 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Checkout\WooCommerce;
+
+use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Rules\Domain\Rule;
+use WallsShop\WDC\Rules\Storage\RuleRepository;
+
+defined( 'ABSPATH' ) || exit;
+
+final class NewShippingMethod extends \WC_Shipping_Method {
+	public const METHOD_ID = 'wdc_platform_delivery';
+
+	private static ?CheckoutOrchestrator $configured_orchestrator = null;
+	private static ?WooCommercePackageMapper $configured_package_mapper = null;
+	private static ?WooCommerceRateMapper $configured_rate_mapper = null;
+	private static ?CheckoutSessionManager $configured_session_manager = null;
+	private static ?RuleRepository $configured_rule_repository = null;
+	private static ?DeliveryServiceManager $configured_service_manager = null;
+	private static ?SettingsRepository $configured_settings_repository = null;
+	private static ?PluginEnvironment $configured_environment = null;
+	private static ?Logger $configured_logger = null;
+
+	private CheckoutOrchestrator $orchestrator;
+	private WooCommercePackageMapper $package_mapper;
+	private WooCommerceRateMapper $rate_mapper;
+	private CheckoutSessionManager $session_manager;
+	private RuleRepository $rule_repository;
+	private ?DeliveryServiceManager $service_manager;
+	private SettingsRepository $settings_repository;
+	private ?PluginEnvironment $environment;
+	private ?Logger $logger;
+
+	public static function configure(
+		CheckoutOrchestrator $orchestrator,
+		WooCommercePackageMapper $package_mapper,
+		WooCommerceRateMapper $rate_mapper,
+		CheckoutSessionManager $session_manager,
+		RuleRepository $rule_repository,
+		SettingsRepository $settings,
+		PluginEnvironment $environment,
+		Logger $logger,
+		?DeliveryServiceManager $service_manager = null
+	): void {
+		self::$configured_orchestrator    = $orchestrator;
+		self::$configured_package_mapper = $package_mapper;
+		self::$configured_rate_mapper    = $rate_mapper;
+		self::$configured_session_manager = $session_manager;
+		self::$configured_rule_repository = $rule_repository;
+		self::$configured_service_manager = $service_manager;
+		self::$configured_settings_repository = $settings;
+		self::$configured_environment    = $environment;
+		self::$configured_logger         = $logger;
+	}
+
+	public function __construct( int $instance_id = 0 ) {
+		$this->id                 = self::METHOD_ID;
+		$this->instance_id        = $instance_id;
+		$this->method_title       = __( 'Калькулятор доставки w.ALL.s', 'walls-delivery-calc' );
+		$this->method_description = __( 'Новая система расчета доставки WDC.', 'walls-delivery-calc' );
+		$this->enabled            = 'yes';
+		$this->title              = __( 'Калькулятор доставки w.ALL.s', 'walls-delivery-calc' );
+		$this->supports           = array( 'shipping-zones', 'instance-settings' );
+
+		$this->orchestrator     = self::$configured_orchestrator ?? $this->fallback_orchestrator();
+		$this->package_mapper   = self::$configured_package_mapper ?? new WooCommercePackageMapper();
+		$this->rate_mapper      = self::$configured_rate_mapper ?? new WooCommerceRateMapper();
+		$this->session_manager  = self::$configured_session_manager ?? new CheckoutSessionManager();
+		$this->rule_repository  = self::$configured_rule_repository ?? new RuleRepository();
+		$this->service_manager  = self::$configured_service_manager;
+		$this->settings_repository = self::$configured_settings_repository ?? new SettingsRepository();
+		$this->environment      = self::$configured_environment;
+		$this->logger           = self::$configured_logger;
+	}
+
+	/**
+	 * @param array<string,mixed> $package
+	 */
+	public function calculate_shipping( $package = array() ): void {
+		try {
+			$previous_chosen_methods = $this->chosen_shipping_methods();
+			$previous_stored_rates = $this->session_manager->rates();
+			$this->session_manager->expire_stale_yandex_5post_selection();
+			$sort = $this->sort_mode();
+			$this->session_manager->save_sort_mode( $sort );
+			$pickup_selections = $this->session_manager->pickup_selections_for_current_destination( true );
+
+			$request = $this->package_mapper->map(
+				is_array( $package ) ? $package : array(),
+				array(
+					'pickup_selection'  => $this->session_manager->pickup_selection_current_destination(),
+					'pickup_selections' => $pickup_selections,
+					'sort_mode'         => $sort,
+				)
+			);
+
+			$result = $this->orchestrator->calculate( $request, $this->checkout_rules(), $sort, true, array( $this, 'checkout_rules_for_carrier' ) );
+			$stored = array();
+
+			foreach ( $this->rates_for_wc( $result->rates ) as $rate ) {
+				$mapped = $this->rate_mapper->map( $rate, $result->fallback_used );
+				$stored_rate = array_merge(
+					$mapped['meta_data'],
+					array(
+						'wdc_rate'                 => true,
+						'wdc_source'               => 'platform',
+						'rate_id'                  => $rate->rate_id,
+						'label'                    => $mapped['label'],
+						'cost'                     => $mapped['cost'],
+						'planned_delivery_comment' => $rate->planned_delivery_comment,
+						'delivery_days'            => $rate->delivery_days->to_array(),
+						'fallback_used'            => $result->fallback_used,
+						'service_title'            => $rate->service_name,
+						'rules_source'             => (string) ( $rate->meta['rules_source'] ?? 'none' ),
+						'round_up_applied'         => ! empty( $rate->meta['round_up_applied'] ),
+						'minimum_price_applied'    => ! empty( $rate->meta['minimum_price_applied'] ),
+					)
+				);
+				$this->handle_rejected_pickup_selection_rate( $stored_rate, $mapped['id'] );
+				$this->add_rate( $mapped );
+				$session_rate = $this->rate_without_transient_render_meta( $stored_rate );
+				$stored[ $mapped['id'] ] = $session_rate;
+				$stored[ self::METHOD_ID . ':' . $mapped['id'] ] = $session_rate;
+			}
+
+			$this->session_manager->save_rates( $stored );
+			$this->clear_pickup_selections_for_unavailable_rates( $stored );
+			$this->reconcile_shipping_method_choices( $previous_chosen_methods, $previous_stored_rates, $stored );
+			$this->session_manager->save_debug(
+				array(
+					'rates_count'    => count( $result->rates ),
+					'rates'          => array_map( static fn ( object $rate ): array => method_exists( $rate, 'to_array' ) ? $rate->to_array() : array(), $result->rates ),
+					'cache_hits'     => $result->cache_hits,
+					'fallback_used'  => $result->fallback_used,
+					'carrier_errors' => $result->carrier_errors,
+					'audit'          => $result->audit,
+					'raw_checkout_city' => (string) ( ( is_array( $package ) && is_array( $package['destination'] ?? null ) ) ? ( $package['destination']['city'] ?? '' ) : '' ),
+					'sort_mode'      => $sort,
+				)
+			);
+		} catch ( \Throwable $exception ) {
+			$this->log_exception( $exception );
+			$this->add_rate(
+				array(
+					'id'        => 'fallback:checkout-exception',
+					'label'     => __( 'Калькулятор доставок', 'walls-delivery-calc' ),
+					'cost'      => '0',
+					'meta_data' => array(
+						'carrier_key'     => 'fallback',
+						'delivery_type'   => 'unknown',
+						'fallback_used'   => true,
+						'comments'        => array( __( 'Использован резервный вариант после ошибки расчета.', 'walls-delivery-calc' ) ),
+						'crossed_price'   => null,
+					),
+				)
+			);
+		}
+	}
+
+	/**
+	 * @param array<int,DeliveryRate> $rates
+	 * @return array<int,DeliveryRate>
+	 */
+	private function rates_for_wc( array $rates ): array {
+		$grouped = array();
+		$output = array();
+		$sorter = new RateSorter();
+		$sort = $this->sort_mode();
+		foreach ( $rates as $rate ) {
+			if ( $rate instanceof DeliveryRate && ! empty( $rate->meta['tariff_selector_group'] ) ) {
+				$group_id = (string) ( $rate->meta['checkout_group_id'] ?? '' );
+				if ( '' === $group_id ) {
+					$group_id = RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key
+						? RussianPostDomesticSettings::checkout_group_id( $rate->delivery_type )
+						: $rate->service_key . ':' . $rate->delivery_type;
+				}
+				if ( ! isset( $grouped[ $group_id ] ) ) {
+					$grouped[ $group_id ] = array( 'placeholder' => count( $output ), 'rates' => array() );
+					$output[] = null;
+				}
+				$grouped[ $group_id ]['rates'][] = $rate;
+				continue;
+			}
+			$output[] = $rate;
+		}
+		foreach ( $grouped as $group_id => $group ) {
+			$items = $sorter->sort_group_rates( $group['rates'], $sort );
+			$output[ (int) $group['placeholder'] ] = $this->tariff_selector_rate( $group_id, $items );
+		}
+
+		return $sorter->sort_methods( array_values( array_filter( $output, static fn( mixed $rate ): bool => $rate instanceof DeliveryRate ) ), $sort );
+	}
+
+	/**
+	 * @param array<string,mixed> $stored_rate
+	 */
+	private function handle_rejected_pickup_selection_rate( array $stored_rate, string $method_id ): void {
+		$meta = is_array( $stored_rate['rate_meta'] ?? null ) ? $stored_rate['rate_meta'] : array();
+		if ( empty( $meta['pickup_selection_rejected'] ) && empty( $stored_rate['pickup_selection_rejected'] ) ) {
+			return;
+		}
+		$family = trim( (string) ( $meta['pickup_selection_rejected_family'] ?? $stored_rate['pickup_selection_rejected_family'] ?? $stored_rate['pickup_family'] ?? $meta['pickup_family'] ?? '' ) );
+		if ( '' === $family || ! str_ends_with( $family, ':pickup' ) ) {
+			return;
+		}
+
+		$this->session_manager->clear_pickup_selection_for_family( $family, 'carrier_selected_pickup_quote_failed' );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function rate_without_transient_render_meta( array $rate ): array {
+		foreach ( $this->transient_pickup_rejection_keys() as $key ) {
+			unset( $rate[ $key ] );
+		}
+		if ( is_array( $rate['rate_meta'] ?? null ) ) {
+			foreach ( $this->transient_pickup_rejection_keys() as $key ) {
+				unset( $rate['rate_meta'][ $key ] );
+			}
+		}
+
+		return $rate;
+	}
+
+	/** @return array<int,string> */
+	private function transient_pickup_rejection_keys(): array {
+		return array(
+			'pickup_selection_rejected',
+			'pickup_selection_rejected_family',
+			'pickup_selection_rejected_code',
+			'pickup_selection_rejected_message',
+		);
+	}
+
+	/**
+	 * @return array<int|string,string>
+	 */
+	private function chosen_shipping_methods(): array {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'get' ) ) {
+			return array();
+		}
+
+		$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
+		if ( ! is_array( $chosen ) ) {
+			return array();
+		}
+
+		$normalized = array();
+		foreach ( $chosen as $index => $method_id ) {
+			if ( is_scalar( $method_id ) ) {
+				$normalized[ $index ] = (string) $method_id;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * @param array<int|string,string> $previous_chosen_methods
+	 * @param array<string,array<string,mixed>> $previous_stored_rates
+	 * @param array<string,array<string,mixed>> $stored_rates
+	 */
+	private function reconcile_shipping_method_choices( array $previous_chosen_methods, array $previous_stored_rates, array $stored_rates ): void {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'set' ) ) {
+			return;
+		}
+
+		if ( array() === $previous_chosen_methods ) {
+			return;
+		}
+
+		if ( array() === $stored_rates ) {
+			return;
+		}
+
+		$next = $previous_chosen_methods;
+		$changed = false;
+		foreach ( $previous_chosen_methods as $index => $method_id ) {
+			$fresh_method_id = $this->fresh_wdc_method_id( $method_id, $stored_rates );
+			if ( '' !== $fresh_method_id ) {
+				if ( $fresh_method_id !== $method_id ) {
+					$next[ $index ] = $fresh_method_id;
+					$changed = true;
+				}
+				continue;
+			}
+
+			if ( ! $this->was_wdc_shipping_method_choice( $method_id, $previous_stored_rates ) ) {
+				continue;
+			}
+
+			unset( $next[ $index ] );
+			$changed = true;
+		}
+
+		if ( $changed ) {
+			WC()->session->set( 'chosen_shipping_methods', $next );
+		}
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $stored_rates
+	 */
+	private function fresh_wdc_method_id( string $method_id, array $stored_rates ): string {
+		$method_id = trim( $method_id );
+		$normalized_method_id = $this->session_manager->normalize_rate_id( $method_id );
+		if ( '' === $normalized_method_id ) {
+			return '';
+		}
+
+		foreach ( $stored_rates as $stored_rate_id => $rate ) {
+			if ( ! is_array( $rate ) ) {
+				continue;
+			}
+			$fresh_method_id = trim( (string) $stored_rate_id );
+			if ( $this->is_legacy_wdc_shipping_method_choice( $fresh_method_id ) ) {
+				continue;
+			}
+			if ( ! $this->is_wdc_stored_rate( $rate, $fresh_method_id ) ) {
+				continue;
+			}
+			if ( $fresh_method_id === $method_id || $normalized_method_id === $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $fresh_method_id ) ) ) {
+				return $fresh_method_id;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $previous_stored_rates
+	 */
+	private function was_wdc_shipping_method_choice( string $method_id, array $previous_stored_rates ): bool {
+		if ( $this->is_legacy_wdc_shipping_method_choice( $method_id ) ) {
+			return true;
+		}
+
+		$normalized_method_id = $this->session_manager->normalize_rate_id( $method_id );
+		if ( '' === $normalized_method_id ) {
+			return false;
+		}
+
+		foreach ( $previous_stored_rates as $stored_rate_id => $rate ) {
+			if ( ! is_array( $rate ) || ! $this->is_wdc_stored_rate( $rate, (string) $stored_rate_id ) ) {
+				continue;
+			}
+			if ( $normalized_method_id === $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $stored_rate_id ) ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function is_legacy_wdc_shipping_method_choice( string $method_id ): bool {
+		return str_starts_with( $method_id, self::METHOD_ID . ':' )
+			|| str_starts_with( $method_id, 'wdc_platform:' );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function is_wdc_stored_rate( array $rate, string $stored_rate_id ): bool {
+		$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $stored_rate_id ) );
+		if ( '' === $rate_id || $rate_id !== $this->session_manager->normalize_rate_id( $stored_rate_id ) ) {
+			return false;
+		}
+
+		if ( true === ( $rate['wdc_rate'] ?? false ) && 'platform' === (string) ( $rate['wdc_source'] ?? '' ) ) {
+			return true;
+		}
+
+		foreach ( array( 'carrier_key', 'service_key', 'delivery_type' ) as $key ) {
+			if ( '' === trim( (string) ( $rate[ $key ] ?? '' ) ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $stored_rates
+	 */
+	private function clear_pickup_selections_for_unavailable_rates( array $stored_rates ): void {
+		$available_families = $this->available_pickup_families( $stored_rates );
+		$selections = $this->session_manager->pickup_selections_for_current_destination( false );
+		foreach ( $selections as $family => $selection ) {
+			$family = $this->session_manager->normalize_pickup_family( (string) ( $selection['pickup_family'] ?? $family ) );
+			if ( '' === $family || ! str_ends_with( $family, ':pickup' ) ) {
+				continue;
+			}
+			if ( ! isset( $available_families[ $family ] ) ) {
+				$this->session_manager->clear_pickup_selection_for_family( $family, 'shipping_method_unavailable' );
+			}
+		}
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $stored_rates
+	 * @return array<string,bool>
+	 */
+	private function available_pickup_families( array $stored_rates ): array {
+		$families = array();
+		foreach ( $stored_rates as $stored_rate_id => $rate ) {
+			if ( ! is_array( $rate ) ) {
+				continue;
+			}
+			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $stored_rate_id ) );
+			$family = PickupFamilyResolver::from_meta( $rate, $rate_id );
+			if ( '' !== $family && str_ends_with( $family, ':pickup' ) ) {
+				$families[ $family ] = true;
+			}
+		}
+
+		return $families;
+	}
+
+	/**
+	 * @param array<int,DeliveryRate> $rates
+	 */
+	private function tariff_selector_rate( string $group_id, array $rates ): DeliveryRate {
+		$selected = $this->session_manager->has_pending_sort_selection_reset() ? array() : $this->session_manager->selected_tariff( $group_id );
+		$selected_object = (string) ( $selected['object_code'] ?? '' );
+		$active = $rates[0];
+		$selected_found = false;
+		foreach ( $rates as $rate ) {
+			if ( (string) $rate->tariff_key === $selected_object ) {
+				$active = $rate;
+				$selected_found = true;
+				break;
+			}
+		}
+		$variants = count( $rates ) > 1 ? array_map(
+			static function ( DeliveryRate $rate ): array {
+				$delivery_days_label = DeliveryDaysFormatter::format( $rate->delivery_days );
+
+				return array(
+					'rate_id' => $rate->rate_id,
+					'object_code' => $rate->tariff_key,
+					'title' => $rate->tariff_name,
+					'delivery_type' => $rate->delivery_type,
+					'price_rub' => $rate->price->get_rubles(),
+					'cost' => (string) $rate->price->get_rubles(),
+					'crossed_price' => $rate->crossed_price?->to_array(),
+					'delivery_days' => $rate->delivery_days->to_array(),
+					'delivery_days_label' => $delivery_days_label,
+					'planned_delivery_date' => $rate->planned_delivery_date,
+					'planned_delivery_comment' => $rate->planned_delivery_comment,
+					'comments' => $rate->comments,
+					'rate_meta' => $rate->meta,
+				);
+			},
+			$rates
+		) : array();
+		if ( ! $selected_found ) {
+			$this->session_manager->save_selected_tariff(
+				$group_id,
+				array(
+					'object_code' => $active->tariff_key,
+					'title' => $active->tariff_name,
+					'delivery_days' => $active->delivery_days->to_array(),
+					'final_price_rub' => $active->price->get_rubles(),
+				)
+			);
+		}
+
+		$method_title = $this->domestic_method_title( $active );
+
+		return new DeliveryRate(
+			$group_id,
+			$active->carrier_key,
+			$active->carrier_name,
+			$active->service_key,
+			$active->service_name,
+			$active->tariff_key,
+			$active->tariff_name,
+			$active->delivery_type,
+			$method_title,
+			$active->price,
+			$active->original_price,
+			$active->crossed_price,
+			$active->delivery_days,
+			$active->planned_delivery_date,
+			$active->planned_delivery_comment,
+			$active->comments,
+			$active->disabled,
+			$active->disabled_reason,
+			$active->requires_pickup_point,
+			$active->requires_courier_address,
+			array_merge(
+				$active->meta,
+				array(
+					'tariff_variants' => $variants,
+					'domestic_tariff_grouped' => RussianPostDomesticSettings::CARRIER_KEY === $active->carrier_key,
+					'checkout_group_id' => $group_id,
+					'pickup_method_title' => (string) ( $active->meta['pickup_method_title'] ?? RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ),
+					'courier_method_title' => (string) ( $active->meta['courier_method_title'] ?? RussianPostDomesticSettings::COURIER_SERVICE_TITLE ),
+					'selected_tariff_object' => $active->tariff_key,
+					'selected_tariff_title' => $active->tariff_name,
+					'selected_tariff_rate_id' => $active->rate_id,
+					'final_price_rub' => $active->price->get_rubles(),
+				)
+			),
+			$active->original_cost,
+			$active->original_delivery_days
+		);
+	}
+
+	private function domestic_method_title( DeliveryRate $rate ): string {
+		$prefix = $this->domestic_method_prefix( $rate );
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key || '' !== $prefix ) {
+			return $this->method_title_from_parts( $prefix, $rate->tariff_name, $this->delivery_comment( $rate->delivery_days ) );
+		}
+
+		$tariff = trim( $rate->tariff_name );
+		if ( '' === $tariff ) {
+			$title = $rate->service_name;
+		} else {
+			$title = $rate->service_name . ': ' . $tariff;
+		}
+		$days = $this->delivery_comment( $rate->delivery_days );
+
+		return '' !== $days ? $title . ' - ' . $days : $title;
+	}
+
+	private function method_title_from_parts( string $service_title, string $tariff_title, string $delivery_days ): string {
+		$title = trim( $service_title );
+		$tariff_title = trim( $tariff_title );
+		if ( '' !== $tariff_title && ! str_contains( $title, $tariff_title ) ) {
+			$title = '' !== $title ? $title . ', ' . $tariff_title : $tariff_title;
+		}
+
+		$delivery_days = trim( $delivery_days );
+		if ( '' !== $delivery_days && ! str_contains( $title, $delivery_days ) ) {
+			$title = '' !== $title ? $title . ' - ' . $delivery_days : $delivery_days;
+		}
+
+		return $title;
+	}
+
+	private function domestic_method_prefix( DeliveryRate $rate ): string {
+		$key = DeliveryType::COURIER === $rate->delivery_type ? 'courier_method_title' : 'pickup_method_title';
+		$default = DeliveryType::COURIER === $rate->delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
+		$title = trim( (string) ( $rate->meta[ $key ] ?? '' ) );
+
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key ) {
+			return '' !== $title ? $title : $default;
+		}
+
+		return $title;
+	}
+
+	private function delivery_comment( DateRange $range ): string {
+		return DeliveryDaysFormatter::format( $range );
+	}
+
+	private function sort_mode(): string {
+		return ( new CheckoutSortSelector( $this->session_manager, $this->settings_repository ) )->current_sort_mode();
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	private function checkout_rules(): array {
+		try {
+			return $this->rule_repository->get_default_rules();
+		} catch ( \Throwable $exception ) {
+			$this->log_exception( $exception );
+		}
+
+		return array();
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function checkout_rules_for_carrier( string $carrier_key ): array {
+		try {
+			if ( method_exists( $this->rule_repository, 'get_rules_for_carrier_with_default_fallback' ) ) {
+				return $this->rule_repository->get_rules_for_carrier_with_default_fallback( $carrier_key );
+			}
+		} catch ( \Throwable $exception ) {
+			$this->log_exception( $exception );
+		}
+
+		return $this->checkout_rules();
+	}
+
+	private function log_exception( \Throwable $exception ): void {
+		if ( $this->logger instanceof Logger ) {
+			$this->logger->error( 'WDC checkout shipping calculation failed.', array( 'error' => $exception->getMessage() ) );
+		}
+	}
+
+	private function fallback_orchestrator(): CheckoutOrchestrator {
+		throw new \RuntimeException( 'WDC platform shipping method is not configured.' );
+	}
+}

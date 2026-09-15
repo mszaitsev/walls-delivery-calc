@@ -1,0 +1,586 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Carriers\Pek\Checkout;
+
+use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
+use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteOptions;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuotePlannedDateTimeResolver;
+use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Pickup\PickupPoint;
+use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
+use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
+
+defined( 'ABSPATH' ) || exit;
+
+final class PekCheckoutQuoteContextResolver {
+	public function __construct(
+		private PekSettings $settings,
+		private LocationRepository $locations,
+		private PekLocationResolver $location_resolver,
+		private PekAddressBuilder $address_builder,
+		private CarrierPickupPointProviderRegistry $pickup_providers,
+		private PekQuotePlannedDateTimeResolver $planned_datetime,
+		private PekCheckoutPickupPointFormatter $formatter,
+		private PekCountryPolicy $countries
+	) {
+	}
+
+	/** @return array<string,mixed> */
+	public function resolve( QuoteRequest $request ): array {
+		$location_id = $this->location_id( $request );
+		$location = $location_id > 0 ? $this->locations->find_by_id( $location_id ) : null;
+		if ( ! $location instanceof Location || ! $location->active ) {
+			throw new PekApiException( 'Для расчёта ПЭК выберите населённый пункт.', array( 'error_code' => 'pek_checkout_location_missing', 'failure_stage' => 'checkout_context' ) );
+		}
+		$receiver_country = strtoupper( trim( $request->country_code ?: $location->country_code ) );
+		if ( ! $this->countries->supports_calculation_direction( $this->countries->sender_country(), $receiver_country ) || $receiver_country !== strtoupper( trim( $location->country_code ) ) ) {
+			throw new PekApiException( 'ПЭК не поддерживает выбранное направление.', array( 'error_code' => 'pek_checkout_country_not_supported', 'failure_stage' => 'checkout_context', 'country_code' => $receiver_country, 'direction_supported' => false ) );
+		}
+		$mapping_error = array();
+		try {
+			$mapping = $this->location_resolver->resolve( $location_id );
+		} catch ( PekApiException $exception ) {
+			$mapping_error = $this->pickup_options_error_from_exception( $exception );
+			$mapping = $this->canonical_location_mapping( $location );
+		} catch ( \RuntimeException ) {
+			$mapping_error = $this->mode_options_error( 'pek_checkout_location_resolution_failed', 'location_resolution' );
+			$mapping = $this->canonical_location_mapping( $location );
+		}
+		$fingerprint = $this->destination_fingerprint( $location, $mapping );
+		$query = $this->pickup_query( $request, $location, $mapping, $fingerprint );
+		$selection = $this->trusted_selection( $request, $fingerprint );
+		$planned = $this->planned_datetime->resolve();
+		$pickup_options = array();
+		$pickup_preliminary_options = array();
+		$pickup_error = array();
+		$pickup_preliminary_error = array();
+		if ( array() !== $mapping_error ) {
+			$pickup_preliminary_error = $mapping_error;
+		} else {
+			try {
+				$pickup_preliminary_options = $this->preliminary_pickup_options( $planned, $query, $mapping, $fingerprint );
+			} catch ( PekApiException $exception ) {
+				$pickup_preliminary_error = $this->pickup_options_error_from_exception( $exception );
+			} catch ( \RuntimeException ) {
+				$pickup_preliminary_error = $this->mode_options_error( 'pek_checkout_pickup_provider_failed', 'destination_terminal_provider' );
+			}
+		}
+		if ( is_array( $selection ) && '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+			$pickup_options = $this->selected_pickup_options( $planned, $selection );
+		} else {
+			$pickup_options = $pickup_preliminary_options;
+			$pickup_error = $pickup_preliminary_error;
+		}
+
+		$courier_options = array();
+		$courier_error = array();
+		try {
+			$courier_options = $this->courier_options( $request, $location, $mapping, $planned );
+		} catch ( PekApiException $exception ) {
+			$courier_error = $this->mode_options_error_from_exception( $exception, 'courier' );
+		}
+
+		return array(
+			'location' => $location,
+			'country_code' => $receiver_country,
+			'location_id' => $location_id,
+			'location_mapping' => $mapping,
+			'location_mapping_diagnostic' => $this->safe_mapping_diagnostic( $mapping ),
+			'destination_fingerprint' => $fingerprint,
+			'pickup_query' => $query,
+			'pickup_provider_query' => $this->safe_query_snapshot( $query, $fingerprint ),
+			'selection' => $selection,
+			'plannedDateTime' => $planned,
+			'pickup_options' => $pickup_options,
+			'pickup_options_error' => $pickup_error,
+			'pickup_preliminary_options' => $pickup_preliminary_options,
+			'pickup_preliminary_options_error' => $pickup_preliminary_error,
+			'courier_options' => $courier_options,
+			'courier_options_error' => $courier_error,
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function canonical_location_mapping( Location $location ): array {
+		return array(
+			'location_id' => (int) $location->id,
+			'country_code' => strtoupper( trim( $location->country_code ) ),
+			'address_fingerprint' => $this->location_resolver->fingerprint( $location ),
+			'resolution_method' => 'canonical_fallback',
+			'normalized_address' => $this->address_builder->build( $location ),
+			'latitude' => $location->has_coordinates() ? $location->latitude : null,
+			'longitude' => $location->has_coordinates() ? $location->longitude : null,
+			'precision' => '',
+			'mapping_state' => 'unavailable',
+			'cache_hit' => false,
+			'stale_fallback' => false,
+		);
+	}
+
+	/** @return array<string,mixed>|null */
+	public function trusted_selection( QuoteRequest $request, string $destination_fingerprint ): ?array {
+		$selections = is_array( $request->customer_context['pickup_selections'] ?? null ) ? $request->customer_context['pickup_selections'] : array();
+		$selection = is_array( $selections[ PekSettings::PICKUP_FAMILY ] ?? null ) ? $selections[ PekSettings::PICKUP_FAMILY ] : array();
+		if ( array() === $selection && is_array( $request->customer_context['pickup_selection'] ?? null ) ) {
+			$selection = $request->customer_context['pickup_selection'];
+		}
+		if ( array() === $selection ) {
+			return null;
+		}
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$carrier = (string) ( $selection['carrier_key'] ?? $snapshot['carrier_key'] ?? '' );
+		$service = (string) ( $selection['service_key'] ?? $snapshot['service_key'] ?? '' );
+		$family = (string) ( $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+		$code = trim( (string) ( $selection['point_code'] ?? $selection['point_id'] ?? $snapshot['point_code'] ?? '' ) );
+		$stored_fingerprint = (string) ( $selection['provider_destination_fingerprint'] ?? $snapshot['provider_destination_fingerprint'] ?? '' );
+		if ( '' === $stored_fingerprint ) {
+			$legacy = (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' );
+			$stored_fingerprint = $this->looks_like_provider_fingerprint( $legacy ) ? $legacy : '';
+		}
+		if ( PekSettings::CARRIER_KEY !== $carrier || PekSettings::SERVICE_KEY !== $service || PekSettings::PICKUP_FAMILY !== $family || '' === $code ) {
+			return null;
+		}
+		if ( '' === $stored_fingerprint || ! hash_equals( $destination_fingerprint, $stored_fingerprint ) ) {
+			return null;
+		}
+		$selection['point_code'] = $code;
+
+		return $selection;
+	}
+
+	/** @return array<string,mixed> */
+	public function safe_query_snapshot( CarrierPickupPointQuery $query, string $destination_fingerprint ): array {
+		return array(
+			'carrier_key' => PekSettings::CARRIER_KEY,
+			'purpose' => $query->purpose,
+			'location_id' => $query->location_id,
+			'country_code' => $query->normalized_country_code(),
+			'fallback_address_fingerprint' => '' !== trim( $query->fallback_address ) ? hash( 'sha256', $query->fallback_address ) : '',
+			'latitude' => $query->latitude,
+			'longitude' => $query->longitude,
+			'cargo' => $query->cargo->to_array(),
+			'radius_km' => $query->radius_km,
+			'limit' => $query->limit,
+			'destination_fingerprint' => $destination_fingerprint,
+			'provider_destination_fingerprint' => $destination_fingerprint,
+		);
+	}
+
+	public function query_from_snapshot( array $snapshot ): ?CarrierPickupPointQuery {
+		$location_id = (int) ( $snapshot['location_id'] ?? 0 );
+		if ( $location_id <= 0 ) {
+			return null;
+		}
+		$location = $this->locations->find_by_id( $location_id );
+		if ( ! $location instanceof Location || ! $location->active ) {
+			return null;
+		}
+		$country_code = strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) );
+		$canonical_country = strtoupper( trim( $location->country_code ) );
+		if (
+			'' === $country_code
+			|| $country_code !== $canonical_country
+			|| ! $this->countries->supports_calculation_direction( $this->countries->sender_country(), $country_code )
+		) {
+			return null;
+		}
+		if ( ! $this->valid_snapshot_coordinates( $snapshot ) ) {
+			return null;
+		}
+		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
+		$coordinates = $location->has_coordinates()
+			? array( 'latitude' => $location->latitude, 'longitude' => $location->longitude )
+			: array( 'latitude' => null, 'longitude' => null );
+		$query = new CarrierPickupPointQuery(
+			PekSettings::CARRIER_KEY,
+			$location_id,
+			$country_code,
+			$this->address_builder->build( $location ),
+			$coordinates['latitude'],
+			$coordinates['longitude'],
+			new PickupCargoConstraints(
+				(int) ( $cargo['weight_g'] ?? 0 ),
+				(int) ( $cargo['volume_cm3'] ?? 0 ),
+				(int) ( $cargo['max_dimension_cm'] ?? 0 ),
+				(int) ( $cargo['max_place_weight_g'] ?? 0 ),
+				max( 1, (int) ( $cargo['places_count'] ?? 1 ) )
+			),
+			CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
+			max( 1, (int) ( $snapshot['radius_km'] ?? $this->settings->pek_destination_terminal_search_radius() ) ),
+			max( 1, (int) ( $snapshot['limit'] ?? $this->settings->pek_destination_terminal_search_limit() ) )
+		);
+
+		return array() === $query->validate() ? $query : null;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function valid_snapshot_coordinates( array $snapshot ): bool {
+		$latitude = $snapshot['latitude'] ?? null;
+		$longitude = $snapshot['longitude'] ?? null;
+		if ( null === $latitude && null === $longitude ) {
+			return true;
+		}
+		if ( null === $latitude || null === $longitude || ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return false;
+		}
+		$latitude = (float) $latitude;
+		$longitude = (float) $longitude;
+
+		return is_finite( $latitude )
+			&& is_finite( $longitude )
+			&& $latitude >= -90
+			&& $latitude <= 90
+			&& $longitude >= -180
+			&& $longitude <= 180;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	public function destination_fingerprint_from_snapshot( array $snapshot ): string {
+		return (string) ( $snapshot['destination_fingerprint'] ?? '' );
+	}
+
+	private function looks_like_provider_fingerprint( string $value ): bool {
+		return 64 === strlen( $value ) && ctype_xdigit( $value );
+	}
+
+	/** @param array<string,mixed> $mapping @return array<string,mixed> */
+	private function safe_mapping_diagnostic( array $mapping ): array {
+		$diagnostic = array();
+		$raw = trim( (string) ( $mapping['safe_diagnostic_json'] ?? '' ) );
+		if ( '' !== $raw ) {
+			$decoded = json_decode( $raw, true );
+			if ( is_array( $decoded ) && ! array_is_list( $decoded ) ) {
+				foreach ( array( 'code', 'message', 'expected_country', 'actual_country', 'precision', 'state' ) as $key ) {
+					if ( is_scalar( $decoded[ $key ] ?? null ) ) {
+						$value = $this->safe_diagnostic_text( (string) $decoded[ $key ] );
+						if ( '' !== $value ) {
+							$diagnostic[ $key ] = $value;
+						}
+					}
+				}
+			}
+		}
+
+		return array(
+			'mapping_state' => (string) ( $mapping['mapping_state'] ?? '' ),
+			'resolution_method' => (string) ( $mapping['resolution_method'] ?? '' ),
+			'precision' => (string) ( $mapping['precision'] ?? '' ),
+			'cache_hit' => ! empty( $mapping['cache_hit'] ),
+			'stale_fallback' => ! empty( $mapping['stale_fallback'] ),
+			'mapping_diagnostic' => $diagnostic,
+		);
+	}
+
+	private function safe_diagnostic_text( string $value ): string {
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? '';
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? '' );
+
+		return substr( $value, 0, 160 );
+	}
+
+	/** @param array<string,mixed> $selection @return array<string,mixed> */
+	private function selected_pickup_options( string $planned, array $selection ): array {
+		return array(
+			'options' => new PekQuoteOptions( PekQuoteOptions::MODE_PICKUP, $planned, (string) $selection['point_code'] ),
+			'warehouse_id' => (string) $selection['point_code'],
+			'warehouse_source' => 'selection',
+			'selected' => true,
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function preliminary_pickup_options( string $planned, CarrierPickupPointQuery $query, array $mapping, string $fingerprint ): array {
+		$provider = $this->pickup_providers->get( PekSettings::CARRIER_KEY );
+		try {
+			$points = null !== $provider ? $provider->search( $query ) : array();
+		} catch ( PekApiException $exception ) {
+			throw new PekApiException(
+				$exception->getMessage(),
+				array_merge( $exception->context(), $this->pickup_provider_context( $provider ) )
+			);
+		}
+		if ( array() === $points ) {
+			throw new PekApiException(
+				'Подходящие терминалы ПЭК не найдены.',
+				array_merge(
+					$this->pickup_provider_context( $provider ),
+					array(
+						'error_code' => 'pek_checkout_pickup_points_missing',
+						'failure_stage' => 'checkout_context',
+					)
+				)
+			);
+		}
+		$main = $this->usable_mapping_for_quote( $mapping ) ? trim( (string) ( $mapping['main_warehouse_id'] ?? '' ) ) : '';
+		$chosen = null;
+		if ( '' !== $main ) {
+			foreach ( $points as $point ) {
+				if ( $point instanceof PickupPoint && $point->code === $main ) {
+					$chosen = $point;
+					break;
+				}
+			}
+		}
+		if ( ! $chosen instanceof PickupPoint ) {
+			foreach ( $points as $point ) {
+				if ( $point instanceof PickupPoint && 'free' === (string) ( $point->raw_reference['source'] ?? '' ) ) {
+					$chosen = $point;
+					break;
+				}
+			}
+		}
+		$chosen = $chosen instanceof PickupPoint ? $chosen : $points[0];
+
+		return array(
+			'options' => new PekQuoteOptions( PekQuoteOptions::MODE_PICKUP, $planned, $chosen->code ),
+			'warehouse_id' => $chosen->code,
+			'warehouse_source' => $chosen->code === $main ? 'mapping_main_warehouse' : ( (string) ( $chosen->raw_reference['source'] ?? '' ) ?: 'provider_first' ),
+			'selected' => false,
+			'preliminary_point' => $this->formatter->format( $chosen, $fingerprint, $query->location_id, $query->country_code ),
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function courier_options( QuoteRequest $request, Location $location, array $mapping, string $planned ): array {
+		$full = $this->full_courier_address( $request );
+		if ( '' !== $full ) {
+			return array(
+				'options' => new PekQuoteOptions( PekQuoteOptions::MODE_COURIER, $planned, '', $full ),
+				'scope' => 'full_address',
+				'address_fingerprint' => hash( 'sha256', $full ),
+			);
+		}
+		$address = $this->quote_address( $location, $mapping );
+		$coordinates = $this->quote_coordinates( $location, $mapping );
+
+		return array(
+			'options' => new PekQuoteOptions( PekQuoteOptions::MODE_COURIER, $planned, '', $address, $coordinates['latitude'], $coordinates['longitude'] ),
+			'scope' => 'location',
+			'address_fingerprint' => hash( 'sha256', $address ),
+		);
+	}
+
+	private function location_id( QuoteRequest $request ): int {
+		foreach ( array( 'selected_location_id', 'location_id' ) as $key ) {
+			$value = $request->customer_context[ $key ] ?? null;
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
+	}
+
+	private function pickup_query( QuoteRequest $request, Location $location, array $mapping, string $fingerprint ): CarrierPickupPointQuery {
+		unset( $fingerprint );
+		$coordinates = $this->quote_coordinates( $location, $mapping );
+		return new CarrierPickupPointQuery(
+			PekSettings::CARRIER_KEY,
+			(int) $location->id,
+			strtoupper( trim( $location->country_code ) ),
+			$this->quote_address( $location, $mapping ),
+			$coordinates['latitude'],
+			$coordinates['longitude'],
+			$this->cargo_constraints( $request->package ),
+			CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
+			$this->settings->pek_destination_terminal_search_radius(),
+			$this->settings->pek_destination_terminal_search_limit()
+		);
+	}
+
+	private function cargo_constraints( Package $package ): PickupCargoConstraints {
+		$weight = max( 0, $package->total_weight_g > 0 ? $package->total_weight_g : $package->get_total_weight_g() );
+		$volume = max( 0, $package->get_total_volume_cm3() );
+		$max_dimension = max( 0, (int) ( $package->length_cm ?? 0 ), (int) ( $package->width_cm ?? 0 ), (int) ( $package->height_cm ?? 0 ) );
+
+		return new PickupCargoConstraints( $weight, $volume, $max_dimension, $weight, 1 );
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function usable_mapping_for_quote( array $mapping ): bool {
+		return in_array( (string) ( $mapping['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true );
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function quote_address( Location $location, array $mapping ): string {
+		if ( $this->usable_mapping_for_quote( $mapping ) ) {
+			$address = trim( (string) ( $mapping['normalized_address'] ?? '' ) );
+			if ( '' !== $address ) {
+				return $address;
+			}
+		}
+
+		return $this->address_builder->build( $location );
+	}
+
+	/** @param array<string,mixed> $mapping @return array{latitude:?float,longitude:?float} */
+	private function quote_coordinates( Location $location, array $mapping ): array {
+		if (
+			$this->usable_mapping_for_quote( $mapping )
+			&& is_numeric( $mapping['latitude'] ?? null )
+			&& is_numeric( $mapping['longitude'] ?? null )
+		) {
+			return array( 'latitude' => (float) $mapping['latitude'], 'longitude' => (float) $mapping['longitude'] );
+		}
+		if ( $location->has_coordinates() ) {
+			return array( 'latitude' => $location->latitude, 'longitude' => $location->longitude );
+		}
+
+		return array( 'latitude' => null, 'longitude' => null );
+	}
+
+	private function destination_fingerprint( Location $location, array $mapping ): string {
+		return hash( 'sha256', implode( '|', array(
+			'country=' . strtoupper( $location->country_code ),
+			'id=' . (string) $location->id,
+			'fias=' . $location->fias_id,
+			'gar=' . (string) $location->gar_object_id,
+			'mapping=' . (string) ( $mapping['address_fingerprint'] ?? '' ),
+		) ) );
+	}
+
+	private function full_courier_address( QuoteRequest $request ): string {
+		$destination = $request->destination;
+		$street = trim( $destination->street );
+		$house = trim( $destination->house );
+		if ( '' !== $street && '' !== $house ) {
+			return trim( implode( ', ', array_filter( array(
+				$this->country_name( $destination->country_code ),
+				$destination->region_name,
+				$destination->city ?: $destination->settlement,
+				$street,
+				$house,
+				$destination->apartment,
+			), static fn( string $part ): bool => '' !== trim( $part ) ) ) );
+		}
+		$raw = trim( $destination->raw_address );
+		return strlen( $raw ) >= 12 ? $raw : '';
+	}
+
+	private function country_name( string $country_code ): string {
+		return array(
+			'RU' => 'Россия',
+			'AM' => 'Армения',
+			'BY' => 'Беларусь',
+			'KG' => 'Кыргызстан',
+			'KZ' => 'Казахстан',
+		)[ strtoupper( trim( $country_code ) ) ] ?? strtoupper( trim( $country_code ) );
+	}
+
+	/** @return array<string,mixed> */
+	private function pickup_options_error_from_exception( PekApiException $exception ): array {
+		$context = $exception->context();
+		$error = array(
+			'success' => false,
+			'error_code' => $this->safe_token( (string) ( $context['error_code'] ?? 'pek_checkout_pickup_options_missing' ) ),
+			'failure_stage' => $this->safe_token( (string) ( $context['failure_stage'] ?? 'checkout_context' ) ),
+		);
+		foreach ( array( 'endpoint', 'method', 'http_status', 'api_error_message', 'cache_hit', 'api_source', 'response_shape', 'field_errors' ) as $key ) {
+			if ( array_key_exists( $key, $context ) ) {
+				$error[ $key ] = $context[ $key ];
+			}
+		}
+
+		return $this->safe_pickup_diagnostic( $error );
+	}
+
+	/** @return array<string,mixed> */
+	private function mode_options_error_from_exception( PekApiException $exception, string $mode ): array {
+		$context = $exception->context();
+
+		return $this->mode_options_error(
+			$this->safe_token( (string) ( $context['error_code'] ?? 'pek_checkout_' . $mode . '_options_missing' ) ),
+			$this->safe_token( (string) ( $context['failure_stage'] ?? 'checkout_context' ) )
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function mode_options_error( string $error_code, string $failure_stage ): array {
+		return array(
+			'success' => false,
+			'error_code' => $this->safe_token( $error_code ),
+			'failure_stage' => $this->safe_token( $failure_stage ),
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function pickup_provider_context( mixed $provider ): array {
+		if ( ! is_object( $provider ) || ! method_exists( $provider, 'last_report' ) ) {
+			return array();
+		}
+		$report = $provider->last_report();
+		return is_array( $report ) ? $this->safe_pickup_diagnostic( $report ) : array();
+	}
+
+	/** @param array<string,mixed> $diagnostic @return array<string,mixed> */
+	private function safe_pickup_diagnostic( array $diagnostic ): array {
+		$result = array();
+		foreach ( array( 'success', 'cache_hit' ) as $key ) {
+			if ( array_key_exists( $key, $diagnostic ) ) {
+				$result[ $key ] = (bool) $diagnostic[ $key ];
+			}
+		}
+		foreach ( array( 'error_code', 'failure_stage', 'api_source' ) as $key ) {
+			if ( array_key_exists( $key, $diagnostic ) ) {
+				$result[ $key ] = $this->safe_token( (string) $diagnostic[ $key ] );
+			}
+		}
+		if ( array_key_exists( 'method', $diagnostic ) ) {
+			$method = strtoupper( trim( (string) $diagnostic['method'] ) );
+			$result['method'] = in_array( $method, array( 'GET', 'POST' ), true ) ? $method : '';
+		}
+		if ( array_key_exists( 'endpoint', $diagnostic ) ) {
+			$result['endpoint'] = $this->safe_endpoint( (string) $diagnostic['endpoint'] );
+		}
+		if ( array_key_exists( 'http_status', $diagnostic ) ) {
+			$result['http_status'] = is_numeric( $diagnostic['http_status'] ) ? max( 0, min( 599, (int) $diagnostic['http_status'] ) ) : '';
+		}
+		if ( array_key_exists( 'api_error_message', $diagnostic ) ) {
+			$result['api_error_message'] = $this->safe_message( (string) $diagnostic['api_error_message'] );
+		}
+		if ( is_array( $diagnostic['response_shape'] ?? null ) ) {
+			$result['response_shape'] = $diagnostic['response_shape'];
+		}
+		if ( is_array( $diagnostic['field_errors'] ?? null ) ) {
+			$result['field_errors'] = $diagnostic['field_errors'];
+		}
+
+		return $result;
+	}
+
+	private function safe_token( string $value ): string {
+		$value = strtolower( trim( $value ) );
+		return 1 === preg_match( '/^[a-z0-9_:-]{0,100}$/', $value ) ? $value : '';
+	}
+
+	private function safe_endpoint( string $value ): string {
+		$value = trim( $value );
+		return 1 === preg_match( '#^/[a-z0-9/_-]{1,180}$#i', $value ) ? $value : '';
+	}
+
+	private function safe_message( string $value ): string {
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $value ) ?? $value;
+		$value = preg_replace( '/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/iu', '[redacted]', $value ) ?? $value;
+		$value = preg_replace( '/(?<!\w)\+?7[\s().-]*\d[\d\s().-]{8,}\d(?!\w)/u', '[redacted]', $value ) ?? $value;
+		$value = trim( $value );
+		if ( function_exists( 'mb_substr' ) ) {
+			$value = mb_substr( $value, 0, 500 );
+		} else {
+			$value = substr( $value, 0, 500 );
+		}
+
+		return trim( $value );
+	}
+}

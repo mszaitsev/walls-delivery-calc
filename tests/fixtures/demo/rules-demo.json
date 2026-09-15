@@ -1,0 +1,107 @@
+[
+  {
+    "name": "+200 RUB demo",
+    "enabled": true,
+    "priority": 10,
+    "target_type": "rate",
+    "target_value": "demo",
+    "action_type": "change_price",
+    "operation_type": "increase",
+    "operation_value": 200,
+    "operation_base": "rubles",
+    "promo_shipping": false,
+    "stop_processing": false,
+    "conditions": [
+      {
+        "condition_group": 1,
+        "condition_type": "country",
+        "operator": "eq",
+        "value_text": "RU"
+      }
+    ]
+  },
+  {
+    "name": "-10% delivery demo",
+    "enabled": true,
+    "priority": 20,
+    "target_type": "rate",
+    "target_value": "demo",
+    "action_type": "change_price",
+    "operation_type": "decrease",
+    "operation_value": 10,
+    "operation_base": "percent_of_delivery",
+    "promo_shipping": false,
+    "stop_processing": false,
+    "conditions": [
+      {
+        "condition_group": 1,
+        "condition_type": "delivery_type",
+        "operator": "eq",
+        "value_text": "courier"
+      }
+    ]
+  },
+  {
+    "name": "Free shipping promo demo",
+    "enabled": true,
+    "priority": 30,
+    "target_type": "rate",
+    "target_value": "demo",
+    "action_type": "change_price",
+    "operation_type": "decrease",
+    "operation_value": 500,
+    "operation_base": "rubles",
+    "promo_shipping": true,
+    "stop_processing": false,
+    "conditions": [
+      {
+        "condition_group": 1,
+        "condition_type": "order_total",
+        "operator": "gte",
+        "value_number": 1000
+      }
+    ]
+  },
+  {
+    "name": "Disable delivery over weight demo",
+    "enabled": true,
+    "priority": 40,
+    "target_type": "rate",
+    "target_value": "Weight limit exceeded",
+    "action_type": "disable_rate",
+    "operation_type": "equals",
+    "operation_value": 0,
+    "operation_base": "rubles",
+    "promo_shipping": false,
+    "stop_processing": true,
+    "conditions": [
+      {
+        "condition_group": 1,
+        "condition_type": "weight",
+        "operator": "gt",
+        "value_number": 10000
+      }
+    ]
+  },
+  {
+    "name": "Add comment demo",
+    "enabled": true,
+    "priority": 50,
+    "target_type": "rate",
+    "target_value": "Demo delivery comment",
+    "action_type": "add_comment",
+    "operation_type": "equals",
+    "operation_value": 0,
+    "operation_base": "rubles",
+    "promo_shipping": false,
+    "stop_processing": false,
+    "conditions": [
+      {
+        "condition_group": 1,
+        "condition_type": "city",
+        "operator": "eq",
+        "value_text": "Moscow"
+      }
+    ]
+  }
+]

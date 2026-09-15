@@ -1,0 +1,1639 @@
+<?php
+declare(strict_types=1);
+
+defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+defined( 'WDC_SCHEMA_VERSION' ) || define( 'WDC_SCHEMA_VERSION', '1.0.0' );
+
+$GLOBALS['wdc_test_options'] = array();
+$GLOBALS['wdc_test_actions'] = array();
+$GLOBALS['wdc_test_filters'] = array();
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
+$GLOBALS['wdc_test_is_checkout'] = true;
+$GLOBALS['wdc_test_dbdelta_queries'] = array();
+
+if ( ! function_exists( 'dbDelta' ) ) {
+	function dbDelta( string|array $queries = '' ): array {
+		foreach ( (array) $queries as $query ) {
+			$GLOBALS['wdc_test_dbdelta_queries'][] = (string) $query;
+		}
+		return array();
+	}
+}
+
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $key, mixed $default = false ): mixed {
+		return $GLOBALS['wdc_test_options'][ $key ] ?? $default;
+	}
+}
+
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $key, mixed $value, bool|string $autoload = false ): bool {
+		$GLOBALS['wdc_test_options'][ $key ] = $value;
+		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_option' ) ) {
+	function delete_option( string $key ): bool {
+		unset( $GLOBALS['wdc_test_options'][ $key ] );
+		if ( isset( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'options' ) && is_array( $GLOBALS['wpdb']->options ) ) {
+			unset( $GLOBALS['wpdb']->options[ $key ] );
+		}
+		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_transient' ) ) {
+	function delete_transient( string $key ): bool {
+		$deleted = false;
+		foreach ( array( '_transient_' . $key, '_transient_timeout_' . $key ) as $option ) {
+			if ( isset( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'options' ) && is_array( $GLOBALS['wpdb']->options ) && array_key_exists( $option, $GLOBALS['wpdb']->options ) ) {
+				unset( $GLOBALS['wpdb']->options[ $option ] );
+				$deleted = true;
+			}
+		}
+		return $deleted;
+	}
+}
+
+if ( ! function_exists( 'add_action' ) ) {
+	function add_action( string $hook, mixed $callback, int $priority = 10, int $accepted_args = 1 ): void {
+		$GLOBALS['wdc_test_actions'][ $hook ][] = array( $callback, $priority, $accepted_args );
+	}
+}
+
+if ( ! function_exists( 'add_filter' ) ) {
+	function add_filter( string $hook, mixed $callback, int $priority = 10, int $accepted_args = 1 ): void {
+		$GLOBALS['wdc_test_filters'][ $hook ][] = array( $callback, $priority, $accepted_args );
+	}
+}
+
+if ( ! function_exists( 'wp_enqueue_script' ) ) {
+	function wp_enqueue_script( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false, bool $in_footer = false ): void {
+		$GLOBALS['wdc_test_scripts'][ $handle ] = compact( 'src', 'deps', 'ver', 'in_footer' );
+	}
+}
+
+if ( ! function_exists( 'wp_localize_script' ) ) {
+	function wp_localize_script( string $handle, string $object_name, array $l10n ): void {
+		$GLOBALS['wdc_test_localized_scripts'][ $handle ][ $object_name ] = $l10n;
+	}
+}
+
+if ( ! function_exists( 'wp_enqueue_style' ) ) {
+	function wp_enqueue_style( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false ): void {
+		$GLOBALS['wdc_test_styles'][ $handle ] = compact( 'src', 'deps', 'ver' );
+	}
+}
+
+if ( ! function_exists( 'wp_script_is' ) ) {
+	function wp_script_is( string $handle, string $status = 'enqueued' ): bool {
+		return 'wc-checkout' === $handle && 'registered' === $status;
+	}
+}
+
+if ( ! function_exists( 'register_activation_hook' ) ) {
+	function register_activation_hook( string $file, mixed $callback ): void {
+	}
+}
+
+if ( ! function_exists( 'register_deactivation_hook' ) ) {
+	function register_deactivation_hook( string $file, mixed $callback ): void {
+	}
+}
+
+if ( ! function_exists( 'is_admin' ) ) {
+	function is_admin(): bool {
+		return (bool) ( $GLOBALS['wdc_test_is_admin'] ?? false );
+	}
+}
+
+if ( ! function_exists( 'is_checkout' ) ) {
+	function is_checkout(): bool {
+		return (bool) ( $GLOBALS['wdc_test_is_checkout'] ?? true );
+	}
+}
+
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $capability ): bool {
+		if ( in_array( $capability, $GLOBALS['wdc_test_denied_capabilities'] ?? array(), true ) ) {
+			return false;
+		}
+		return in_array( $capability, array( 'manage_options', 'manage_woocommerce' ), true );
+	}
+}
+
+if ( ! function_exists( 'current_time' ) ) {
+	function current_time( string $type ): string {
+		return '2026-05-21 12:00:00';
+	}
+}
+
+if ( ! function_exists( 'sanitize_text_field' ) ) {
+	function sanitize_text_field( string $value ): string {
+		return trim( strip_tags( $value ) );
+	}
+}
+
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( string $value ): string {
+		return strtolower( preg_replace( '/[^a-zA-Z0-9_\-]/', '', $value ) ?? '' );
+	}
+}
+
+if ( ! function_exists( 'wp_unslash' ) ) {
+	function wp_unslash( mixed $value ): mixed {
+		return $value;
+	}
+}
+
+if ( ! function_exists( 'wp_json_encode' ) ) {
+	function wp_json_encode( mixed $value, int $flags = 0 ): string|false {
+		return json_encode( $value, $flags );
+	}
+}
+
+if ( ! function_exists( 'admin_url' ) ) {
+	function admin_url( string $path = '' ): string {
+		return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
+	}
+}
+
+if ( ! function_exists( 'wp_create_nonce' ) ) {
+	function wp_create_nonce( string $action ): string {
+		return 'nonce-' . $action;
+	}
+}
+
+if ( ! function_exists( 'wp_nonce_field' ) ) {
+	function wp_nonce_field( string|int $action = -1, string $name = '_wpnonce', bool $referer = true, bool $display = true ): string {
+		$field = '<input type="hidden" name="' . esc_attr( $name ) . '" value="' . esc_attr( wp_create_nonce( $action ) ) . '">';
+		if ( $display ) {
+			echo $field;
+		}
+		return $field;
+	}
+}
+
+if ( ! function_exists( 'wp_verify_nonce' ) ) {
+	function wp_verify_nonce( string $nonce, string $action ): bool {
+		return 'nonce-' . $action === $nonce;
+	}
+}
+
+if ( ! function_exists( '__' ) ) {
+	function __( string $text, string $domain = '' ): string {
+		return $text;
+	}
+}
+
+if ( ! function_exists( 'esc_html__' ) ) {
+	function esc_html__( string $text, string $domain = '' ): string {
+		return $text;
+	}
+}
+
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'esc_attr' ) ) {
+	function esc_attr( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'selected' ) ) {
+	function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
+		$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+		return $result;
+	}
+}
+
+if ( ! function_exists( 'checked' ) ) {
+	function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
+		$result = (string) $checked === (string) $current ? ' checked="checked"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+		return $result;
+	}
+}
+
+if ( ! function_exists( 'submit_button' ) ) {
+	function submit_button( string $text = 'Save Changes' ): void {
+		echo '<button type="submit" class="button button-primary">' . esc_html( $text ) . '</button>';
+	}
+}
+
+if ( ! function_exists( 'trailingslashit' ) ) {
+	function trailingslashit( string $value ): string {
+		return rtrim( $value, '/\\' ) . DIRECTORY_SEPARATOR;
+	}
+}
+
+if ( ! class_exists( 'WC_Settings_API' ) ) {
+	class WC_Settings_API {
+		/** @var array<string,mixed> */
+		public array $settings = array();
+	}
+}
+
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method extends WC_Settings_API {
+		public string $id = '';
+		public int $instance_id = 0;
+		public string $method_title = '';
+		public string $method_description = '';
+		public string $enabled = 'yes';
+		public string $title = '';
+		/** @var array<int,string> */
+		public array $supports = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $rates = array();
+
+		public function add_rate( array $rate ): void {
+			$this->rates[] = $rate;
+		}
+	}
+}
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		public int $insert_id = 0;
+		/** @var array<int,array<string,mixed>> */
+		public array $pickup_rows = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $location_rows = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $rule_rows = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $rule_condition_rows = array();
+		/** @var array<string,mixed> */
+		public array $options = array();
+
+		public function get_charset_collate(): string {
+			return '';
+		}
+
+		public function esc_like( string $text ): string {
+			return addcslashes( $text, '_%\\' );
+		}
+
+		public function get_results( string $query, mixed $output = null ): array {
+			if ( str_contains( $query, 'wdc_rule_conditions' ) ) {
+				preg_match( '/rule_id = ([0-9]+)/', $query, $matches );
+				$rule_id = (int) ( $matches[1] ?? 0 );
+				return array_values( array_filter( $this->rule_condition_rows, static fn ( array $row ): bool => (int) $row['rule_id'] === $rule_id ) );
+			}
+
+			if ( str_contains( $query, 'wdc_rules' ) ) {
+				$rows = $this->rule_rows;
+				if ( str_contains( $query, 'enabled = 1' ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (int) $row['enabled'] === 1 ) );
+				}
+				if ( preg_match( "/target_type = '([^']*)'/", $query, $matches ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (string) $row['target_type'] === $matches[1] ) );
+				}
+				if ( preg_match( "/target_value = '([^']*)'/", $query, $matches ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (string) $row['target_value'] === $matches[1] ) );
+				}
+				usort(
+					$rows,
+					static fn ( array $a, array $b ): int => ( (int) $a['promo_shipping'] <=> (int) $b['promo_shipping'] )
+						?: ( (int) $a['priority'] <=> (int) $b['priority'] )
+						?: ( (int) $a['id'] <=> (int) $b['id'] )
+				);
+				return $rows;
+			}
+
+			if ( str_contains( $query, 'wdc_locations' ) ) {
+				preg_match( "/searchable_text LIKE '([^']+)'/", $query, $like_matches );
+				$needle = trim( (string) ( $like_matches[1] ?? '' ), '%' );
+				preg_match( '/LIMIT ([0-9]+)/', $query, $limit_matches );
+				$limit = (int) ( $limit_matches[1] ?? 50 );
+				$rows = array_values(
+					array_filter(
+						$this->location_rows,
+						static fn ( array $row ): bool => (bool) ( $row['active'] ?? 0 )
+							&& ( '' === $needle || str_contains( (string) ( $row['searchable_text'] ?? '' ), $needle ) )
+					)
+				);
+				usort( $rows, static fn ( array $a, array $b ): int => strcmp( (string) $a['display_name'], (string) $b['display_name'] ) );
+				return array_slice( $rows, 0, max( 1, $limit ) );
+			}
+
+			if ( ! preg_match( "/carrier_key = '([^']+)'.*country_code = '([^']+)'/", $query, $matches ) ) {
+				return array();
+			}
+
+			return array_values(
+				array_filter(
+					$this->pickup_rows,
+					static fn ( array $row ): bool => (bool) ( $row['active'] ?? 0 )
+						&& $row['carrier_key'] === $matches[1]
+						&& $row['country_code'] === $matches[2]
+				)
+			);
+		}
+
+		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( ! preg_match( "/carrier_key = '([^']+)'.*point_code = '([^']+)'/", $query, $matches ) ) {
+				return null;
+			}
+
+			foreach ( $this->pickup_rows as $row ) {
+				if ( $row['carrier_key'] === $matches[1] && $row['point_code'] === $matches[2] ) {
+					return $row;
+				}
+			}
+
+			return null;
+		}
+
+		public function prepare( string $query, mixed ...$args ): string {
+			if ( 1 === count( $args ) && is_array( $args[0] ) ) {
+				$args = $args[0];
+			}
+			foreach ( $args as $arg ) {
+				$value = is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
+				$query = preg_replace( '/%[sd]/', $value, $query, 1 ) ?? $query;
+			}
+			return $query;
+		}
+
+		public function insert( string $table, array $data, array $format = array() ): bool {
+			$this->insert_id++;
+			$data['id'] = $this->insert_id;
+			if ( str_contains( $table, 'wdc_locations' ) ) {
+				$this->location_rows[] = $data;
+			} elseif ( str_ends_with( $table, 'wdc_pickup_points' ) ) {
+				$this->pickup_rows[] = $data;
+			}
+			return true;
+		}
+
+		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			return true;
+		}
+
+		public function get_var( string $query ): int {
+			return count( $this->pickup_rows );
+		}
+
+		public function query( string $query ): bool {
+			if ( str_starts_with( $query, 'UPDATE' ) && str_contains( $query, 'wdc_rules' ) ) {
+				foreach ( $this->rule_rows as $index => $row ) {
+					if ( '' === (string) ( $row['target_type'] ?? '' ) ) {
+						$this->rule_rows[ $index ]['target_type'] = 'default';
+						$this->rule_rows[ $index ]['target_value'] = '';
+					}
+				}
+			}
+
+			return true;
+		}
+	}
+}
+
+$GLOBALS['wpdb'] = new wpdb();
+
+final class WdcRuntimeSmokeSession {
+	/** @var array<string,mixed> */
+	private array $data = array();
+
+	public function set( string $key, mixed $value ): void {
+		$this->data[ $key ] = $value;
+	}
+
+	public function get( string $key, mixed $default = null ): mixed {
+		return $this->data[ $key ] ?? $default;
+	}
+
+	public function __unset( string $key ): void {
+		unset( $this->data[ $key ] );
+	}
+}
+
+final class WdcRuntimeSmokeWooCommerce {
+	public WdcRuntimeSmokeSession $session;
+
+	public function __construct() {
+		$this->session = new WdcRuntimeSmokeSession();
+	}
+}
+
+final class WdcRuntimeSmokeRate {
+	/** @param array<string,mixed> $meta */
+	public function __construct( private array $meta ) {}
+
+	/** @return array<string,mixed> */
+	public function get_meta_data(): array {
+		return $this->meta;
+	}
+}
+
+final class WdcRuntimeSmokeMetaData {
+	public function __construct( private string $key, private mixed $value ) {}
+
+	/** @return array{key:string,value:mixed} */
+	public function get_data(): array {
+		return array(
+			'key'   => $this->key,
+			'value' => $this->value,
+		);
+	}
+}
+
+final class WdcRuntimeSmokeWooRate {
+	public string $id = 'wdc_platform:yandex_pickup';
+
+	/** @param array<string,mixed> $meta */
+	public function __construct( private array $meta ) {}
+
+	/** @return array<int,WdcRuntimeSmokeMetaData> */
+	public function get_meta_data(): array {
+		return array_map(
+			static fn ( string $key, mixed $value ): WdcRuntimeSmokeMetaData => new WdcRuntimeSmokeMetaData( $key, $value ),
+			array_keys( $this->meta ),
+			array_values( $this->meta )
+		);
+	}
+}
+if ( ! function_exists( 'WC' ) ) {
+	function WC(): WdcRuntimeSmokeWooCommerce {
+		static $wc = null;
+		if ( null === $wc ) {
+			$wc = new WdcRuntimeSmokeWooCommerce();
+		}
+		return $wc;
+	}
+}
+
+require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
+
+( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/fixtures/TestDemoCarrier.php';
+require_once dirname( __DIR__ ) . '/fixtures/TestPickupProvider.php';
+
+use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Admin\SettingsAdminPage;
+use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Calendar\Services\CalendarService;
+use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+use WallsShop\WDC\Calendar\Services\YearGenerator;
+use WallsShop\WDC\Calendar\Storage\CalendarRepository;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
+use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
+use WallsShop\WDC\Checkout\Cache\QuoteCache;
+use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
+use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
+use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
+use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
+use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryMessages;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
+use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
+use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
+use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
+use WallsShop\WDC\Core\Plugin;
+use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Quote\DeliveryQuote;
+use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Infrastructure\Settings\PlatformRuntimeSettings;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Import\LocationImportService;
+use WallsShop\WDC\Locations\Services\KeyboardLayoutTransformer;
+use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
+use WallsShop\WDC\Locations\Services\LocationSearchService;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
+use WallsShop\WDC\Rules\Services\ConditionEvaluator;
+use WallsShop\WDC\Rules\Services\RuleEngine;
+use WallsShop\WDC\Rules\Services\RuleEvaluator;
+use WallsShop\WDC\Rules\Storage\RuleRepository;
+use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
+use WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter;
+use WallsShop\WDC\Shipments\Admin\ShipmentCostAnalyticsAdminSection;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsIndexer;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsService;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostThresholdPolicy;
+use WallsShop\WDC\Shipments\Analytics\Storage\ShipmentCostAnalyticsRepository;
+use WallsShop\WDC\Shipments\Analytics\Storage\ShipmentCostAnalyticsTable;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
+
+function runtime_smoke_assert( bool $condition, string $message ): void {
+	if ( ! $condition ) {
+		throw new RuntimeException( $message );
+	}
+}
+
+function runtime_smoke_reset_hooks(): void {
+	$GLOBALS['wdc_test_actions'] = array();
+	$GLOBALS['wdc_test_filters'] = array();
+	$GLOBALS['wdc_test_scripts'] = array();
+	$GLOBALS['wdc_test_localized_scripts'] = array();
+	$GLOBALS['wdc_test_styles'] = array();
+}
+
+function runtime_smoke_has_action_callback( string $hook, string $class ): bool {
+	foreach ( $GLOBALS['wdc_test_actions'][ $hook ] ?? array() as $entry ) {
+		$callback = $entry[0] ?? null;
+		if ( is_array( $callback ) && is_object( $callback[0] ?? null ) && $callback[0] instanceof $class ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+function runtime_smoke_has_filter_callback( string $hook, string $class ): bool {
+	foreach ( $GLOBALS['wdc_test_filters'][ $hook ] ?? array() as $entry ) {
+		$callback = $entry[0] ?? null;
+		if ( is_array( $callback ) && is_object( $callback[0] ?? null ) && $callback[0] instanceof $class ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+function runtime_smoke_environment(): PluginEnvironment {
+	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.13' );
+}
+
+function runtime_smoke_shipment_cost_analytics_section(): ShipmentCostAnalyticsAdminSection {
+	$registry = new CarrierRegistry();
+	$policy = new ShipmentCostThresholdPolicy();
+
+	return new ShipmentCostAnalyticsAdminSection(
+		new ShipmentCostAnalyticsService(
+			new ShipmentCostAnalyticsQuery( new ShipmentCostAnalyticsRepository( new ShipmentCostAnalyticsTable() ) ),
+			$registry
+		),
+		$policy,
+		'https://example.test/wp-content/plugins/wdc/',
+		'test'
+	);
+}
+
+function runtime_smoke_request( string $delivery_type = '', ?int $weight_g = null ): QuoteRequest {
+	$items = null !== $weight_g
+		? array( new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), $weight_g, 10, 10, 10 ) )
+		: array();
+
+	return new QuoteRequest(
+		'RU',
+		new Address( country_code: 'RU', city: 'Новосибирск' ),
+		Package::from_items( $items, 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
+		'',
+		Money::from_rubles( 1000 ),
+		'2026-05-21',
+		'' !== $delivery_type ? array( 'delivery_type' => $delivery_type ) : array()
+	);
+}
+
+function runtime_smoke_orchestrator_with_demo(): CheckoutOrchestrator {
+	$logger   = new CheckoutLogger();
+	$registry = new CarrierRegistry();
+	$registry->register( new TestDemoCarrier() );
+
+	return new CheckoutOrchestrator(
+		$registry,
+		new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+		new RateSorter(),
+		new FallbackRateFactory(),
+		new CarrierExecutionGuard( $logger ),
+		$logger,
+		runtime_smoke_lead_time_normalizer( 0 )
+	);
+}
+
+function runtime_smoke_lead_time_normalizer( int $processing_days = 0 ): DeliveryLeadTimeNormalizer {
+	$settings = new SettingsRepository();
+	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
+	$timezone = new TimezoneService();
+	$formatter = new DeliveryDateFormatter();
+
+	return new DeliveryLeadTimeNormalizer( new \WallsShop\WDC\Checkout\Runtime\ShopProcessingDaysResolver( $settings, new \WallsShop\WDC\Orders\Application\ShopProcessingOrderQueueCounter( new \WallsShop\WDC\Infrastructure\Logging\Logger(), static fn( array $statuses ): int => 0 ) ),
+		new DeliveryServiceSettingsRepository(),
+		new DeliveryDateCalculator( new CalendarService( new CalendarRepository(), new YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
+		$formatter
+	);
+}
+
+$reflection = new ReflectionClass( NewShippingMethod::class );
+$settings_property = $reflection->getProperty( 'settings' );
+runtime_smoke_assert( NewShippingMethod::class !== $settings_property->getDeclaringClass()->getName(), 'NewShippingMethod must not redeclare WC_Settings_API::$settings.' );
+runtime_smoke_assert( $settings_property->isPublic(), 'Inherited WC_Settings_API::$settings must remain public.' );
+
+$settings = new SettingsRepository();
+$runtime_settings = new PlatformRuntimeSettings( $settings );
+$retired_checkout_flag = 'enable_new' . '_checkout_shipping';
+$settings->replace( array() );
+runtime_smoke_assert( $runtime_settings->runtime_enabled(), 'Missing legacy runtime setting must keep WDC runtime enabled.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
+runtime_smoke_assert( $runtime_settings->runtime_enabled(), 'Explicit enabled runtime setting must enable WDC runtime.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );
+runtime_smoke_assert( ! $runtime_settings->runtime_enabled(), 'Explicit disabled runtime setting must disable WDC runtime.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, 'definitely-not-bool' );
+runtime_smoke_assert( $runtime_settings->runtime_enabled(), 'Invalid persisted runtime setting must normalize to the safe enabled default.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
+$settings->set( 'show_checkout_debug_panel', true );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );
+runtime_smoke_assert( ! $runtime_settings->runtime_enabled(), 'Platform runtime setting must be the only global checkout runtime switch.' );
+$settings->replace( array() );
+
+$plugin = new Plugin( runtime_smoke_environment() );
+$plugin->register();
+$container = $plugin->container();
+runtime_smoke_assert( array() !== $GLOBALS['wdc_test_dbdelta_queries'], 'Initial schema must run before table-backed runtime services are registered.' );
+runtime_smoke_assert( '1.0.0' === ( $GLOBALS['wdc_test_options']['wdc_db_version'] ?? '' ), 'Plugin patch versions must not advance the unchanged schema baseline.' );
+runtime_smoke_assert( $container->get( AdminMenu::class ) instanceof AdminMenu, 'Composition root must build AdminMenu.' );
+$admin_menu = $container->get( AdminMenu::class );
+ob_start();
+$admin_menu->render_page();
+$overview_html = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $overview_html, 'Версия плагина' ), 'Overview page must render plugin version row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Версия PHP' ), 'Overview page must render PHP version row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Версия WooCommerce' ), 'Overview page must render WooCommerce version row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Статус HPOS' ), 'Overview page must render HPOS status row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Статус Action Scheduler' ), 'Overview page must render Action Scheduler status row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Очистка кеша доставки' ), 'Overview page must render delivery cache cleanup section.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Очистить кеш тарифов доставки' ), 'Overview page must render delivery cache cleanup button.' );
+runtime_smoke_assert( str_contains( $overview_html, 'wdc_overview_action' ), 'Overview page must render overview POST action field.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Флаги функций' ), 'Overview page must not render the legacy feature flags section.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Требования' ), 'Overview page must not render the requirements section.' );
+
+$settings_page = $container->get( SettingsAdminPage::class );
+ob_start();
+$settings_page->render_page();
+$settings_html = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $settings_html, 'Использовать WDC в WooCommerce' ), 'Platform settings page must render the WooCommerce runtime switch.' );
+runtime_smoke_assert( str_contains( $settings_html, PlatformRuntimeSettings::RUNTIME_ENABLED_KEY ), 'Runtime switch must be stored through the platform settings key.' );
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );
+ob_start();
+$settings_page->render_page();
+$disabled_settings_html = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $disabled_settings_html, 'WDC настроен, но интеграция с WooCommerce сейчас отключена.' ), 'Settings page must show an informational notice when runtime is disabled.' );
+$_POST = array( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => array( 'bad' ) );
+$sanitized_settings = $settings_page->sanitize_settings( $_POST );
+runtime_smoke_assert( false === $sanitized_settings[ PlatformRuntimeSettings::RUNTIME_ENABLED_KEY ], 'Submitted invalid runtime switch value must normalize to disabled through checkbox semantics.' );
+$settings->replace( array() );
+$legacy_class = 'Feature' . 'Flags';
+foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) ) as $src_file ) {
+	if ( ! $src_file instanceof SplFileInfo || 'php' !== $src_file->getExtension() ) {
+		continue;
+	}
+	runtime_smoke_assert( ! str_contains( (string) file_get_contents( $src_file->getPathname() ), $legacy_class ), 'Production code must not reference the legacy feature flag service.' );
+}
+
+NewShippingMethod::configure(
+	$container->get( CheckoutOrchestrator::class ),
+	$container->get( WooCommercePackageMapper::class ),
+	$container->get( WooCommerceRateMapper::class ),
+	$container->get( CheckoutSessionManager::class ),
+	$container->get( RuleRepository::class ),
+	$settings,
+	runtime_smoke_environment(),
+	new Logger()
+);
+$method = new NewShippingMethod();
+runtime_smoke_assert( $method instanceof NewShippingMethod, 'NewShippingMethod must instantiate without a settings visibility fatal.' );
+
+$checkout_rules_method = ( new ReflectionClass( NewShippingMethod::class ) )->getMethod( 'checkout_rules' );
+$checkout_rules_method->setAccessible( true );
+$rules_db = new wpdb();
+NewShippingMethod::configure(
+	$container->get( CheckoutOrchestrator::class ),
+	$container->get( WooCommercePackageMapper::class ),
+	$container->get( WooCommerceRateMapper::class ),
+	$container->get( CheckoutSessionManager::class ),
+	new RuleRepository( $rules_db ),
+	$settings,
+	runtime_smoke_environment(),
+	new Logger()
+);
+$method_without_rules = new NewShippingMethod();
+runtime_smoke_assert( array() === $checkout_rules_method->invoke( $method_without_rules ), 'No default rules must return an empty checkout rules list.' );
+runtime_smoke_assert( is_readable( dirname( __DIR__ ) . '/fixtures/demo/rules-demo.json' ), 'Demo rules fixture should exist for fallback regression coverage.' );
+runtime_smoke_assert( array() === $checkout_rules_method->invoke( $method_without_rules ), 'Demo rules must not be used as checkout fallback.' );
+
+$rules_db->rule_rows[] = array(
+	'id'              => 1,
+	'name'            => 'Default checkout rule',
+	'enabled'         => 1,
+	'priority'        => 10,
+	'target_type'     => 'default',
+	'target_value'    => '',
+	'action_type'     => RuleActionTypes::CHANGE_PRICE,
+	'operation_type'  => RuleOperationTypes::DECREASE,
+	'operation_value' => 100,
+	'operation_base'  => RuleOperationBases::RUBLES,
+	'promo_shipping'  => 0,
+	'stop_processing' => 0,
+	'created_at'      => '2026-05-21 12:00:00',
+	'updated_at'      => '2026-05-21 12:00:00',
+);
+$checkout_rules = $checkout_rules_method->invoke( new NewShippingMethod() );
+runtime_smoke_assert( 1 === count( $checkout_rules ), 'Existing default rules must be used by checkout runtime.' );
+runtime_smoke_assert( 'Default checkout rule' === $checkout_rules[0]->name, 'Checkout runtime must return the stored default rule.' );
+
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_filters']['woocommerce_shipping_methods'] ), 'Shipping method filter must be registered.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutLocationAjax::ACTION] ), 'Location AJAX endpoint must register for logged-in users.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_nopriv_' . CheckoutLocationAjax::ACTION] ), 'Location AJAX endpoint must register for guests.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_after_shipping_rate'] ), 'Checkout rate renderer hook must register when platform runtime is enabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_review_order_before_shipping'] ), 'Address renderer hook must register when platform runtime is enabled.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must register in the full checkout runtime.' );
+foreach ( array( 'woocommerce_default_address_fields', 'woocommerce_billing_fields', 'woocommerce_checkout_fields', 'woocommerce_form_field_args' ) as $checkout_field_filter ) {
+	runtime_smoke_assert( runtime_smoke_has_filter_callback( $checkout_field_filter, \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must register ' . $checkout_field_filter . ' in the full checkout runtime.' );
+}
+runtime_smoke_assert( runtime_smoke_has_filter_callback( 'pre_option_woocommerce_checkout_phone_field', \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must force Woo phone visibility only in the full checkout runtime.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_checkout_order_processed', \WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime::class ), 'Checkout address runtime must clear transient destination state when an order is processed.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_thankyou', \WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime::class ), 'Checkout address runtime must repeat transient destination cleanup at the thank-you lifecycle boundary.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must register when platform runtime is enabled.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_order_status_changed', ShopProcessingOrderQueueCounter::class ), 'Passive shop processing queue cache invalidation must register when platform runtime is enabled.' );
+
+/** @var ShippingMethodRegistrar $registrar */
+$registrar = $container->get( ShippingMethodRegistrar::class );
+runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ NewShippingMethod::METHOD_ID ] ), 'Shipping method registration must be enabled by the platform runtime switch without a second checkout flag.' );
+
+runtime_smoke_reset_hooks();
+$GLOBALS['wdc_test_options']['wdc_core_settings'] = array(
+	PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => false,
+	$retired_checkout_flag => true,
+);
+$runtime_disabled_plugin = new Plugin( runtime_smoke_environment() );
+$runtime_disabled_plugin->register();
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_filters']['woocommerce_shipping_methods'] ), 'Checkout shipping method filter must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutLocationAjax::ACTION] ), 'Checkout location AJAX must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_select_domestic_tariff'] ), 'Checkout tariff selector AJAX must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend checkout assets must not register when platform runtime is disabled.' );
+foreach ( array( 'woocommerce_default_address_fields', 'woocommerce_billing_fields', 'woocommerce_checkout_fields', 'woocommerce_form_field_args' ) as $checkout_field_filter ) {
+	runtime_smoke_assert( ! runtime_smoke_has_filter_callback( $checkout_field_filter, \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must not register ' . $checkout_field_filter . ' when platform runtime is disabled.' );
+}
+runtime_smoke_assert( ! runtime_smoke_has_filter_callback( 'pre_option_woocommerce_checkout_phone_field', \WallsShop\WDC\Checkout\WooCommerce\CheckoutFieldConfigurator::class ), 'Checkout field configurator must not force Woo phone visibility when platform runtime is disabled.' );
+runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'woocommerce_review_order_before_shipping', CheckoutDeliveryMessages::class ), 'Checkout delivery messages must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController::class ), 'Checkout pickup REST routes must not register when platform runtime is disabled.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'rest_api_init', \WallsShop\WDC\Pickup\Rest\PickupPointsRestController::class ), 'Carrier pickup/admin preparation REST routes must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( runtime_smoke_has_action_callback( 'woocommerce_order_status_changed', ShopProcessingOrderQueueCounter::class ), 'Passive shop processing queue cache invalidation must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions'][ ShipmentStatusAutoSyncCron::HOOK ] ), 'Shipment status autosync callback must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions'][ ShipmentCostAnalyticsIndexer::SHIPMENT_CHANGED_HOOK ] ), 'Shipment analytics mutation indexer must not register when platform runtime is disabled.' );
+
+$GLOBALS['wdc_test_is_admin'] = true;
+runtime_smoke_reset_hooks();
+$runtime_disabled_admin_plugin = new Plugin( runtime_smoke_environment() );
+$runtime_disabled_admin_plugin->register();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['admin_menu'] ), 'WDC admin menu/pages must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_dpd_geography_import_status'] ), 'Carrier geography import admin AJAX must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_ozon_delivery_pickup_status'] ), 'Carrier pickup catalog import admin AJAX must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_gar_import_status'] ), 'Locations/geography admin AJAX must remain registered when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['add_meta_boxes_shop_order'] ), 'Order delivery metabox must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['add_meta_boxes'] ), 'Shipment order metabox must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_order_delivery_recalculate_preview'] ), 'Order delivery recalculation AJAX must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_ajax_wdc_preview_shipment'] ), 'Shipment preview AJAX must not register when platform runtime is disabled.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['admin_post_wdc_download_shipment_document'] ), 'Shipment document download action must not register when platform runtime is disabled.' );
+
+$GLOBALS['wdc_test_options']['wdc_core_settings'] = array(
+	PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
+	$retired_checkout_flag => false,
+);
+runtime_smoke_reset_hooks();
+$runtime_enabled_admin_plugin = new Plugin( runtime_smoke_environment() );
+$runtime_enabled_admin_plugin->register();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_filters']['woocommerce_shipping_methods'] ), 'Runtime enabled must preserve checkout shipping method registration.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['add_meta_boxes_shop_order'] ), 'Runtime enabled must preserve order delivery metabox registration.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['add_meta_boxes'] ), 'Runtime enabled must preserve Shipment Framework metabox registration.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions'][ ShipmentStatusAutoSyncCron::HOOK ] ), 'Runtime enabled must preserve shipment autosync cron registration.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions'][ ShipmentCostAnalyticsIndexer::SHIPMENT_CHANGED_HOOK ] ), 'Runtime enabled must preserve shipment analytics mutation hook registration.' );
+
+$plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
+$order_background_offset = strpos( $plugin_source, 'private function register_order_background_runtime_hooks' );
+$boot_modules_offset = strpos( $plugin_source, 'public function boot_modules' );
+runtime_smoke_assert( false !== $order_background_offset && false !== $boot_modules_offset, 'Plugin source must expose order background runtime and boot_modules boundaries.' );
+$order_background_source = substr( $plugin_source, $order_background_offset, $boot_modules_offset - $order_background_offset );
+runtime_smoke_assert( str_contains( $plugin_source, 'register_passive_runtime_bookkeeping_hooks' ), 'Plugin composition root must expose a passive runtime bookkeeping boundary.' );
+runtime_smoke_assert( ! str_contains( $order_background_source, 'woocommerce_order_status_changed' ), 'Passive shop processing cache invalidation must not be registered inside order background runtime hooks.' );
+
+$disabled_autosync_settings = new SettingsRepository();
+$disabled_autosync_settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, false );
+$disabled_autosync = new ShipmentStatusAutoSyncService(
+	$disabled_autosync_settings,
+	new PlatformRuntimeSettings( $disabled_autosync_settings ),
+	$container->get( \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository::class ),
+	$container->get( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class )
+);
+$disabled_autosync_result = $disabled_autosync->run( 'cron' );
+runtime_smoke_assert( 'runtime_disabled' === (string) ( $disabled_autosync_result['status'] ?? '' ), 'Already scheduled order-related autosync execution must stop when platform runtime is disabled.' );
+$GLOBALS['wdc_test_is_admin'] = false;
+$GLOBALS['wdc_test_options']['wdc_core_settings'] = array();
+runtime_smoke_reset_hooks();
+
+$city_selector_config = $registrar->city_selector_config();
+runtime_smoke_assert( 'https://example.test/wp-admin/admin-ajax.php' === $city_selector_config['ajax_url'], 'City selector config must expose AJAX URL.' );
+runtime_smoke_assert( 3 === $city_selector_config['min_chars'], 'City selector config must require three characters.' );
+runtime_smoke_assert( str_starts_with( $city_selector_config['nonce'], 'nonce-' ), 'City selector config must expose nonce.' );
+runtime_smoke_assert( 100 === (int) ( $city_selector_config['checkout_location_search_limit'] ?? 0 ), 'City selector config must expose checkout location search limit.' );
+runtime_smoke_assert( 'Идёт поиск, подождите несколько секунд' === $city_selector_config['strings']['searching'], 'City selector config strings must be Russian.' );
+$container->get( CheckoutSessionManager::class )->save_city_context( array( 'source' => 'manual', 'country_code' => 'RU', 'city_name' => 'Ручной город', 'region_name' => 'Ручная область' ) );
+$manual_city_selector_config = $registrar->city_selector_config();
+runtime_smoke_assert( 'manual' === (string) ( $manual_city_selector_config['manual_city_context']['source'] ?? '' ) && 'Ручной город' === (string) ( $manual_city_selector_config['manual_city_context']['city_name'] ?? '' ), 'City selector config must expose transient manual city context for current checkout reload.' );
+$checkout_session = $container->get( CheckoutSessionManager::class );
+$checkout_session->save_selected_city(
+	array(
+		'id' => 154958,
+		'country_code' => 'RU',
+		'region_code' => '78',
+		'region_name' => 'Санкт-Петербург',
+		'region_type' => 'г',
+		'place_name' => 'Зеленогорск',
+		'place_type' => 'г',
+		'display_name' => 'г Санкт-Петербург, г Зеленогорск',
+		'postal_code' => '197720',
+		'fias_id' => 'ac598324-b704-4957-a66e-e8142677981b',
+	)
+);
+$checkout_session->save_city_context( array( 'source' => 'local_db', 'country_code' => 'RU', 'location_id' => 154958 ) );
+$canonical_city_selector_config = $registrar->city_selector_config();
+runtime_smoke_assert( 154958 === (int) ( $canonical_city_selector_config['canonical_city_context']['id'] ?? 0 ), 'City selector config must expose the trusted positive selected_city ID for checkout reload.' );
+runtime_smoke_assert( '197720' === (string) ( $canonical_city_selector_config['canonical_city_context']['postal_code'] ?? '' ) && '' !== (string) ( $canonical_city_selector_config['canonical_city_context']['city_value'] ?? '' ), 'Canonical reload context must reuse checkout payload city and postcode semantics.' );
+$checkout_session->save_city_context( array( 'source' => 'local_db', 'country_code' => 'RU', 'location_id' => 24534 ) );
+runtime_smoke_assert( array() === $registrar->city_selector_config()['canonical_city_context'], 'Mismatched selected_city and city_context IDs must not be localized as trusted canonical state.' );
+$checkout_session->clear_normalized_address();
+runtime_smoke_assert( array() === $registrar->city_selector_config()['canonical_city_context'], 'Post-order destination cleanup must leave no canonical restore payload for a fresh checkout.' );
+
+$location_repository = new LocationRepository( $GLOBALS['wpdb'] );
+( new LocationImportService( $location_repository ) )->import_from_json_file( dirname( __DIR__ ) . '/fixtures/demo/locations-demo.json' );
+$location_settings = new SettingsRepository();
+$keyboard_layout = new KeyboardLayoutTransformer();
+runtime_smoke_assert( 'новос' === $keyboard_layout->latin_to_cyrillic_layout( 'yjdjc' ), 'Keyboard layout must map yjdjc to новос.' );
+runtime_smoke_assert( 'привет' === $keyboard_layout->latin_to_cyrillic_layout( 'ghbdtn' ), 'Keyboard layout must map ghbdtn to привет.' );
+runtime_smoke_assert( in_array( 'новос', $keyboard_layout->variants( 'yjdjc' ), true ), 'Keyboard variants must include corrected query.' );
+$location_search_service = new LocationSearchService( $location_repository, $keyboard_layout );
+$location_country_index = new LocationCountryIndexService( $location_repository );
+$location_ajax = new CheckoutLocationAjax( new CheckoutLocationSearch( $location_search_service ), $location_settings, $location_country_index );
+$location_payload = $location_ajax->payload( 'Новос' );
+runtime_smoke_assert( 'Новосибирская область' === ( $location_payload['groups'][0]['region'] ?? '' ), 'Location AJAX payload must group Новос by region.' );
+runtime_smoke_assert( 'Новосибирск' === ( $location_payload['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX payload must return Новосибирск.' );
+runtime_smoke_assert( 'Новосибирск' === ( $location_ajax->payload( 'yjdjc' )['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location search must find Новосибирск through keyboard layout correction.' );
+runtime_smoke_assert( array() === $location_ajax->payload( 'Berlin' )['groups'], 'Keyboard layout correction must not make Berlin match Russian cities accidentally.' );
+runtime_smoke_assert( in_array( 'RU', $location_country_index->countries(), true ), 'Runtime city selector receives supported location countries.' );
+runtime_smoke_assert( false === (bool) ( $location_ajax->payload( 'Новосибирск', '', 'PL' )['local_database_available'] ?? true ), 'Runtime city selector disables local DB for unsupported country.' );
+runtime_smoke_assert( 100 === $location_payload['limit'], 'Location AJAX payload must include default limit.' );
+runtime_smoke_assert( isset( $location_payload['limit_reached'] ), 'Location AJAX payload must include limit_reached.' );
+$location_settings->set( 'checkout_location_search_limit', 10 );
+runtime_smoke_assert( 10 === $location_ajax->payload( 'Новос' )['limit'], 'Location AJAX must use SettingsRepository checkout_location_search_limit.' );
+$location_settings->set( 'checkout_location_search_limit', 999 );
+runtime_smoke_assert( 500 === $location_ajax->payload( 'Новос' )['limit'], 'Location AJAX must clamp checkout_location_search_limit to max.' );
+$location_settings->set( 'checkout_location_search_limit', 100 );
+runtime_smoke_assert( array() === $location_ajax->payload( 'xx' )['groups'], 'Short location AJAX query must return empty groups.' );
+runtime_smoke_assert( array() === $location_ajax->payload( 'НеизвестныйГород' )['groups'], 'Unknown location AJAX query must return empty groups.' );
+$_REQUEST = array(
+	'nonce' => 'bad-nonce',
+	'query' => 'Новос',
+);
+ob_start();
+$location_ajax->handle();
+$nonce_error = json_decode( (string) ob_get_clean(), true );
+runtime_smoke_assert( false === ( $nonce_error['success'] ?? true ), 'Location AJAX must reject nonce mismatch.' );
+$_REQUEST = array(
+	'nonce' => wp_create_nonce( CheckoutLocationAjax::NONCE_ACTION ),
+	'query' => 'Новос',
+);
+ob_start();
+$location_ajax->handle();
+$ajax_response = json_decode( (string) ob_get_clean(), true );
+runtime_smoke_assert( true === ( $ajax_response['success'] ?? false ), 'Location AJAX handle must return success for valid nonce.' );
+runtime_smoke_assert( 'Новосибирск' === ( $ajax_response['data']['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX handle must return grouped Новосибирск results.' );
+
+$city_selector_js = str_replace( "\r\n", "\n", (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' ) );
+foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id', 'event.target', ':visible', ':disabled', 'city input event', 'ajax request start', 'locationStore', 'data-location-key', 'mousedown.wdcCitySelector', 'isSelecting', 'preventDefault', 'stopPropagation', 'stopImmediatePropagation', 'wdc-city-selector-selected', 'setTimeout', 'suppressSearch', 'search suppressed', 'suppressSearch disabled after updated_checkout', 'wdc-city-picker-overlay', 'wdc-city-picker-panel', 'wdc-city-picker-close', 'Escape', 'wdc-city-picker-search', 'wdc-city-picker-use-manual', 'wdc-city-picker-clear', 'manual fallback city', 'manual city button mousedown', 'fallback selection start', 'fallback city applied', 'picker closed after fallback', 'update_checkout triggered after fallback', 'closePicker', 'applyManualFallbackCity', 'applySelectedLocation', 'originalCityValue', 'Использовать введенное название', 'Стереть введенное название', 'corrected query', 'correction used', 'supported_location_countries', 'currentCountryCode', 'localDatabaseAvailable', 'country_code: currentCountryCode()' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $city_selector_js, $needle ), 'City selector JS must contain ' . $needle . '.' );
+}
+preg_match( '/function closePicker\(\) \{(?P<body>.*?)\n\t\}/s', $city_selector_js, $close_picker_match );
+runtime_smoke_assert( isset( $close_picker_match['body'] ), 'City selector JS must expose closePicker function body.' );
+runtime_smoke_assert( ! str_contains( $close_picker_match['body'], 'applyManualFallbackCity' ), 'closePicker must not call applyManualFallbackCity.' );
+runtime_smoke_assert( ! str_contains( $close_picker_match['body'], 'update_checkout' ), 'closePicker must not trigger update_checkout.' );
+runtime_smoke_assert( str_contains( $city_selector_js, ".on( 'click.wdcCitySelector', '.wdc-city-picker-close', function ( event )" ) && str_contains( $city_selector_js, "stopEvent( event );\n\t\tclosePicker();" ), 'Close button handler must call closePicker only.' );
+runtime_smoke_assert( str_contains( $city_selector_js, "if ( event.target === this ) {\n\t\t\tclosePicker();" ), 'Outside overlay click must call closePicker only.' );
+runtime_smoke_assert( str_contains( $city_selector_js, "if ( 'Escape' === event.key && pickerOpen ) {\n\t\t\tevent.preventDefault();\n\t\t\tclosePicker();" ), 'Escape handler must call closePicker only.' );
+runtime_smoke_assert( str_contains( $city_selector_js, ".on( 'input.wdcCitySelector', '.wdc-city-picker-search'" ), 'City selector JS must search from modal input events.' );
+runtime_smoke_assert( ! str_contains( $city_selector_js, "keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector', citySelector" ), 'City selector JS must not search from external city keyup/change/paste.' );
+runtime_smoke_assert( ! str_contains( $city_selector_js, 'data-location="' ), 'City selector JS must not store encoded JSON in data-location.' );
+runtime_smoke_assert( ! str_contains( $city_selector_js, 'JSON.stringify( location )' ), 'City selector JS must not stringify location payload into HTML attributes.' );
+runtime_smoke_assert( ! str_contains( $city_selector_js, 'locations-demo.json' ), 'City selector JS must not preload full location dataset.' );
+runtime_smoke_assert( ! str_contains( $city_selector_js, 'skipManualFallback' ), 'City selector JS must not use close-time manual fallback flags.' );
+runtime_smoke_assert( ! str_contains( $city_selector_js, 'update_checkout triggered after empty city' ), 'City selector JS must not trigger checkout update for empty close.' );
+
+$city_selector_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.css' );
+foreach ( array( 'max-width: 1300px', 'column-count: 2', 'break-inside: avoid', '@media (max-width: 900px)', 'column-count: 1', 'width: 100%', 'min-width: 0', 'position: fixed' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $city_selector_css, $needle ), 'City selector CSS must contain ' . $needle . '.' );
+}
+foreach ( array( '.wdc-city-picker-search', 'min-height: 50px', 'border: 1px solid #d5d5d5', 'border-radius: 12px', '.wdc-city-picker-use-manual', 'border-radius: 10px', '.wdc-city-picker-close', 'appearance: none', 'box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.18)', '.wdc-city-picker-region', 'background: #eef1f3', 'border-bottom: 1px solid #d8dee6' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $city_selector_css, $needle ), 'City selector CSS must style the polished modal control: ' . $needle . '.' );
+}
+runtime_smoke_assert( ! str_contains( $city_selector_css, 'grid-template-columns: repeat(2' ), 'Desktop city selector CSS must not use equal-height grid columns.' );
+
+$checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
+foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup carrier', 'pickup rate id', 'pickup point code', 'update_checkout triggered after pickup selection' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $checkout_sort_js, $needle ), 'Pickup frontend JS must contain ' . $needle . '.' );
+}
+$delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
+runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Checkout delivery type selector must not auto-render courier customer comment.' );
+$rate_renderer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutRateRenderer.php' );
+$rate_meta_normalizer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/WooCommerceRateMetaNormalizer.php' );
+$rate_mapper_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/WooCommerceRateMapper.php' );
+$checkout_orchestrator_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Runtime/CheckoutOrchestrator.php' );
+$new_shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
+$checkout_rates_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' ), 'Rate renderer must render comments as block elements, not inline-only spans.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, 'render_pickup_selector( $meta, $method )' ) && str_contains( $rate_renderer_source, 'data-wdc-pickup-checkout' ), 'Rate renderer must render checkout pickup UI for pickup-point rates.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, 'WooCommerceRateMetaNormalizer::meta' ) && str_contains( $rate_meta_normalizer_source, 'normalize_meta_data' ) && str_contains( $rate_meta_normalizer_source, "array_key_exists( 'key', \$entry )" ), 'Rate renderer must normalize real WooCommerce meta-data entries before checking pickup flags.' );
+runtime_smoke_assert( str_contains( $rate_mapper_source, "'pickup_family'" ) && str_contains( $rate_mapper_source, 'PickupFamilyResolver::from_delivery_rate' ), 'WooCommerce rate mapper must expose pickup_family in top-level WC rate meta through the generic family resolver.' );
+runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, "woocommerce_after_shipping_rate', array( \$this, 'render'" ), 'Delivery type selector must not register a duplicate checkout pickup UI renderer.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, "'planned_delivery_comment'" ) && str_contains( $rate_renderer_source, 'wdc-platform-planned-delivery-comment' ), 'Rate renderer must output planned_delivery_comment from rate meta as the checkout planned-date block.' );
+runtime_smoke_assert( str_contains( $checkout_orchestrator_source, 'private DeliveryLeadTimeNormalizer $lead_time_normalizer' ) && ! str_contains( $checkout_orchestrator_source, '?Delivery' . 'LeadTimeNormalizer' ) && ! str_contains( $checkout_orchestrator_source, 'lead_time_normalizer ' . 'instanceof' ), 'CheckoutOrchestrator must require DeliveryLeadTimeNormalizer and must not fall back to the legacy lead-time pipeline.' );
+runtime_smoke_assert( str_contains( $rate_mapper_source, 'DeliveryDaysFormatter::format( $rate->delivery_days )' ) && str_contains( $rate_mapper_source, 'DeliveryDaysFormatter::format( $rate->original_delivery_days )' ) && str_contains( $rate_mapper_source, 'str_ends_with( $title, $original_delivery_label )' ), 'Single-rate labels must derive final/original delivery suffixes from DeliveryDaysFormatter and replace only the original suffix.' );
+runtime_smoke_assert( str_contains( $rate_mapper_source, "rtrim( \$title ) . ' - ' . \$final_delivery_label" ) && ! str_contains( $rate_mapper_source, "\$label .= ' - ' . \$planned_delivery_comment" ), 'Single-rate labels must append final delivery days with the shared separator and must not use planned_delivery_comment label concatenation.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, 'count( $variants ) < 2' ), 'Domestic tariff selector must not render radio list for a single tariff.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, "wdc-domestic-tariff-selector__crossed-price" ), 'Domestic tariff selector must render per-variant crossed price.' );
+runtime_smoke_assert( str_contains( $rate_mapper_source, "'domestic_tariff_grouped'" ), 'WooCommerce rate meta must expose the domestic grouped marker to checkout rendering.' );
+runtime_smoke_assert( str_contains( $new_shipping_method_source, 'domestic_method_title' ) && str_contains( $new_shipping_method_source, 'method_title_from_parts( $prefix, $rate->tariff_name, $this->delivery_comment( $rate->delivery_days )' ), 'Domestic grouped method label must use configured method title, selected tariff, and delivery days.' );
+runtime_smoke_assert( str_contains( $new_shipping_method_source, '$this->delivery_comment( $rate->delivery_days )' ) && str_contains( $new_shipping_method_source, 'DeliveryDaysFormatter::format' ), 'Domestic selector rows must derive formatted delivery comments from final delivery days.' );
+runtime_smoke_assert( str_contains( $checkout_rates_css, '.wdc-platform-delivery-comment' ) && str_contains( $checkout_rates_css, 'flex-basis: 100%' ) && str_contains( $checkout_rates_css, '.wdc-shipping-rate-comment' ) && str_contains( $checkout_rates_css, 'display: block' ), 'Checkout comments CSS must force each service/rule comment onto its own line.' );
+$src_iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) );
+foreach ( $src_iterator as $src_file ) {
+	if ( ! $src_file->isFile() || 'php' !== $src_file->getExtension() ) {
+		continue;
+	}
+	runtime_smoke_assert( ! str_contains( (string) file_get_contents( $src_file->getPathname() ), 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Courier auto-comment text must not exist in src unless explicitly configured.' );
+}
+
+$settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
+$settings->set( $retired_checkout_flag, false );
+runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ NewShippingMethod::METHOD_ID ] ), 'Shipping method registration must be enabled through settings.' );
+$registrar->enqueue_assets();
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must not enqueue.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must not enqueue when DaData suggestions are disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must enqueue when DaData suggestions are disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-checkout-address-fields'] ), 'Checkout address fields script must enqueue for courier required UX.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-courier-address-summary'] ), 'Courier address summary script must enqueue for checkout.' );
+
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$GLOBALS['wdc_test_is_checkout'] = true;
+$pickup_assets_session = new CheckoutSessionManager();
+( new PickupMapCheckout( $pickup_assets_session, runtime_smoke_environment(), $settings ) )->enqueue_assets();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-pickup-checkout'] ), 'Pickup checkout assets must enqueue on checkout before session pickup rates exist.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_styles']['wdc-pickup-map'] ), 'Pickup checkout styles must enqueue on checkout before session pickup rates exist.' );
+$pickup_assets_config = $GLOBALS['wdc_test_localized_scripts']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
+runtime_smoke_assert( is_array( $pickup_assets_config ) && array_key_exists( 'pickupFamilies', $pickup_assets_config ), 'Pickup checkout config must localize even before rates are saved.' );
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$GLOBALS['wdc_test_is_checkout'] = false;
+( new PickupMapCheckout( new CheckoutSessionManager(), runtime_smoke_environment(), $settings ) )->enqueue_assets();
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-pickup-checkout'] ) && ! isset( $GLOBALS['wdc_test_styles']['wdc-pickup-map'] ), 'Pickup checkout assets must not enqueue outside checkout.' );
+$GLOBALS['wdc_test_is_checkout'] = true;
+
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$settings->set( 'dadata_suggestions_enabled', true );
+$registrar->enqueue_assets();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must enqueue when DaData suggestions are requested even if API key is missing.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_styles']['wdc-platform-address-suggestions'] ), 'Address suggestions CSS must enqueue when DaData suggestions are requested.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must still enqueue when DaData suggestions are requested.' );
+$suggestions_config = $GLOBALS['wdc_test_localized_scripts']['wdc-platform-address-suggestions']['wdcPlatformAddressSuggestions'] ?? array();
+runtime_smoke_assert( true === ( $suggestions_config['suggestions_requested'] ?? false ), 'Address suggestions config must show suggestions_requested=true.' );
+runtime_smoke_assert( false === ( $suggestions_config['enabled'] ?? true ), 'Address suggestions config must show enabled=false when API key is missing.' );
+runtime_smoke_assert( false === ( $suggestions_config['tokens_ready'] ?? true ), 'Address suggestions config must show tokens_ready=false when tokens are missing.' );
+runtime_smoke_assert( 0 === (int) ( $suggestions_config['total_tokens_count'] ?? -1 ), 'Address suggestions config must expose total_tokens_count.' );
+runtime_smoke_assert( 0 === (int) ( $suggestions_config['available_tokens_count'] ?? -1 ), 'Address suggestions config must expose available_tokens_count.' );
+runtime_smoke_assert( array_key_exists( 'encryption_ready', $suggestions_config ), 'Address suggestions config must expose encryption_ready.' );
+runtime_smoke_assert( ! array_key_exists( 'api_key', $suggestions_config ) && ! array_key_exists( 'token', $suggestions_config ), 'Address suggestions frontend config must not expose DaData credentials.' );
+
+$demo_orchestrator = runtime_smoke_orchestrator_with_demo();
+$all_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;
+runtime_smoke_assert( 2 === count( $all_rates ), 'Orchestrator must return pickup and courier rates.' );
+runtime_smoke_assert( array( DeliveryType::PICKUP, DeliveryType::COURIER ) === array_map( static fn ( object $rate ): string => $rate->delivery_type, $all_rates ), 'Demo rates must include pickup and courier.' );
+runtime_smoke_assert( 2 === count( $demo_orchestrator->calculate( runtime_smoke_request( DeliveryType::PICKUP ), array(), RateSorter::CHEAPEST, false )->rates ), 'Selected pickup delivery type must not hide courier.' );
+runtime_smoke_assert( 2 === count( $demo_orchestrator->calculate( runtime_smoke_request( DeliveryType::COURIER ), array(), RateSorter::CHEAPEST, false )->rates ), 'Selected courier delivery type must not hide pickup.' );
+
+$fast_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::FASTEST, false )->rates;
+runtime_smoke_assert( DeliveryType::COURIER === $fast_rates[0]->delivery_type, 'Fastest sort must put courier first.' );
+$cheap_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;
+runtime_smoke_assert( DeliveryType::PICKUP === $cheap_rates[0]->delivery_type, 'Cheapest sort must put pickup first.' );
+$mapped_courier = ( new WooCommerceRateMapper() )->map( $fast_rates[0] );
+runtime_smoke_assert( DeliveryType::COURIER === ( $mapped_courier['meta_data']['delivery_type'] ?? '' ), 'WDC courier rate must keep delivery_type in technical rate meta.' );
+runtime_smoke_assert( ! array_key_exists( 'is_courier', $mapped_courier['meta_data'] ) && ! array_key_exists( 'wdc_delivery_kind', $mapped_courier['meta_data'] ) && ! array_key_exists( 'delivery_kind', $mapped_courier['meta_data'] ), 'WDC courier rate must not expose visible courier helper meta.' );
+$mapped_pickup = ( new WooCommerceRateMapper() )->map( $cheap_rates[0] );
+runtime_smoke_assert( DeliveryType::PICKUP === ( $mapped_pickup['meta_data']['delivery_type'] ?? '' ) && ! array_key_exists( 'is_courier', $mapped_pickup['meta_data'] ), 'Pickup rate must keep delivery_type without visible courier helper meta.' );
+runtime_smoke_assert( true === ( $mapped_pickup['meta_data']['requires_pickup_point'] ?? null ) && 'demo:pickup' === (string) ( $mapped_pickup['meta_data']['pickup_family'] ?? '' ) && 'demo' === (string) ( $mapped_pickup['meta_data']['carrier_key'] ?? '' ), 'Pickup DeliveryRate meta must reach WooCommerce mapper with pickup requirement, family, and carrier.' );
+
+$explicit_meta_courier_rate = new DeliveryRate(
+	'demo:meta-courier',
+	'demo',
+	'Demo',
+	'meta',
+	'Meta courier',
+	'meta',
+	'Meta courier',
+	DeliveryType::UNKNOWN,
+	'Meta courier',
+	Money::from_rubles( 100 ),
+	null,
+	null,
+	DateRange::single( 1 ),
+	meta: array( 'service_kind' => DeliveryType::COURIER )
+);
+$mapped_meta_courier = ( new WooCommerceRateMapper() )->map( $explicit_meta_courier_rate );
+runtime_smoke_assert( DeliveryType::UNKNOWN === ( $mapped_meta_courier['meta_data']['delivery_type'] ?? '' ) && ! array_key_exists( 'is_courier', $mapped_meta_courier['meta_data'] ), 'Explicit courier helper meta must stay out of visible WooCommerce rate meta.' );
+
+$_POST = array(
+	'billing_postcode'  => '630000',
+	'billing_city'      => 'г Новосибирск',
+	'billing_state'     => 'Новосибирская область',
+	'billing_address_1' => 'ул. Советская, д. 99',
+);
+$renderer = new CheckoutRateRenderer();
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$courier_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $courier_summary_output, 'wdc-courier-address-summary' ), 'Courier summary block must render inside WDC courier rate meta.' );
+runtime_smoke_assert( str_contains( $courier_summary_output, 'Доставка курьером по адресу:' ), 'Courier summary title must render.' );
+runtime_smoke_assert( str_contains( $courier_summary_output, '630000, г Новосибирск, ул. Советская, д. 99' ), 'Courier summary must render postcode, city, and address.' );
+runtime_smoke_assert( ! str_contains( $courier_summary_output, 'Новосибирская область' ), 'Courier summary must not include region.' );
+
+$_POST = array(
+        'billing_postcode'  => '630091',
+        'billing_city'      => 'г Новосибирск',
+        'billing_address_1' => '',
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$empty_courier_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $empty_courier_summary_output, 'Для доставки курьером необходимо' ), 'Empty courier address must render warning.' );
+runtime_smoke_assert( str_contains( $empty_courier_summary_output, 'href="#billing_address_1"' ), 'Empty courier address warning must link to billing address field.' );
+runtime_smoke_assert( str_contains( $empty_courier_summary_output, 'заполнить адрес' ), 'Empty courier address warning link text must be Russian.' );
+runtime_smoke_assert( ! str_contains( $empty_courier_summary_output, '>630091, г Новосибирск<' ), 'Courier summary must not show postcode and city as address when address line 1 is empty.' );
+
+$_POST = array(
+        'billing_city'       => 'г Новосибирск',
+        'billing_address_1'  => '',
+        'shipping_city'      => 'г Томск',
+        'shipping_address_1' => 'ул. Shipping, д. 1',
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$billing_preferred_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $billing_preferred_summary_output, 'href="#billing_address_1"' ), 'PHP courier summary must keep billing address when billing field exists and ship-to-different is not posted.' );
+runtime_smoke_assert( ! str_contains( $billing_preferred_summary_output, 'ул. Shipping, д. 1' ), 'PHP courier summary must not use filled shipping address without ship-to-different.' );
+
+$_POST = array(
+        'shipping_city'      => 'г Томск',
+        'shipping_address_1' => 'ул. Shipping, д. 1',
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$shipping_fallback_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $shipping_fallback_summary_output, 'г Томск, ул. Shipping, д. 1' ), 'PHP courier summary must fall back to shipping when billing address field is absent.' );
+
+$_POST = array(
+        'ship_to_different_address' => '1',
+        'billing_city'              => 'г Новосибирск',
+        'billing_address_1'         => 'ул. Billing, д. 1',
+        'shipping_city'             => 'г Томск',
+        'shipping_address_1'        => 'ул. Shipping, д. 1',
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$shipping_selected_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $shipping_selected_summary_output, 'г Томск, ул. Shipping, д. 1' ), 'PHP courier summary must use shipping when ship-to-different is posted.' );
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_pickup['meta_data'] ) );
+$pickup_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $pickup_summary_output, 'wdc-courier-address-summary' ), 'Courier summary block must not render inside pickup rate.' );
+$yandex_pickup_meta = array(
+	'carrier_key'           => 'yandex_delivery',
+	'service_key'           => 'yandex_delivery',
+	'rate_id'               => 'yandex_pickup',
+	'delivery_type'         => DeliveryType::PICKUP,
+	'requires_pickup_point' => true,
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $yandex_pickup_meta ) );
+$yandex_rate_pickup_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-checkout' ), 'CheckoutRateRenderer must render pickup checkout container for Yandex pickup.' );
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-open' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-empty-open' ), 'CheckoutRateRenderer must render pickup open buttons for Yandex pickup.' );
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-shipping-method-id="yandex_pickup"' ), 'Yandex pickup checkout container must expose the rate id as data-shipping-method-id.' );
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'name="wdc_pickup_family"' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-family' ) && str_contains( $yandex_rate_pickup_output, 'value="yandex_delivery:pickup"' ), 'Yandex pickup checkout container must expose yandex_delivery:pickup family.' );
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-card' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-title-text' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-address' ), 'Yandex pickup checkout container must include JS-updated card placeholders.' );
+ob_start();
+$renderer->render( new WdcRuntimeSmokeWooRate( $yandex_pickup_meta + array( 'pickup_family' => 'yandex_delivery:pickup' ) ) );
+$yandex_wc_rate_pickup_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $yandex_wc_rate_pickup_output, 'data-wdc-pickup-checkout' ) && str_contains( $yandex_wc_rate_pickup_output, 'data-wdc-pickup-open' ) && str_contains( $yandex_wc_rate_pickup_output, 'data-wdc-pickup-family' ) && str_contains( $yandex_wc_rate_pickup_output, 'data-shipping-method-id="yandex_pickup"' ), 'CheckoutRateRenderer must render Yandex pickup UI when WooCommerce supplies meta as WC meta-data objects.' );
+
+$yandex_courier_meta = array(
+	'carrier_key'           => 'yandex_delivery',
+	'service_key'           => 'yandex_delivery',
+	'rate_id'               => 'yandex_courier',
+	'delivery_type'         => DeliveryType::COURIER,
+	'requires_pickup_point' => false,
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $yandex_courier_meta ) );
+$yandex_rate_courier_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $yandex_rate_courier_output, 'data-wdc-pickup-checkout' ) && ! str_contains( $yandex_rate_courier_output, 'data-wdc-pickup-open' ), 'CheckoutRateRenderer must not render pickup UI for Yandex courier.' );
+
+$jet_pickup_meta = array(
+	'carrier_key'           => 'jet_logistic',
+	'service_key'           => 'jet_logistic',
+	'rate_id'               => 'jet_logistic_pickup',
+	'delivery_type'         => DeliveryType::PICKUP,
+	'requires_pickup_point' => false,
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $jet_pickup_meta ) );
+$jet_pickup_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $jet_pickup_output, 'data-wdc-pickup-checkout' ) && ! str_contains( $jet_pickup_output, 'data-wdc-pickup-open' ), 'CheckoutRateRenderer must not render pickup selector UI for pickup rates with requires_pickup_point=false.' );
+
+$quote_cache = new QuoteCache();
+$service_cache_key_a = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' );
+$service_cache_key_b = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_b' );
+runtime_smoke_assert( $service_cache_key_a !== $service_cache_key_b, 'Quote cache key must include service_key.' );
+runtime_smoke_assert( $service_cache_key_a === $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' ), 'Quote cache key must remain stable per service.' );
+runtime_smoke_assert( $service_cache_key_a !== $quote_cache->cache_key( runtime_smoke_request( '', 2400 ), 'demo', '', 'service_a' ), 'Quote cache key must include package total weight so weight-based tariffs cannot reuse another weight.' );
+runtime_smoke_assert( $service_cache_key_a !== $quote_cache->cache_key( runtime_smoke_request( '', 0 ), 'demo', '', 'service_a' ), 'Quote cache key must distinguish an empty package from a physical package whose item weight is zero.' );
+$quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-a', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_a' );
+$quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-b', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_b' );
+runtime_smoke_assert( 'quote-a' === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' )?->quote_id, 'Quote cache hit must stay isolated for service_a.' );
+runtime_smoke_assert( 'quote-b' === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_b' )?->quote_id, 'Quote cache hit must stay isolated for service_b.' );
+
+$GLOBALS['wpdb']->options = array(
+	'_transient_wdc_rp_domestic_aaa' => 'domestic',
+	'_transient_timeout_wdc_rp_domestic_aaa' => 123,
+	'_transient_wdc_rp_tariff_bbb' => 'international',
+	'_transient_timeout_wdc_rp_tariff_bbb' => 456,
+	'_transient_wdc_cdek_region_directory_region9' => array( 'coverage' ),
+	'_transient_timeout_wdc_cdek_region_directory_region9' => 999,
+	'_transient_wdc_pickup_search_ccc' => 'pickup',
+	'_transient_timeout_wdc_pickup_search_ccc' => 789,
+	'_transient_dadata_ddd' => 'dadata',
+	'_transient_foreign_quote' => 'foreign',
+);
+$quote_cache_manager = new DeliveryQuoteCacheManager( $quote_cache, $GLOBALS['wpdb'] );
+$deleted_quote_cache = $quote_cache_manager->clear_all_quote_cache();
+runtime_smoke_assert( 3 === $deleted_quote_cache, 'DeliveryQuoteCacheManager must return the number of deleted quote/tariff/geography transient keys.' );
+runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_aaa', $GLOBALS['wpdb']->options ) && ! array_key_exists( '_transient_wdc_rp_tariff_bbb', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must delete WDC Russian Post quote/tariff cache transients.' );
+runtime_smoke_assert( ! array_key_exists( '_transient_wdc_cdek_region_directory_region9', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must delete CDEK region directory transients.' );
+runtime_smoke_assert( array_key_exists( '_transient_wdc_pickup_search_ccc', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_dadata_ddd', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_foreign_quote', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must leave pickup, DaData, and foreign transients untouched.' );
+runtime_smoke_assert( null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'DeliveryQuoteCacheManager must invalidate runtime quote memory namespace.' );
+$GLOBALS['wdc_test_actions'] = array();
+$quote_cache_manager->register();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_filters']['woocommerce_cart_shipping_packages'] ), 'DeliveryQuoteCacheManager must add the global cache version to WooCommerce shipping packages.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_update_product'] ) && isset( $GLOBALS['wdc_test_actions']['woocommerce_update_product_variation'] ), 'DeliveryQuoteCacheManager must invalidate delivery cache after simple product and variation updates.' );
+$package_before_bump = $quote_cache_manager->add_cache_version_to_packages( array( array( 'contents' => array() ) ) );
+$version_before_product_update = $quote_cache_manager->delivery_rates_cache_version();
+$quote_cache_manager->invalidate_after_product_update( 123 );
+$version_after_product_update = $quote_cache_manager->delivery_rates_cache_version();
+runtime_smoke_assert( $version_before_product_update !== $version_after_product_update, 'Product update must bump the global delivery rates cache version.' );
+$package_after_product_update = $quote_cache_manager->add_cache_version_to_packages( array( array( 'contents' => array() ) ) );
+runtime_smoke_assert( ( $package_before_bump[0]['wdc_delivery_rates_cache_version'] ?? '' ) !== ( $package_after_product_update[0]['wdc_delivery_rates_cache_version'] ?? '' ), 'Package cache identity must change after delivery rates cache version bump.' );
+$quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-c', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_a' );
+$version_before_variation_update = $quote_cache_manager->delivery_rates_cache_version();
+$quote_cache_manager->invalidate_after_product_update( 456 );
+runtime_smoke_assert( $version_before_variation_update !== $quote_cache_manager->delivery_rates_cache_version() && null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'Variation update must use the same carrier-neutral invalidation boundary and clear runtime quote cache.' );
+
+$container->get( SettingsRepository::class )->set( ShipmentStatusAutoSyncService::INTERVAL_KEY, 30 );
+$admin_menu = new AdminMenu( runtime_smoke_environment(), $quote_cache_manager, runtime_smoke_shipment_cost_analytics_section(), $container->get( \WallsShop\WDC\Admin\ScheduledTaskCatalog::class ) );
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_POST = array();
+ob_start();
+$admin_menu->render_page();
+$overview_html = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $overview_html, 'wdc_overview_action' ) && str_contains( $overview_html, 'clear_delivery_quote_cache' ) && str_contains( $overview_html, 'Очистить кеш тарифов доставки' ), 'Overview page must render delivery quote cache clear button.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Версия плагина' ) && str_contains( $overview_html, 'Версия PHP' ) && str_contains( $overview_html, 'Версия WooCommerce' ) && str_contains( $overview_html, 'Статус HPOS' ) && str_contains( $overview_html, 'Статус Action Scheduler' ), 'Overview page must keep the platform information block.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Запланированные задачи' ) && str_contains( $overview_html, 'Время указано по Новосибирску (GMT+7).' ) && str_contains( $overview_html, 'Обновление ПВЗ DPD' ), 'Overview page must render the read-only WDC scheduled task catalog.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Каждые 00:30' ), 'Overview must render the effective configured shipment status interval.' );
+$ordered_task_labels = array( 'Автосинхронизация статусов отправлений', 'Обновление ПВЗ Почты России', 'Обновление ПВЗ Ozon Delivery', 'Полное обновление ПВЗ/географии Яндекс', 'Обновление ПВЗ DPD', 'Генерация календаря следующего года' );
+runtime_smoke_assert( 6 === count( $container->get( \WallsShop\WDC\Admin\ScheduledTaskCatalog::class )->tasks() ), 'Overview catalog must contain exactly six scheduled tasks.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Проверка подготовленного FIAS dataset' ), 'Overview must not render the retired prepared FIAS placeholder.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Проверка обновлений GAR' ), 'Overview must not render the retired automatic GAR check.' );
+$previous_task_position = -1;
+foreach ( $ordered_task_labels as $task_label ) {
+	$task_position = strpos( $overview_html, $task_label );
+	runtime_smoke_assert( false !== $task_position && $task_position > $previous_task_position, 'Overview scheduled task order mismatch at: ' . $task_label );
+	$previous_task_position = $task_position;
+}
+$cache_position = strpos( $overview_html, 'Очистить кеш тарифов доставки' );
+$tasks_position = strpos( $overview_html, 'Запланированные задачи' );
+$analytics_position = strpos( $overview_html, 'Аналитика стоимости отправлений' );
+runtime_smoke_assert( false !== $cache_position && false !== $tasks_position && false !== $analytics_position && $cache_position < $tasks_position && $tasks_position < $analytics_position, 'Overview must render cache cleanup, scheduled tasks, then shipment cost analytics.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Флаги функций' ) && ! str_contains( $overview_html, '<h2>Требования</h2>' ), 'Overview page must not render legacy flags or requirements sections.' );
+
+$GLOBALS['wpdb']->options['_transient_wdc_rp_domestic_admin'] = 'admin-cache';
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = array( 'wdc_overview_action' => 'clear_delivery_quote_cache', 'wdc_clear_delivery_quote_cache_nonce' => 'bad' );
+ob_start();
+$admin_menu->render_page();
+$invalid_nonce_html = (string) ob_get_clean();
+runtime_smoke_assert( array_key_exists( '_transient_wdc_rp_domestic_admin', $GLOBALS['wpdb']->options ) && ! str_contains( $invalid_nonce_html, 'Удалено записей' ), 'Overview cache clear action must require a valid nonce.' );
+
+$GLOBALS['wdc_test_denied_capabilities'] = array( AdminMenu::CAPABILITY );
+$_POST = array( 'wdc_overview_action' => 'clear_delivery_quote_cache', 'wdc_clear_delivery_quote_cache_nonce' => wp_create_nonce( 'wdc_clear_delivery_quote_cache' ) );
+ob_start();
+$admin_menu->render_page();
+$denied_capability_html = (string) ob_get_clean();
+unset( $GLOBALS['wdc_test_denied_capabilities'] );
+runtime_smoke_assert( array_key_exists( '_transient_wdc_rp_domestic_admin', $GLOBALS['wpdb']->options ) && '' === $denied_capability_html, 'Overview cache clear action must require admin capability.' );
+
+$_POST = array( 'wdc_overview_action' => 'clear_delivery_quote_cache', 'wdc_clear_delivery_quote_cache_nonce' => wp_create_nonce( 'wdc_clear_delivery_quote_cache' ) );
+ob_start();
+$admin_menu->render_page();
+$clear_success_html = (string) ob_get_clean();
+runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_admin', $GLOBALS['wpdb']->options ) && str_contains( $clear_success_html, 'Кеш тарифов доставки очищен' ) && str_contains( $clear_success_html, 'Удалено записей: 1' ), 'Overview cache clear action must render success notice after clear.' );
+
+$settings_page = new SettingsAdminPage( $settings, $runtime_settings );
+$legacy_location_limit_key = 'location' . '_search' . '_limit';
+runtime_smoke_assert( true === $settings->defaults()['checkout_sort_selector_enabled'], 'Missing selector visibility must default to enabled.' );
+$checked_sort = $settings_page->sanitize_settings( array( 'checkout_sort_selector_enabled' => '1' ) );
+$unchecked_sort = $settings_page->sanitize_settings( array() );
+runtime_smoke_assert( true === $checked_sort['checkout_sort_selector_enabled'] && false === $unchecked_sort['checkout_sort_selector_enabled'], 'Checkbox must explicitly sanitize checked and unchecked states.' );
+$saved_sort_settings = $settings->all();
+$settings->replace( array_merge( $saved_sort_settings, $checked_sort ) );
+runtime_smoke_assert( $settings->get_bool( 'checkout_sort_selector_enabled' ), 'Checked selector must persist through merge save flow.' );
+$settings->replace( array_merge( $settings->all(), $unchecked_sort ) );
+runtime_smoke_assert( ! $settings->get_bool( 'checkout_sort_selector_enabled' ), 'Unchecked selector must overwrite saved true through merge.' );
+$settings->set( 'show_checkout_debug_panel', true );
+runtime_smoke_assert( ! $settings->get_bool( 'checkout_sort_selector_enabled' ), 'Updating another setting must preserve disabled selector.' );
+$settings->replace( $saved_sort_settings );
+$settings_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
+runtime_smoke_assert( strpos( $settings_source, 'name="checkout_sort_mode"' ) < strpos( $settings_source, 'name="checkout_sort_selector_enabled"' ) && strpos( $settings_source, 'name="checkout_sort_selector_enabled"' ) < strpos( $settings_source, 'name="show_checkout_debug_panel"' ), 'Selector checkbox must follow sort mode and precede debug control.' );
+runtime_smoke_assert( 0 === $settings->get_int( $legacy_location_limit_key, 0 ), 'SettingsRepository must not default the legacy location limit key.' );
+runtime_smoke_assert( 100 === $settings->get_int( 'checkout_location_search_limit', 0 ), 'SettingsRepository must default checkout_location_search_limit to 100.' );
+$sanitized = $settings_page->sanitize_settings(
+	array(
+		'checkout_sort_mode'           => 'unexpected',
+		'show_checkout_debug_panel'    => 'on',
+		'checkout_location_search_limit' => '100',
+	)
+);
+runtime_smoke_assert( ! array_key_exists( $retired_checkout_flag, $sanitized ), 'Platform settings save must not write the retired checkout rollout flag.' );
+runtime_smoke_assert( RateSorter::CHEAPEST === $sanitized['checkout_sort_mode'], 'Invalid checkout_sort_mode must fall back to cheapest.' );
+runtime_smoke_assert( true === $sanitized['show_checkout_debug_panel'], 'show_checkout_debug_panel must sanitize to true.' );
+runtime_smoke_assert( ! array_key_exists( $legacy_location_limit_key, $sanitized ), 'Legacy location limit key must not be sanitized.' );
+runtime_smoke_assert( 100 === $sanitized['checkout_location_search_limit'], 'checkout_location_search_limit=100 must sanitize to 100.' );
+runtime_smoke_assert( 10 === $settings_page->sanitize_settings( array( 'checkout_location_search_limit' => '5' ) )['checkout_location_search_limit'], 'checkout_location_search_limit below min must clamp to 10.' );
+runtime_smoke_assert( 500 === $settings_page->sanitize_settings( array( 'checkout_location_search_limit' => '999' ) )['checkout_location_search_limit'], 'checkout_location_search_limit above max must clamp to 500.' );
+
+$GLOBALS['wdc_test_options'] = array(
+	'wdc_core_settings' => array(
+		PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
+		$retired_checkout_flag => false,
+		'checkout_sort_mode'           => RateSorter::CHEAPEST,
+		'show_checkout_debug_panel'    => false,
+	),
+);
+$plugin_without_demo = new Plugin( runtime_smoke_environment() );
+$plugin_without_demo->register();
+/** @var CarrierRegistry $registry */
+$registry = $plugin_without_demo->container()->get( CarrierRegistry::class );
+runtime_smoke_assert( ! $registry->has( 'demo' ), 'Demo carrier must not be registered when disabled.' );
+/** @var CheckoutOrchestrator $orchestrator */
+$orchestrator = $plugin_without_demo->container()->get( CheckoutOrchestrator::class );
+$fallback = $orchestrator->calculate( runtime_smoke_request() );
+runtime_smoke_assert( $fallback->fallback_used, 'Orchestrator must return fallback when no carriers are registered.' );
+runtime_smoke_assert( 'fallback' === $fallback->rates[0]->carrier_key, 'Fallback rate must be returned instead of fatal.' );
+
+$debug_session = new CheckoutSessionManager();
+$debug_session->save_debug( array( 'rates_count' => 1, 'fallback_used' => true ) );
+$debug_gate_settings = new SettingsRepository();
+$debug_gate_settings->set( PlatformRuntimeSettings::RUNTIME_ENABLED_KEY, true );
+ob_start();
+( new CheckoutDebugPanel( $debug_session, $debug_gate_settings, new PlatformRuntimeSettings( $debug_gate_settings ) ) )->render();
+$debug_output = (string) ob_get_clean();
+runtime_smoke_assert( '' === $debug_output, 'Debug panel must be hidden when show_checkout_debug_panel is false.' );
+
+$settings->replace(
+	array_merge(
+		$settings->all(),
+		array(
+			PlatformRuntimeSettings::RUNTIME_ENABLED_KEY => true,
+			$retired_checkout_flag => false,
+			'show_checkout_debug_panel'    => true,
+		)
+	)
+);
+ob_start();
+( new CheckoutDebugPanel( $debug_session, $settings, new PlatformRuntimeSettings( $settings ) ) )->render();
+$debug_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $debug_output, 'Отладка checkout WDC' ), 'Debug panel must render when runtime and debug setting are enabled, regardless of the retired checkout rollout flag.' );
+
+runtime_smoke_assert( 'Калькулятор доставки w.ALL.s' === $method->method_title, 'Shipping method title must be updated.' );
+
+$errors = new class {
+	/** @var array<string,string> */
+	public array $errors = array();
+	public function add( string $code, string $message ): void {
+		$this->errors[ $code ] = $message;
+	}
+};
+$validation_session = new CheckoutSessionManager();
+$validation_session->save_rates(
+	array(
+		'demo:pickup' => array(
+			'carrier_key'           => 'demo',
+			'rate_id'               => 'demo:pickup',
+			'delivery_type'         => DeliveryType::PICKUP,
+			'requires_pickup_point' => true,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:pickup' ) );
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( 'Выберите пункт выдачи.' === ( $errors->errors['wdc_pickup_required'] ?? '' ), 'Pickup validation label must be Russian.' );
+
+$validation_session->save_pickup_selection(
+	array(
+		'carrier_key'   => 'demo',
+		'rate_id'       => 'demo:pickup',
+		'point_code'    => 'demo-nsk-001',
+		'point_address' => 'Красный проспект, 25',
+	)
+);
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Matching pickup selection must validate.' );
+
+$validation_session->clear_pickup_selection();
+$validation_session->save_pickup_selection(
+	array(
+		'carrier_key'   => 'other',
+		'rate_id'       => 'other:pickup',
+		'point_code'    => 'other-nsk-001',
+		'point_address' => 'Красный проспект, 99',
+	)
+);
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( 'Выберите пункт выдачи.' === ( $errors->errors['wdc_pickup_required'] ?? '' ), 'Stale pickup selection from another family must not satisfy selectable pickup validation.' );
+
+$validation_session->clear_pickup_selection();
+$validation_session->save_rates(
+	array(
+		'jet_logistic_pickup' => array(
+			'carrier_key'           => 'jet_logistic',
+			'rate_id'               => 'jet_logistic_pickup',
+			'delivery_type'         => DeliveryType::PICKUP,
+			'requires_pickup_point' => false,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_pickup' ) );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Алматы' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Pickup validation must pass for pickup rates that do not require a concrete pickup point.' );
+
+$validation_session->save_rates(
+	array(
+		'jet_logistic_courier' => array(
+			'carrier_key'           => 'jet_logistic',
+			'rate_id'               => 'jet_logistic_courier',
+			'delivery_type'         => DeliveryType::COURIER,
+			'requires_pickup_point' => false,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_courier' ) );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Алматы', 'billing_address_1' => 'ул. Абая, д. 1' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Courier validation must not require pickup selection.' );
+
+$validation_session->save_rates(
+	array(
+		'demo:courier' => array(
+			'carrier_key'   => 'demo',
+			'rate_id'       => 'demo:courier',
+			'delivery_type' => DeliveryType::COURIER,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:courier' ) );
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( 'Для доставки курьером необходимо заполнить адрес.' === ( $errors->errors['wdc_courier_address_required'] ?? '' ), 'Courier validation must fail when address is empty.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'billing_postcode' => '630091', 'billing_city' => 'г Новосибирск', 'billing_address_1' => '', 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( 'Для доставки курьером необходимо заполнить адрес.' === ( $errors->errors['wdc_courier_address_required'] ?? '' ), 'Courier validation must fail when only postcode and city are filled.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'billing_address_1' => 'ул. Советская, д. 99' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Courier validation must pass when address is filled and ignore stale pickup selection.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'billing_address_1' => '', 'shipping_address_1' => 'ул. Shipping, д. 1' ), $errors );
+runtime_smoke_assert( 'Для доставки курьером необходимо заполнить адрес.' === ( $errors->errors['wdc_courier_address_required'] ?? '' ), 'Courier validation must not use filled shipping address when billing field exists and ship-to-different is absent.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_address_1' => 'ул. Shipping, д. 1' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Courier validation must fall back to shipping when billing address field is absent.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'ship_to_different_address' => '1', 'billing_address_1' => '', 'shipping_address_1' => 'ул. Shipping, д. 1' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Courier validation must use shipping when ship-to-different is posted.' );
+$errors->errors = array();
+WC()->session->set( 'chosen_shipping_methods', array() );
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'No-shipping checkout must not require address.' );
+
+$validation_session->clear_pickup_selection();
+$validation_session->save_rates(
+	array(
+		'russian_post_worldwide_parcel' => array(
+			'carrier_key'            => 'russian_post',
+			'rate_id'                => 'russian_post_worldwide_parcel',
+			'service_key'            => 'russian_post_worldwide_parcel',
+			'delivery_type'          => DeliveryType::PICKUP,
+			'requires_pickup_point'  => false,
+			'no_pickup_selection'    => true,
+			'rate_meta'              => array(
+				'no_pickup_selection'   => true,
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_worldwide_parcel' ) );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Russian Post international pickup rate must validate without pickup point selection.' );
+
+$repo = new PickupPointRepository();
+$repo->save_many( ( new TestPickupProvider( dirname( __DIR__ ) . '/fixtures/demo/pickup-points-demo.json' ) )->load_points() );
+runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосибирск' ) ) >= 3, 'Demo pickup search must find Новосибирск.' );
+runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'новосибирск' ) ) >= 3, 'Demo pickup search must find lowercase Новосибирск.' );
+runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосиб' ) ) >= 3, 'Demo pickup search must find partial Новосиб.' );
+
+WC()->session = new WdcRuntimeSmokeSession();
+$renderer = new CheckoutDeliveryTypeSelector( new CheckoutSessionManager(), $repo, new PickupPointRenderer() );
+$rate = new class {
+	public function get_meta_data(): array {
+		return array(
+			'carrier_key'           => 'demo',
+			'rate_id'               => 'demo:pickup',
+			'delivery_type'         => 'pickup',
+			'requires_pickup_point' => true,
+		);
+	}
+};
+ob_start();
+$renderer->render( $rate );
+$selector_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $selector_output, 'wdc_platform_delivery_type' ), 'Delivery type radio must not render.' );
+runtime_smoke_assert( str_contains( $selector_output, 'data-wdc-pickup-checkout' ) && str_contains( $selector_output, 'data-wdc-pickup-open' ), 'Pickup selector must render checkout pickup container and open button.' );
+
+$yandex_renderer = new CheckoutDeliveryTypeSelector( new CheckoutSessionManager(), $repo, new PickupPointRenderer() );
+$yandex_pickup_rate = new class {
+	public function get_meta_data(): array {
+		return array(
+			'carrier_key' => 'yandex_delivery',
+			'service_key' => 'yandex_delivery',
+			'rate_id' => 'yandex_pickup',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => true,
+		);
+	}
+};
+ob_start();
+$yandex_renderer->render( $yandex_pickup_rate );
+$yandex_pickup_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $yandex_pickup_output, 'data-wdc-pickup-checkout' ) && str_contains( $yandex_pickup_output, 'data-wdc-pickup-open' ), 'Yandex pickup rate must render pickup checkout container and open button.' );
+runtime_smoke_assert( str_contains( $yandex_pickup_output, 'name="wdc_pickup_carrier_key"' ) && str_contains( $yandex_pickup_output, 'value="yandex_delivery"' ) && str_contains( $yandex_pickup_output, 'name="wdc_pickup_family"' ) && str_contains( $yandex_pickup_output, 'value="yandex_delivery:pickup"' ), 'Yandex pickup render must include carrier and family hidden fields.' );
+$yandex_courier_rate = new class {
+	public function get_meta_data(): array {
+		return array(
+			'carrier_key' => 'yandex_delivery',
+			'service_key' => 'yandex_delivery',
+			'rate_id' => 'yandex_courier',
+			'delivery_type' => 'courier',
+			'requires_pickup_point' => false,
+		);
+	}
+};
+ob_start();
+$yandex_renderer->render( $yandex_courier_rate );
+$yandex_courier_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $yandex_courier_output, 'data-wdc-pickup-checkout' ) && ! str_contains( $yandex_courier_output, 'data-wdc-pickup-open' ), 'Yandex courier rate must not render pickup selector UI.' );
+
+$rp_rate = new class {
+	public function get_meta_data(): array {
+		return array(
+			'carrier_key'           => 'russian_post',
+			'rate_id'               => 'russian_post_worldwide_parcel',
+			'service_key'           => 'russian_post_worldwide_parcel',
+			'delivery_type'         => 'pickup',
+			'requires_pickup_point' => true,
+			'no_pickup_selection'   => true,
+			'rate_meta'             => array(
+				'no_pickup_selection'   => true,
+			),
+		);
+	}
+};
+ob_start();
+$renderer->render( $rp_rate );
+$rp_selector_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $rp_selector_output, 'Выберите пункт выдачи' ) && ! str_contains( $rp_selector_output, 'wdc-platform-pickup-point' ), 'Russian Post international must not render pickup selector UI.' );
+
+$pickup_mode_scan = '';
+foreach ( array( '/src', '/tests' ) as $scan_dir ) {
+	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . $scan_dir ) );
+	foreach ( $iterator as $scan_file ) {
+		if ( $scan_file->isFile() ) {
+			$pickup_mode_scan .= (string) file_get_contents( $scan_file->getPathname() );
+		}
+	}
+}
+$removed_pickup_mode_key = 'pickup_selection_' . 'mode';
+runtime_smoke_assert( ! str_contains( $pickup_mode_scan, $removed_pickup_mode_key ), 'Removed pickup selection mode key must not be referenced after cleanup.' );
+
+$sort_session = new CheckoutSessionManager();
+$sort_selector = new CheckoutSortSelector( $sort_session, $settings );
+WC()->session->set( 'shipping_for_package_0', array( 'cached' => true ) );
+$sort_selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=fastest' );
+runtime_smoke_assert( RateSorter::FASTEST === $sort_session->selected_sort_mode(), 'Sort selector must save fastest in session.' );
+runtime_smoke_assert( null === WC()->session->get( 'shipping_for_package_0' ), 'Sort selector must clear WooCommerce shipping cache when sort changes.' );
+ob_start();
+$sort_selector->render();
+$sort_zero_output = (string) ob_get_clean();
+runtime_smoke_assert( '' === $sort_zero_output, 'Sort selector must not render when there are no WDC rates.' );
+WC()->session->set( 'shipping_for_package_0', array( 'rates' => array( new WdcRuntimeSmokeRate( array( 'carrier_key' => 'russian_post' ) ) ) ) );
+ob_start();
+$sort_selector->render();
+$sort_one_output = (string) ob_get_clean();
+runtime_smoke_assert( '' === $sort_one_output, 'Sort selector must not render when there is only one WDC rate.' );
+WC()->session->set( 'shipping_for_package_0', array( 'rates' => array( new WdcRuntimeSmokeRate( array( 'carrier_key' => 'russian_post' ) ), new WdcRuntimeSmokeRate( array( 'carrier_key' => 'fallback' ) ) ) ) );
+ob_start();
+$sort_selector->render();
+$sort_two_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $sort_two_output, 'wdc-checkout-sort-row' ) && str_contains( $sort_two_output, 'wdc_platform_checkout_sort_mode' ), 'Sort selector must render only when two or more WDC rates are available.' );
+$settings->set( 'checkout_sort_selector_enabled', false );
+ob_start();
+$sort_selector->render();
+$hidden_sort_output = (string) ob_get_clean();
+runtime_smoke_assert( '' === $hidden_sort_output, 'Disabled selector must emit no markup even with multiple WDC rates.' );
+$settings->set( 'checkout_sort_selector_enabled', true );
+$checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
+runtime_smoke_assert( str_contains( $checkout_sort_js, 'function relocateDeliveryControls()' ) && str_contains( $checkout_sort_js, 'function relocateDeliveryMessages()' ) && str_contains( $checkout_sort_js, 'function relocateSortControl( $messages )' ) && str_contains( $checkout_sort_js, 'prependTo( $shippingCell )' ) && str_contains( $checkout_sort_js, 'insertAfter( $messages )' ) && ! str_contains( $checkout_sort_js, '.clone(' ) && str_contains( $checkout_sort_js, 'updated_checkout' ), 'Checkout sort JS must move delivery messages into the shipping row, place sort after them, and keep the no-message prepend fallback.' );
+$courier_address_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/courier-address-summary.js' );
+foreach ( array( 'billing_address_1', 'shipping_address_1', 'billing_postcode', 'shipping_postcode', 'billing_city', 'shipping_city', 'updated_checkout', 'input[name^="shipping_method"]', 'required = required', 'aria-required', 'data-wdc-courier-address-summary', 'wdcCourierAddressSummary', 'addressParts', '.join(\', \')', 'target.focus()', 'selectedItem.contains(summary)', 'shipToDifferent && shipToDifferent.checked', '!billingAddress && shippingAddress', 'marker.getAttribute(\'data-wdc-added\') === \'true\'', 'var address1 = value(addressField)', 'var hasAddress1 = address1 !== \'\'', 'valueNode.textContent = hasAddress1 ? address : \'\'', 'valueNode.hidden = !hasAddress1', 'warningNode.hidden = hasAddress1' ) as $needle ) {
+        runtime_smoke_assert( str_contains( $courier_address_js, $needle ), 'Courier address summary JS must contain ' . $needle . '.' );
+}
+$pickup_checkout_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' );
+foreach ( array( 'updated_checkout', 'boot();', "document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init)", "event.target.closest ? event.target.closest('[data-wdc-pickup-open]')", 'openModal(container, containerMethod(container) || activeMethod || currentShippingMethod())', "method === 'yandex_pickup'", "value === 'yandex_pickup'", "family === 'dpd:pickup' || family === 'yandex_delivery:pickup'" ) as $needle ) {
+	runtime_smoke_assert( str_contains( $pickup_checkout_js, $needle ), 'Pickup checkout JS must contain ' . $needle . '.' );
+}
+runtime_smoke_assert( ! str_contains( $pickup_checkout_js, "openButton.addEventListener('click'" ), 'Pickup checkout open button must use delegated click handling after updated_checkout DOM replacement.' );
+runtime_smoke_assert( ! str_contains( $courier_address_js, "value('shipping_address_1') !== ''" ), 'Courier address summary JS must not switch to shipping only because shipping address has a value.' );
+runtime_smoke_assert( ! str_contains( $courier_address_js, '} else if (!required && marker) {' ), 'Courier address summary JS must not remove native WooCommerce required markers.' );
+$plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
+$registrar_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
+runtime_smoke_assert( ! str_contains( $plugin_source, 'CheckoutAddressRenderer::class )->register()' ) && ! str_contains( $registrar_source, 'address-normalization.css' ), 'Visible checkout address-check block and its frontend CSS must not be registered by default.' );
+
+$fallback_rate = ( new FallbackRateFactory() )->create();
+runtime_smoke_assert( 'Нет видимых доступных вариантов доставки, обратитесь к менеджеру магазина' === $fallback_rate->title, 'Fallback rate label must be Russian.' );
+runtime_smoke_assert( 'Калькулятор доставок' === __( 'Калькулятор доставок', 'walls-delivery-calc' ), 'Menu label must exist in Russian.' );
+runtime_smoke_assert( AdminMenu::MENU_SLUG === 'wdc-platform', 'Top-level menu slug must be stable.' );
+
+echo "Runtime stabilization smoke test passed.\n";

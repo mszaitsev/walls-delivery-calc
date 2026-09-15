@@ -1,0 +1,736 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\DeliveryServices;
+
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\SelfPickup\SelfPickupSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+
+defined( 'ABSPATH' ) || exit;
+
+final class DeliveryServiceRepository {
+	private \wpdb $wpdb;
+
+	public function __construct( ?\wpdb $db = null ) {
+		global $wpdb;
+
+		$this->wpdb = $db ?? $wpdb;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	public function create_service( array $data ): int {
+		$service_key = (string) ( $data['service_key'] ?? '' );
+		if ( '' !== $service_key ) {
+			$existing = $this->find_any_by_service_key( $service_key );
+			if ( $existing instanceof DeliveryService && null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array_merge(
+						$data,
+						array(
+							'deleted' => 0,
+						)
+					)
+				);
+
+				return (int) $existing->id;
+			}
+		}
+
+		$now = current_time( 'mysql' );
+		$row = $this->normalize_row( $data, $now );
+		$this->wpdb->insert( $this->table(), $row, $this->formats() );
+
+		return (int) $this->wpdb->insert_id;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	public function insert_service( array $data ): int {
+		$now = current_time( 'mysql' );
+		$row = $this->normalize_row( $data, $now );
+		$inserted = $this->wpdb->insert( $this->table(), $row, $this->formats() );
+
+		return false !== $inserted ? (int) $this->wpdb->insert_id : 0;
+	}
+
+	public function delete_newly_created_service( int $id ): void {
+		$result = $this->wpdb->delete( $this->table(), array( 'id' => $id ), array( '%d' ) );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Failed to delete newly created delivery service.' );
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	public function update_service( int $id, array $data ): void {
+		$row = $this->normalize_row( $data, current_time( 'mysql' ), false );
+		if ( array() === $row ) {
+			return;
+		}
+
+		$row['updated_at'] = current_time( 'mysql' );
+		$this->wpdb->update( $this->table(), $row, array( 'id' => $id ), $this->formats_for_row( $row ), array( '%d' ) );
+	}
+
+	public function soft_delete_service( int $id ): void {
+		$service = $this->find_by_id( $id );
+		if ( $service instanceof DeliveryService && $this->is_predefined_service_key( $service->service_key ) ) {
+			return;
+		}
+
+		$this->wpdb->update(
+			$this->table(),
+			array( 'deleted' => 1, 'enabled' => 0, 'updated_at' => current_time( 'mysql' ) ),
+			array( 'id' => $id ),
+			array( '%d', '%d', '%s' ),
+			array( '%d' )
+		);
+	}
+
+	/**
+	 * @return array<int,DeliveryService>
+	 */
+	public function list_active(): array {
+		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->table()} WHERE deleted = 0 ORDER BY sort_order ASC, id ASC", ARRAY_A );
+
+		return $this->rows_to_services( is_array( $rows ) ? $rows : array() );
+	}
+
+	public function find_by_service_key( string $service_key ): ?DeliveryService {
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare( "SELECT * FROM {$this->table()} WHERE service_key = %s AND deleted = 0 LIMIT 1", $service_key ),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? DeliveryService::from_array( $row ) : null;
+	}
+
+	public function find_by_id( int $id ): ?DeliveryService {
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare( "SELECT * FROM {$this->table()} WHERE id = %d LIMIT 1", $id ),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? DeliveryService::from_array( $row ) : null;
+	}
+
+	public function is_predefined_service_key( string $service_key ): bool {
+		return in_array(
+			$service_key,
+			array(
+				RussianPostSettings::SERVICE_KEY,
+				RussianPostDomesticSettings::SERVICE_KEY,
+				CdekSettings::SERVICE_KEY,
+				DpdSettings::SERVICE_KEY,
+				PekSettings::SERVICE_KEY,
+				JetLogisticSettings::SERVICE_KEY,
+				YandexDeliverySettings::SERVICE_KEY,
+				OzonDeliverySettings::SERVICE_KEY,
+				SelfPickupSettings::SERVICE_KEY,
+			),
+			true
+		);
+	}
+
+	public function service_key_exists_for_other_service( string $service_key, int $service_id ): bool {
+		return $this->service_key_exists( $service_key, $service_id );
+	}
+
+	public function service_key_exists( string $service_key, ?int $exclude_id = null ): bool {
+		$existing = $this->find_any_by_service_key( $service_key );
+		return $existing instanceof DeliveryService && null !== $existing->id && ( null === $exclude_id || (int) $existing->id !== $exclude_id );
+	}
+
+	/**
+	 * @param array<int,int|string> $ordered_ids
+	 */
+	public function reorder( array $ordered_ids ): void {
+		$position = 10;
+		foreach ( $ordered_ids as $id ) {
+			$id = (int) $id;
+			if ( $id <= 0 ) {
+				continue;
+			}
+
+			$this->wpdb->update(
+				$this->table(),
+				array( 'sort_order' => $position, 'updated_at' => current_time( 'mysql' ) ),
+				array( 'id' => $id ),
+				array( '%d', '%s' ),
+				array( '%d' )
+			);
+			$position += 10;
+		}
+	}
+
+	public function ensure_russian_post_service(): DeliveryService {
+		$existing = $this->find_any_by_service_key( RussianPostSettings::SERVICE_KEY );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => RussianPostSettings::CARRIER_KEY,
+						'service_type' => DeliveryService::TYPE_API,
+						'title' => '' !== trim( $existing->title ) ? $existing->title : RussianPostSettings::TITLE,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => DeliveryService::AVAILABILITY_CARRIER_DIRECTORY,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( RussianPostSettings::SERVICE_KEY, (int) $existing->id );
+			}
+
+			return $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => RussianPostSettings::SERVICE_KEY,
+				'carrier_key' => RussianPostSettings::CARRIER_KEY,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => RussianPostSettings::TITLE,
+				'enabled' => 1,
+				'availability_mode' => DeliveryService::AVAILABILITY_CARRIER_DIRECTORY,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
+				'sort_order' => 10,
+				'deleted' => 0,
+			)
+		);
+
+		$created = $this->find_by_service_key( RussianPostSettings::SERVICE_KEY );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => RussianPostSettings::SERVICE_KEY ) );
+	}
+
+	/**
+	 * @return array<int,DeliveryService>
+	 */
+	public function ensure_russian_post_domestic_service(): DeliveryService {
+		return $this->ensure_builtin_service(
+			RussianPostDomesticSettings::SERVICE_KEY,
+			RussianPostDomesticSettings::CARRIER_KEY,
+			RussianPostDomesticSettings::TITLE,
+			20,
+			'Доставка до почтового отделения по индексу',
+			array( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE, RussianPostDomesticSettings::COURIER_SERVICE_TITLE )
+		);
+	}
+
+	public function ensure_cdek_service(): DeliveryService {
+		$existing = $this->find_any_by_service_key( CdekSettings::SERVICE_KEY );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => CdekSettings::CARRIER_KEY,
+						'service_type' => DeliveryService::TYPE_API,
+						'title' => '' === trim( $existing->title ) ? CdekSettings::TITLE : $existing->title,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( CdekSettings::SERVICE_KEY, (int) $existing->id );
+			}
+
+			$updated = $this->find_by_service_key( CdekSettings::SERVICE_KEY );
+
+			return $updated instanceof DeliveryService ? $updated : $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => CdekSettings::SERVICE_KEY,
+				'carrier_key' => CdekSettings::CARRIER_KEY,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => CdekSettings::TITLE,
+				'enabled' => 0,
+				'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
+				'sort_order' => 30,
+				'deleted' => 0,
+			)
+		);
+
+		$created = $this->find_by_service_key( CdekSettings::SERVICE_KEY );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => CdekSettings::SERVICE_KEY, 'carrier_key' => CdekSettings::CARRIER_KEY, 'title' => CdekSettings::TITLE, 'enabled' => 0 ) );
+	}
+
+	public function cdek_service_exists(): bool {
+		return $this->find_any_by_service_key( CdekSettings::SERVICE_KEY ) instanceof DeliveryService;
+	}
+
+	public function ensure_dpd_service(): DeliveryService {
+		$existing = $this->find_any_by_service_key( DpdSettings::SERVICE_KEY );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => DpdSettings::CARRIER_KEY,
+						'service_type' => DeliveryService::TYPE_API,
+						'title' => '' === trim( $existing->title ) ? DpdSettings::TITLE : $existing->title,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( DpdSettings::SERVICE_KEY, (int) $existing->id );
+			}
+
+			$updated = $this->find_by_service_key( DpdSettings::SERVICE_KEY );
+
+			return $updated instanceof DeliveryService ? $updated : $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => DpdSettings::SERVICE_KEY,
+				'carrier_key' => DpdSettings::CARRIER_KEY,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => DpdSettings::TITLE,
+				'enabled' => 0,
+				'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
+				'sort_order' => 40,
+				'deleted' => 0,
+			)
+		);
+
+		$created = $this->find_by_service_key( DpdSettings::SERVICE_KEY );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => DpdSettings::SERVICE_KEY, 'carrier_key' => DpdSettings::CARRIER_KEY, 'title' => DpdSettings::TITLE, 'enabled' => 0 ) );
+	}
+
+	public function ensure_yandex_delivery_service(): DeliveryService {
+		$existing = $this->find_any_by_service_key( YandexDeliverySettings::SERVICE_KEY );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+						'service_type' => DeliveryService::TYPE_API,
+						'title' => '' === trim( $existing->title ) ? YandexDeliverySettings::TITLE : $existing->title,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( YandexDeliverySettings::SERVICE_KEY, (int) $existing->id );
+			}
+
+			$updated = $this->find_by_service_key( YandexDeliverySettings::SERVICE_KEY );
+
+			return $updated instanceof DeliveryService ? $updated : $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => YandexDeliverySettings::SERVICE_KEY,
+				'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => YandexDeliverySettings::TITLE,
+				'enabled' => 0,
+				'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
+				'sort_order' => 50,
+				'deleted' => 0,
+			)
+		);
+
+		$created = $this->find_by_service_key( YandexDeliverySettings::SERVICE_KEY );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => YandexDeliverySettings::SERVICE_KEY, 'carrier_key' => YandexDeliverySettings::CARRIER_KEY, 'title' => YandexDeliverySettings::TITLE, 'enabled' => 0 ) );
+	}
+
+	public function ensure_jet_logistic_service(): DeliveryService {
+		$existing = $this->find_any_by_service_key( JetLogisticSettings::SERVICE_KEY );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => JetLogisticSettings::CARRIER_KEY,
+						'service_type' => DeliveryService::TYPE_API,
+						'title' => '' === trim( $existing->title ) ? JetLogisticSettings::PUBLIC_TITLE : $existing->title,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( JetLogisticSettings::SERVICE_KEY, (int) $existing->id );
+			}
+			$updated = $this->find_by_service_key( JetLogisticSettings::SERVICE_KEY );
+
+			return $updated instanceof DeliveryService ? $updated : $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => JetLogisticSettings::SERVICE_KEY,
+				'carrier_key' => JetLogisticSettings::CARRIER_KEY,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => JetLogisticSettings::PUBLIC_TITLE,
+				'enabled' => 0,
+				'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
+				'sort_order' => 60,
+				'deleted' => 0,
+			)
+		);
+		$created = $this->find_by_service_key( JetLogisticSettings::SERVICE_KEY );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => JetLogisticSettings::SERVICE_KEY, 'carrier_key' => JetLogisticSettings::CARRIER_KEY, 'title' => JetLogisticSettings::PUBLIC_TITLE, 'enabled' => 0 ) );
+	}
+
+	public function ensure_pek_service(): DeliveryService {
+		$existing = $this->find_any_by_service_key( PekSettings::SERVICE_KEY );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => PekSettings::CARRIER_KEY,
+						'service_type' => DeliveryService::TYPE_API,
+						'title' => '' === trim( $existing->title ) ? PekSettings::PUBLIC_TITLE : $existing->title,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( PekSettings::SERVICE_KEY, (int) $existing->id );
+			}
+			$updated = $this->find_by_service_key( PekSettings::SERVICE_KEY );
+
+			return $updated instanceof DeliveryService ? $updated : $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => PekSettings::SERVICE_KEY,
+				'carrier_key' => PekSettings::CARRIER_KEY,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => PekSettings::PUBLIC_TITLE,
+				'enabled' => 0,
+				'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
+				'sort_order' => 70,
+				'deleted' => 0,
+			)
+		);
+		$created = $this->find_by_service_key( PekSettings::SERVICE_KEY );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => PekSettings::SERVICE_KEY, 'carrier_key' => PekSettings::CARRIER_KEY, 'title' => PekSettings::PUBLIC_TITLE, 'enabled' => 0 ) );
+	}
+
+	public function ozon_delivery_service_exists(): bool {
+		return $this->find_any_by_service_key( OzonDeliverySettings::SERVICE_KEY ) instanceof DeliveryService;
+	}
+
+	public function ensure_ozon_delivery_service(): DeliveryService {
+		return $this->ensure_builtin_service(
+			OzonDeliverySettings::SERVICE_KEY,
+			OzonDeliverySettings::CARRIER_KEY,
+			OzonDeliverySettings::TITLE,
+			70
+		);
+	}
+
+	public function pek_service_exists(): bool {
+		return $this->find_any_by_service_key( PekSettings::SERVICE_KEY ) instanceof DeliveryService;
+	}
+
+	public function ensure_self_pickup_service(): DeliveryService {
+		$existing = $this->find_any_by_service_key( SelfPickupSettings::SERVICE_KEY );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => SelfPickupSettings::CARRIER_KEY,
+						'service_type' => DeliveryService::TYPE_FIXED,
+						'title' => '' !== trim( $existing->title ) ? $existing->title : SelfPickupSettings::TITLE,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => '' !== trim( $existing->availability_mode ) ? $existing->availability_mode : DeliveryService::AVAILABILITY_ALL_COUNTRIES,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( SelfPickupSettings::SERVICE_KEY, (int) $existing->id );
+			}
+
+			$updated = $this->find_by_service_key( SelfPickupSettings::SERVICE_KEY );
+			return $updated instanceof DeliveryService ? $updated : $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => SelfPickupSettings::SERVICE_KEY,
+				'carrier_key' => SelfPickupSettings::CARRIER_KEY,
+				'service_type' => DeliveryService::TYPE_FIXED,
+				'title' => SelfPickupSettings::TITLE,
+				'enabled' => 1,
+				'availability_mode' => DeliveryService::AVAILABILITY_ALL_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 0,
+				'round_up_to_ruble' => 0,
+				'minimum_price_rub' => 0,
+				'include_packaging_weight' => 0,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
+				'sort_order' => 80,
+				'deleted' => 0,
+			)
+		);
+
+		$created = $this->find_by_service_key( SelfPickupSettings::SERVICE_KEY );
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => SelfPickupSettings::SERVICE_KEY, 'carrier_key' => SelfPickupSettings::CARRIER_KEY, 'title' => SelfPickupSettings::TITLE ) );
+	}
+
+	/**
+	 * @param array<int,string> $replaceable_titles
+	 */
+	private function ensure_builtin_service( string $service_key, string $carrier_key, string $title, int $sort_order, string $pickup_comment = '', array $replaceable_titles = array() ): DeliveryService {
+		$existing = $this->find_any_by_service_key( $service_key );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$existing_title = trim( $existing->title );
+				$should_replace_title = '' === $existing_title || in_array( $existing_title, $replaceable_titles, true );
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => $carrier_key,
+						'service_type' => DeliveryService::TYPE_API,
+						'title' => $should_replace_title ? $title : $existing->title,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( $service_key, (int) $existing->id );
+			}
+
+			$updated = $this->find_by_service_key( $service_key );
+
+			return $updated instanceof DeliveryService ? $updated : $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => $service_key,
+				'carrier_key' => $carrier_key,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => $title,
+				'enabled' => 1,
+				'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => $pickup_comment,
+				'courier_customer_comment' => '',
+				'sort_order' => $sort_order,
+				'deleted' => 0,
+			)
+		);
+
+		$created = $this->find_by_service_key( $service_key );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => $service_key, 'carrier_key' => $carrier_key, 'title' => $title ) );
+	}
+
+	private function find_any_by_service_key( string $service_key ): ?DeliveryService {
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare( "SELECT * FROM {$this->table()} WHERE service_key = %s ORDER BY deleted ASC, id ASC LIMIT 1", $service_key ),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? DeliveryService::from_array( $row ) : null;
+	}
+
+	private function delete_duplicate_active_services( string $service_key, int $keep_id ): void {
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare( "SELECT * FROM {$this->table()} WHERE service_key = %s AND deleted = 0 ORDER BY id ASC", $service_key ),
+			ARRAY_A
+		);
+		if ( ! is_array( $rows ) ) {
+			return;
+		}
+
+		foreach ( $rows as $row ) {
+			$id = (int) ( $row['id'] ?? 0 );
+			if ( $id > 0 && $id !== $keep_id ) {
+				$this->wpdb->update(
+					$this->table(),
+					array( 'deleted' => 1, 'enabled' => 0, 'updated_at' => current_time( 'mysql' ) ),
+					array( 'id' => $id ),
+					array( '%d', '%d', '%s' ),
+					array( '%d' )
+				);
+			}
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function normalize_row( array $data, string $now, bool $include_created = true ): array {
+		$allowed = array(
+			'service_key' => '%s',
+			'carrier_key' => '%s',
+			'service_type' => '%s',
+			'title' => '%s',
+			'enabled' => '%d',
+			'availability_mode' => '%s',
+			'use_default_rules_when_no_service_rules' => '%d',
+			'round_up_to_ruble' => '%d',
+			'minimum_price_rub' => '%f',
+			'include_packaging_weight' => '%d',
+			'packaging_weight_mode' => '%s',
+			'pickup_customer_comment' => '%s',
+			'courier_customer_comment' => '%s',
+			'sort_order' => '%d',
+			'deleted' => '%d',
+		);
+		$row = array();
+		foreach ( $allowed as $key => $format ) {
+			if ( ! array_key_exists( $key, $data ) ) {
+				continue;
+			}
+			$row[ $key ] = match ( $format ) {
+				'%d' => (int) $data[ $key ],
+				'%f' => 'minimum_price_rub' === $key ? max( 0, (float) str_replace( ',', '.', (string) $data[ $key ] ) ) : (float) str_replace( ',', '.', (string) $data[ $key ] ),
+				default => (string) $data[ $key ],
+			};
+			if ( 'packaging_weight_mode' === $key ) {
+				$row[ $key ] = DeliveryService::normalize_packaging_weight_mode( (string) $row[ $key ] );
+			}
+		}
+
+		if ( $include_created ) {
+			$row = array_merge(
+				array(
+					'service_key' => '',
+					'carrier_key' => '',
+					'service_type' => DeliveryService::TYPE_API,
+					'title' => '',
+					'enabled' => 1,
+					'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+					'use_default_rules_when_no_service_rules' => 1,
+					'round_up_to_ruble' => 1,
+					'minimum_price_rub' => 1.0,
+					'include_packaging_weight' => 1,
+					'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+					'pickup_customer_comment' => '',
+					'courier_customer_comment' => '',
+					'sort_order' => 100,
+					'deleted' => 0,
+				),
+				$row,
+				array( 'created_at' => $now, 'updated_at' => $now )
+			);
+		}
+
+		return $row;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,DeliveryService>
+	 */
+	private function rows_to_services( array $rows ): array {
+		return array_map( static fn ( array $row ): DeliveryService => DeliveryService::from_array( $row ), $rows );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function formats(): array {
+		return array( '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%d', '%f', '%d', '%s', '%s', '%s', '%d', '%d', '%s', '%s' );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<int,string>
+	 */
+	private function formats_for_row( array $row ): array {
+		$formats = array(
+			'service_key' => '%s',
+			'carrier_key' => '%s',
+			'service_type' => '%s',
+			'title' => '%s',
+			'enabled' => '%d',
+			'availability_mode' => '%s',
+			'use_default_rules_when_no_service_rules' => '%d',
+			'round_up_to_ruble' => '%d',
+			'minimum_price_rub' => '%f',
+			'include_packaging_weight' => '%d',
+			'packaging_weight_mode' => '%s',
+			'pickup_customer_comment' => '%s',
+			'courier_customer_comment' => '%s',
+			'sort_order' => '%d',
+			'deleted' => '%d',
+			'created_at' => '%s',
+			'updated_at' => '%s',
+		);
+
+		return array_values( array_intersect_key( $formats, $row ) );
+	}
+
+	private function table(): string {
+		return $this->wpdb->prefix . 'wdc_delivery_services';
+	}
+}

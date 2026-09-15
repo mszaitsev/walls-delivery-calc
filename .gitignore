@@ -6,9 +6,13 @@
 *.tar
 *.tar.gz
 *.log
+/dist/
 .DS_Store
 .idea/
 .vscode/
 node_modules/
 vendor/
+!assets/vendor/
+!assets/vendor/leaflet/
+!assets/vendor/leaflet/**
 wp-config.php

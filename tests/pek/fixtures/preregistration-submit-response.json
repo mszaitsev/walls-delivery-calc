@@ -1,0 +1,28 @@
+{
+  "documentId": 136,
+  "sender": {
+    "warehouseID": "sender-warehouse-guid",
+    "addressNormal": "Россия, Новосибирск"
+  },
+  "cargos": [
+    {
+      "cargoCode": "999940950644",
+      "barсode": "999940950644",
+      "orderNumber": "1001",
+      "stockTitle": "НСК01",
+      "customerCorrelation": "wdc-pek-1",
+      "positions": [
+        {
+          "barcode": "9999409506440001"
+        }
+      ],
+      "receiver": {
+        "warehouseId": "receiver-warehouse-guid",
+        "addressNormal": "Россия, Москва"
+      }
+    }
+  ],
+  "notifications": [
+    "Тестовое уведомление без ПДн"
+  ]
+}

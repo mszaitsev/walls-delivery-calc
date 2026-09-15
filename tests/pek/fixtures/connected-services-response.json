@@ -1,0 +1,28 @@
+{
+  "availableTypesOfDelivery": [3],
+  "specialConditionsWithParams": [
+    {
+      "specialCondition": {
+        "UID": "ffb40421-4761-11e8-80c9-00155d668927",
+        "title": "Упрощенная выдача"
+      },
+      "params": [
+        {
+          "key": "CODMaxSum",
+          "type": "Money",
+          "values": 100000.00
+        },
+        {
+          "key": "BranchUID",
+          "type": "UNIQUEIDENTIFIER",
+          "values": "00000000-0000-0000-0000-000000000000"
+        },
+        {
+          "key": "TheCounterpartSender",
+          "type": "Boolean",
+          "values": "true"
+        }
+      ]
+    }
+  ]
+}

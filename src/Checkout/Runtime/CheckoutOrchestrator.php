@@ -1,0 +1,470 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Checkout\Runtime;
+
+use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Checkout\Cache\QuoteCache;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentSnapshotBuilder;
+use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
+use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryQuote;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Packaging\PackagingApplicationResult;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
+use WallsShop\WDC\Rules\Domain\Rule;
+use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
+
+defined( 'ABSPATH' ) || exit;
+
+final class CheckoutOrchestrator {
+	public function __construct(
+		private CarrierRegistry $carrier_registry,
+		private RuleAppliedRateBuilder $rule_builder,
+		private RateSorter $sorter,
+		private FallbackRateFactory $fallback_factory,
+		private CarrierExecutionGuard $execution_guard,
+		private CheckoutLogger $logger,
+		private DeliveryLeadTimeNormalizer $lead_time_normalizer,
+		private ?QuoteCache $quote_cache = null,
+		private ?DeliveryServiceRegistry $service_registry = null,
+		private ?DeliveryServiceManager $service_manager = null,
+		private ?PackagingWeightCalculator $packaging_calculator = null,
+		private ?DpdSettings $dpd_settings = null,
+		private ?DeliveryCustomerCommentSnapshotBuilder $customer_comment_snapshot_builder = null
+	) {
+		$this->customer_comment_snapshot_builder ??= new DeliveryCustomerCommentSnapshotBuilder();
+	}
+
+	/**
+	 * @return array<int,DeliveryRate>
+	 */
+	public function calculate_rates( QuoteRequest $request ): array {
+		return $this->calculate( $request )->rates;
+	}
+
+	/**
+	 * @param array<int,Rule> $rules
+	 */
+	public function calculate( QuoteRequest $request, array $rules = array(), string $sort = RateSorter::CHEAPEST, bool $cache_enabled = true, ?callable $rules_resolver = null ): CheckoutCalculationResult {
+		$carrier_errors = array();
+		$audit          = array();
+		$cache_hits     = 0;
+		$rates          = array();
+		$service_entries = $this->service_entries_for_country( $request->country_code );
+
+		if ( null === $service_entries ) {
+			$carriers = $this->carrier_registry->for_country( $request->country_code );
+			if ( array() === $carriers ) {
+				$carriers = $this->carrier_registry->enabled();
+			}
+			foreach ( $carriers as $carrier ) {
+				$service_entries[] = array( 'carrier' => $carrier, 'service' => null );
+			}
+		}
+
+		foreach ( $service_entries as $entry ) {
+			$carrier = $entry['carrier'];
+			$service = $entry['service'];
+			$carrier_key   = $carrier->get_identity()->key;
+			$service_key   = $service instanceof DeliveryService ? $service->service_key : '';
+			$delivery_type = (string) ( $entry['delivery_type'] ?? '' );
+			$quote         = null;
+			$service_request = $request;
+			$packaging_result = null;
+			if ( $service instanceof DeliveryService && $this->packaging_calculator instanceof PackagingWeightCalculator ) {
+				$packaging_result = $this->packaging_calculator->apply_to_package( $request->package, $service );
+				$service_request = $this->request_with_package( $request, $packaging_result->package, $packaging_result );
+			}
+			if ( $service instanceof DeliveryService ) {
+				$service_request = $this->request_for_service( $service_request, $service, $delivery_type );
+			}
+			if ( $this->should_skip_api_quote_for_incomplete_manual_destination( $carrier, $service_request ) ) {
+				continue;
+			}
+			$carrier_cache_context = $carrier instanceof CarrierQuoteCacheContextProviderInterface ? $carrier->quote_cache_context( $service_request ) : array();
+
+			if ( $cache_enabled && $this->quote_cache instanceof QuoteCache ) {
+				$quote = $this->quote_cache->get( $service_request, $carrier_key, $delivery_type, $service_key, $carrier_cache_context );
+				if ( $quote instanceof DeliveryQuote ) {
+					++$cache_hits;
+				}
+			}
+
+			if ( ! $quote instanceof DeliveryQuote ) {
+				$quote = $this->execution_guard->quote( $carrier, $service_request, $carrier_errors );
+				if ( $cache_enabled && $this->quote_cache instanceof QuoteCache && $this->should_cache_quote( $quote ) ) {
+					$this->quote_cache->set( $service_request, $carrier_key, $quote, $delivery_type, $service_key, $carrier_cache_context );
+				}
+			}
+
+			foreach ( $quote->rates as $rate ) {
+				if ( ! $rate instanceof DeliveryRate ) {
+					continue;
+				}
+
+				if ( $packaging_result instanceof PackagingApplicationResult ) {
+					$rate = $this->rate_with_meta( $rate, $packaging_result->to_meta() );
+				}
+				$rate = $service instanceof DeliveryService ? $this->rate_for_service( $rate, $service ) : $rate;
+				$rate = $this->lead_time_normalizer->normalize( $rate, $service, $service_request );
+				$rules_source = 'none';
+				if ( ! empty( $rate->meta['skip_rules'] ) ) {
+					$rules_for_rate = array();
+					$rules_source = 'skipped_fallback';
+				} elseif ( $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager ) {
+					$rules_data = $this->service_manager->rules_for_service( $service );
+					$rules_for_rate = $rules_data['rules'];
+					$rules_source = $rules_data['source'];
+				} else {
+					$rules_for_rate = null !== $rules_resolver ? $rules_resolver( $rate->carrier_key ) : $rules;
+					$rules_for_rate = is_array( $rules_for_rate ) ? $rules_for_rate : array();
+					$rules_source = array() !== $rules_for_rate ? 'default' : 'none';
+				}
+				$pre_rule_comment_count = count( $rate->comments );
+				$applied = $this->rule_builder->apply( $rate, $this->context_for_rate( $service_request, $rate ), $rules_for_rate );
+				$processed = $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager && empty( $applied['rate']->meta['skip_service_post_processing'] )
+					? $this->service_manager->post_process_rate( $applied['rate'], $service )
+					: $applied['rate'];
+				$processed = $this->lead_time_normalizer->enrich_planned_date( $processed, $service_request );
+				$processed = $this->rate_with_meta(
+					$processed,
+					array(
+						'rules_source' => $rules_source,
+						'rules_audit'  => $applied['audit'],
+						'final_price_rub' => $processed->price->get_rubles(),
+						'original_price_rub' => $rate->price->get_rubles(),
+					)
+				);
+				$processed = $this->rate_with_materialized_customer_comment_templates( $processed, $pre_rule_comment_count );
+				$processed = $this->rate_with_customer_comment_snapshot( $processed );
+				$rates[] = $processed;
+				$audit[] = array(
+					'rate_id' => $rate->rate_id,
+					'carrier' => $rate->carrier_key,
+					'service' => $rate->service_key,
+					'rules_source' => $rules_source,
+					'entries' => $applied['audit'],
+				);
+			}
+		}
+
+		$visible       = array_values( array_filter( $rates, static fn ( DeliveryRate $rate ): bool => $rate->is_available() ) );
+		$fallback_used = array() === $visible;
+		if ( $fallback_used ) {
+			$visible[] = $this->fallback_factory->create();
+		}
+
+		$final = $this->sorter->sort( $visible, $sort );
+
+		return new CheckoutCalculationResult( $final, $fallback_used, $cache_hits, $audit, $carrier_errors );
+	}
+
+	private function should_cache_quote( DeliveryQuote $quote ): bool {
+		return $quote->success && array() !== $quote->rates;
+	}
+
+	private function should_skip_api_quote_for_incomplete_manual_destination( object $carrier, QuoteRequest $request ): bool {
+		if ( 'api' !== $carrier->get_identity()->type ) {
+			return false;
+		}
+		if ( 'manual' !== (string) ( $request->customer_context['selected_source'] ?? '' ) && empty( $request->customer_context['is_manual_city'] ) ) {
+			return false;
+		}
+		$city_present = '' !== trim( $request->destination->city ) || '' !== trim( $request->destination->settlement );
+		$region_present = '' !== trim( $request->destination->region_name );
+		$postcode_present = '' !== trim( $request->destination->postcode );
+
+		return ! ( $city_present && $region_present && $postcode_present );
+	}
+
+	/**
+	 * @return array<int,array{carrier:object,service:?DeliveryService,delivery_type?:string}>|null
+	 */
+	private function service_entries_for_country( string $country_code ): ?array {
+		if ( ! $this->service_registry instanceof DeliveryServiceRegistry || ! $this->service_manager instanceof DeliveryServiceManager ) {
+			return null;
+		}
+
+		$entries = array();
+		$services = $this->service_registry->active_services();
+		if ( array() === $services ) {
+			return array();
+		}
+
+		foreach ( $services as $service ) {
+			$country_enabled = $this->service_manager->service_available_for_country( $service, $country_code );
+			if ( ! $country_enabled ) {
+				continue;
+			}
+			$carrier = $this->service_registry->carrier_for( $service );
+			if ( null !== $carrier ) {
+				if ( in_array( $service->service_key, array( RussianPostDomesticSettings::SERVICE_KEY, CdekCarrier::KEY, YandexDeliverySettings::SERVICE_KEY ), true ) ) {
+					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::PICKUP );
+					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::COURIER );
+					continue;
+				}
+				if ( DpdSettings::SERVICE_KEY === $service->service_key ) {
+					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::PICKUP );
+					if ( $this->dpd_settings instanceof DpdSettings && $this->dpd_settings->runtime_courier_rates_enabled() ) {
+						$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::COURIER );
+					}
+					continue;
+				}
+				$capabilities = $carrier->get_capabilities();
+				if ( $capabilities->supports_pickup_delivery && $capabilities->supports_courier_delivery ) {
+					$entries[] = array( 'carrier' => $carrier, 'service' => $service );
+					continue;
+				}
+				$entries[] = array( 'carrier' => $carrier, 'service' => $service );
+			}
+		}
+
+		return $entries;
+	}
+
+	private function rate_for_service( DeliveryRate $rate, DeliveryService $service ): DeliveryRate {
+		$comment_type = $rate->delivery_type;
+		$comment = match ( $comment_type ) {
+			DeliveryType::PICKUP => trim( $service->pickup_customer_comment ),
+			DeliveryType::COURIER => trim( $service->courier_customer_comment ),
+			default => '',
+		};
+		$is_fallback = ! empty( $rate->meta['fallback'] );
+		$apply_service_comment = '' !== $comment && ! $is_fallback;
+		$comments = $apply_service_comment ? array_values( array_filter( array_merge( array( $comment ), $rate->comments ), static fn ( mixed $item ): bool => '' !== trim( (string) $item ) ) ) : $rate->comments;
+
+		return new DeliveryRate(
+			$rate->rate_id,
+			$service->carrier_key,
+			$rate->carrier_name,
+			$service->service_key,
+			$service->title,
+			$rate->tariff_key,
+			$rate->tariff_name,
+			$rate->delivery_type,
+			$is_fallback || ! empty( $rate->meta['preserve_rate_title'] ) ? $rate->title : $service->title,
+			$rate->price,
+			$rate->original_price,
+			$rate->crossed_price,
+			$rate->delivery_days,
+			$rate->planned_delivery_date,
+			$rate->planned_delivery_comment,
+			$comments,
+			$rate->disabled,
+			$rate->disabled_reason,
+			$rate->requires_pickup_point,
+			$rate->requires_courier_address,
+			array_merge(
+				$rate->meta,
+				array(
+					'service_key' => $service->service_key,
+					'service_title' => $service->title,
+					'carrier_key' => $service->carrier_key,
+					'service_customer_comment_applied' => $apply_service_comment ? 'yes' : 'no',
+					'service_customer_comment_type' => in_array( $comment_type, array( DeliveryType::PICKUP, DeliveryType::COURIER ), true ) ? $comment_type : '',
+				)
+			),
+			$rate->original_cost,
+			$rate->original_delivery_days
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function rate_with_meta( DeliveryRate $rate, array $meta ): DeliveryRate {
+		return new DeliveryRate(
+			$rate->rate_id,
+			$rate->carrier_key,
+			$rate->carrier_name,
+			$rate->service_key,
+			$rate->service_name,
+			$rate->tariff_key,
+			$rate->tariff_name,
+			$rate->delivery_type,
+			$rate->title,
+			$rate->price,
+			$rate->original_price,
+			$rate->crossed_price,
+			$rate->delivery_days,
+			$rate->planned_delivery_date,
+			$rate->planned_delivery_comment,
+			$rate->comments,
+			$rate->disabled,
+			$rate->disabled_reason,
+			$rate->requires_pickup_point,
+			$rate->requires_courier_address,
+			array_merge( $rate->meta, $meta ),
+			$rate->original_cost,
+			$rate->original_delivery_days
+		);
+	}
+
+	private function rate_with_customer_comment_snapshot( DeliveryRate $rate ): DeliveryRate {
+		$customer_comments = $this->customer_comment_snapshot_builder->build( $rate );
+		if ( array() === $customer_comments ) {
+			return $rate;
+		}
+
+		return new DeliveryRate(
+			$rate->rate_id,
+			$rate->carrier_key,
+			$rate->carrier_name,
+			$rate->service_key,
+			$rate->service_name,
+			$rate->tariff_key,
+			$rate->tariff_name,
+			$rate->delivery_type,
+			$rate->title,
+			$rate->price,
+			$rate->original_price,
+			$rate->crossed_price,
+			$rate->delivery_days,
+			$rate->planned_delivery_date,
+			$rate->planned_delivery_comment,
+			$rate->comments,
+			$rate->disabled,
+			$rate->disabled_reason,
+			$rate->requires_pickup_point,
+			$rate->requires_courier_address,
+			array_merge( $rate->meta, array( 'customer_comments' => $customer_comments ) ),
+			$rate->original_cost,
+			$rate->original_delivery_days
+		);
+	}
+
+	private function rate_with_materialized_customer_comment_templates( DeliveryRate $rate, int $insert_after_count ): DeliveryRate {
+		$template_comments = $this->customer_comment_snapshot_builder->materialized_template_comments( $rate );
+		if ( array() === $template_comments ) {
+			return $rate;
+		}
+		$insert_after_count = max( 0, min( $insert_after_count, count( $rate->comments ) ) );
+		$comments = array_merge(
+			array_slice( $rate->comments, 0, $insert_after_count ),
+			$template_comments,
+			array_slice( $rate->comments, $insert_after_count )
+		);
+
+		return new DeliveryRate(
+			$rate->rate_id,
+			$rate->carrier_key,
+			$rate->carrier_name,
+			$rate->service_key,
+			$rate->service_name,
+			$rate->tariff_key,
+			$rate->tariff_name,
+			$rate->delivery_type,
+			$rate->title,
+			$rate->price,
+			$rate->original_price,
+			$rate->crossed_price,
+			$rate->delivery_days,
+			$rate->planned_delivery_date,
+			$rate->planned_delivery_comment,
+			$this->normalized_comments( $comments ),
+			$rate->disabled,
+			$rate->disabled_reason,
+			$rate->requires_pickup_point,
+			$rate->requires_courier_address,
+			$rate->meta,
+			$rate->original_cost,
+			$rate->original_delivery_days
+		);
+	}
+
+	/**
+	 * @param array<int,mixed> $comments
+	 * @return array<int,string>
+	 */
+	private function normalized_comments( array $comments ): array {
+		$result = array();
+		foreach ( $comments as $comment ) {
+			if ( ! is_scalar( $comment ) ) {
+				continue;
+			}
+			$text = trim( (string) $comment );
+			if ( '' === $text || in_array( $text, $result, true ) ) {
+				continue;
+			}
+			$result[] = $text;
+		}
+
+		return $result;
+	}
+
+	private function context_for_rate( QuoteRequest $request, DeliveryRate $rate ): RuleEvaluationContext {
+		return new RuleEvaluationContext(
+			$request->order_total,
+			$rate->price,
+			$request->package,
+			$request->destination,
+			$rate->delivery_type,
+			$request->payment_method,
+			$request->calculation_date,
+			array(),
+			array_merge(
+				$request->customer_context,
+				$rate->meta,
+				array(
+					'carrier_key' => $rate->carrier_key,
+					'rate_id'     => $rate->rate_id,
+					'original_delivery_days' => $rate->delivery_days->min_days ?? $rate->delivery_days->max_days ?? null,
+					'original_delivery_min_days' => $rate->delivery_days->min_days,
+					'original_delivery_max_days' => $rate->delivery_days->max_days,
+					'selected_location_fias_id' => (string) ( $request->customer_context['selected_location_fias_id'] ?? $request->destination->fias_id ),
+				)
+			),
+			$request->all_cart_items_total()
+		);
+	}
+
+	private function request_with_package( QuoteRequest $request, Package $package, PackagingApplicationResult $packaging ): QuoteRequest {
+		return new QuoteRequest(
+			$request->country_code,
+			$request->destination,
+			$package,
+			$request->payment_method,
+			$request->order_total,
+			$request->calculation_date,
+			array_merge( $request->customer_context, $packaging->to_meta() ),
+			$request->all_cart_items_total()
+		);
+	}
+
+	private function request_for_service( QuoteRequest $request, DeliveryService $service, string $delivery_type = '' ): QuoteRequest {
+		$context = array(
+			'service_id' => $service->id,
+			'service_key' => $service->service_key,
+			'service_title' => $service->title,
+			'service_carrier_key' => $service->carrier_key,
+		);
+		if ( '' !== $delivery_type ) {
+			$context['delivery_type'] = $delivery_type;
+		}
+
+		return new QuoteRequest(
+			$request->country_code,
+			$request->destination,
+			$request->package,
+			$request->payment_method,
+			$request->order_total,
+			$request->calculation_date,
+			array_merge(
+				$request->customer_context,
+				$context
+			),
+			$request->all_cart_items_total()
+		);
+	}
+}

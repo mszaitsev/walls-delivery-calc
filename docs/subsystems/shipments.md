@@ -1,0 +1,70 @@
+# Shipments
+
+Version: 1.0.25
+
+Shipment code lives under `src/Shipments` and carrier-owned shipment modules. Implementations exist for CDEK, DPD, Russian Post, Yandex Delivery, Jet Logistic, PEK, and Ozon Delivery; shared behavior is defined by the Shipment Framework.
+
+## Shipment package editor
+
+The open shipment modal owns an ephemeral preparation draft. Current item quantity, unit price, unit weight, item dimensions, place assignment, and current place weight/dimensions are collected directly for every preview and create request; they do not update WooCommerce order items, products, prices, dimensions, or totals and are reset from order/product data after a full admin-page reload.
+
+Package summaries and overweight presentation are calculated from those same current rows. By default, a package whose weight is below the allocated item-weight sum produces a warning only. CDEK is the carrier-owned exception: Create requires every original order quantity to be fully assigned to valid places and requires `sum(current unit item weight × allocated quantity) <= manager-entered place weight` for every place. Equality is valid, and calculated API/packaging weight is not part of this gate. The per-package **Подогнать вес товаров** action is available only when every place has a positive weight, the selected place is heavier than 50 g, contains items, and its current item total exceeds its place weight. It proportionally reduces integer per-unit item weights toward `place weight - 50 g`, distributing rounding deterministically; quantity granularity may produce the nearest reachable total below that target.
+
+Carrier adapters consume the resulting draft through their existing contracts. CDEK, Russian Post, and Yandex use current item weight/value where their item payload supports it; Ozon uses current allocation prices for declared value; PEK uses current draft item price for insurance and current draft item weight for its product-weight policy. DPD and all current carrier payloads use current place dimensions. Editable item dimensions remain sanitized draft data but are not mapped into invented carrier fields because the supported create APIs currently use package/place dimensions rather than item dimensions.
+
+PEK supports the verified RU create/preview/persist/manual-attach/status/document/cancellation flow with generic creation-attempt identity and fail-closed validation. Foreign PEK destinations use manual attachment plus read-only status and actual-cost behavior. Carrier raw status remains distinct from configurable universal WDC status mapping.
+
+Creation uses server-owned idempotency/correlation state where supported. Status normalization, mutation reconciliation, safe diagnostics, document access, cancellation eligibility, and persistence mapping remain carrier-owned behind shared interfaces. Carrier-specific payloads must not leak secrets or customer payloads into production logs.
+
+Russian Post tracking uses the 490-row official native operation catalog owned by `RussianPostTrackingStatusMapper`. The Delivery Services `status_mapping` tab exposes each `operation_type_id:operation_attr_id` pair and lets an administrator override only its universal `DeliveryStatus`; native terminal metadata remains immutable. Four newly catalogued pairs default to `unknown`. Version 1.0.12 intentionally aligns `2:25` («Вручение — Адресату по QR коду») with the official carrier metadata by keeping `delivered` and changing only its terminal flag to `true`; every other native row is unchanged. Tracking updates—including saved overrides—run through the same Shipment Framework adapter registry and global shipment status autosync used by other carriers. Russian Post has no carrier-specific status cadence, enablement flag, or status cron; its independently configured weekly pickup-point import is unrelated.
+
+## Ozon Delivery Shipments
+
+Ozon Delivery is integrated through carrier-owned classes under `src/Carriers/OzonDelivery/Shipments` and existing Shipment Framework registries. The official create flow is `POST /v1/order/create` with an `Idempotency-Key` UUID from the shared creation-attempt service, followed by carrier-owned approval of every returned posting through `POST /v1/posting/approve`. There is no generic approve button or approve interface.
+
+Actual postings come only from the Shipment modal: one manager-defined actual place becomes one Ozon posting. Checkout Packaging and quote metadata such as `ozon_delivery_places` are not read or persisted for shipment creation. For every posting the request builder uses the actual place weight and dimensions, the selected buyer Ozon point from order state, the configured Ozon `shipment_method_id`, and a server-built description `Товары по заказу {ORDER_NUMBER}. Коробка {INDEX} из {TOTAL}` capped at 500 characters.
+
+Declared value for actual Ozon shipment creation is calculated server-side from the actual Shipment modal rows assigned to each place: `quantity x unit price`, summed per place with integer kopeck arithmetic. Manager-edited prices, edited quantities, split rows, and manually added rows are authoritative Ozon shipment input after admin-side validation. Ozon does not match modal rows back to WooCommerce order items for declared value and does not send item names, SKU, item keys, product IDs, or per-item prices to the Ozon create API.
+
+Before mutation the Ozon service resolves the selected pickup point from the active local Ozon catalog and validates every actual place against that point's per-place weight and rotated dimension limits. A missing/stale point, overweight place, oversized place, invalid phone, missing `shipment_method_id`, malformed assignments, duplicated quantities, or empty declared place fails closed before `/v1/order/create`.
+
+Persistence is mapper-owned: the saved shipment keeps the Ozon order number, all posting numbers, posting-to-place indexes, idempotency key, approval state, safe request/response snapshots, actual-cost candidate from pre-create `/v1/order/checkout`, and lifecycle continuation token when approval is partial. Retry resumes approval of existing postings and does not create a second Ozon order or repeat the checkout preflight. Status sync uses `POST /v1/posting/info` for all postings and maps documented Ozon statuses; a multi-posting shipment is not delivered until all required postings are delivered. Cancellation uses `POST /v1/posting/cancel` for each persisted posting and treats partial accepted cancellation as a controlled reconciliation state driven by status polling, without automatic second cancel mutation. Labels use `POST /v1/posting/label` per posting through the existing document provider UI.
+
+## CDEK EAEU Shipments
+
+CDEK pickup coverage does not change Shipment Framework production code. A selected child point keeps its actual `cdek_city_code` in the generic pickup snapshot, while pickup creation continues to send the selected `delivery_point` code; courier `to_location` semantics remain unchanged.
+
+CDEK domestic and EAEU shipments share the existing `CdekShipmentAdapter`, request builder, persistence mapper, status service, barcode print service, document provider, and modal extension. Shipment Framework contracts, registries, lifecycle endpoints, status polling, manual attach, cancel, local remove, actual cost, and barcode PDF behavior remain shared.
+
+Russian CDEK courier preparation keeps the DaData/FIAS plus CDEK location flow. For `AM`, `BY`, `KZ`, and `KG`, courier preparation uses the resolved CDEK city code from calculation or rate metadata plus the raw WooCommerce shipping address and postcode; it does not require Russian DaData or FIAS. International pickup uses the same `/v2/orders` endpoint and the selected CDEK delivery point.
+
+The CDEK modal extension owns the `cdek_recipient_document` field. It is server-rendered hidden and cleared for `RU`, visible and optional for `AM`, `BY`, `KZ`, and `KG`, then re-synchronized by the CDEK admin JS hook during form initialization and later country changes; this visibility does not depend on preview responses. When present it maps to `recipient.tin` for `KZ`/`KG` and to `recipient.passport_number` for `AM`/`BY`. The value is sanitized, kept only in the current admin page memory, redacted from diagnostics, and never stored in order meta, shipment persistence, snapshots, transients, options, notes, analytics, or status payloads.
+
+## Canonical Requirements
+
+- Shipment creation uses the common adapter/mapper/repository flow.
+- Manual admin shipment creation supports multiple places and item allocation.
+- Carrier documents are exposed through provider-owned document actions and downloaded through the protected document service.
+- Carrier status updates map into universal delivery statuses and may update WooCommerce order status through configured mapping.
+- Jet Logistic status messages are free text. Carrier-owned mappings convert known text into existing universal statuses; unknown messages are observed and saved for admin mapping but do not reset the current universal status. Jet stores only the latest status fields and up to five deduplicated recent events, not the full API log.
+- Order shipment data should be compact but sufficient: carrier key, service key/title, delivery type, places, request/response snapshots when relevant, tracking/external IDs, status, canonical actual shipment cost when available, and timestamps.
+
+## Actual Shipment Cost
+
+`actual_cost_kopecks` is the canonical actual shipment cost owner for every carrier. It is an integer amount in kopecks; companion fields are `actual_cost_currency`, `actual_cost_source`, `actual_cost_source_detail`, and `actual_cost_updated_at`.
+
+Supported source values include `carrier_api`, `carrier_status`, `carrier_reconciliation`, and `manual`. Manual cost edits in the shared shipment card set `actual_cost_source=manual`, but they are a fallback/correction value, not a lock: a later strictly positive carrier/API update overwrites any existing source. Missing, null, zero, negative, or invalid carrier amounts must not remove or overwrite an existing actual cost. Clearing the actual cost removes canonical actual-cost fields, allowing a later carrier update to populate them again.
+
+## Shipment Cost Analytics
+
+The overview page (`admin.php?page=wdc-platform`) includes a read-only shipment cost analytics section. One analytics row represents at most one selected created shipment for an order. The plan price is order-level data and belongs to the delivery service selected during calculation/checkout, so other shipment records on the same order are excluded from comparison. A shipment qualifies when the selected `_wdc_shipments` record has a real carrier identifier such as `tracking_number`, `barcode`, `external_id`, `carrier_shipment_id`, `shipment_id`, `cdek_number`, `dpd_order_number`, `yandex_request_id`, or `request_id`; drafts, previews, failed records without identifiers, and removed records are excluded.
+
+Planned cost comes from the same base API cost contract used by the order delivery calculator through `ShipmentBaseApiCostResolver`. It means carrier API cost before delivery rules, markup, discounts, or customer-paid shipping total. Actual cost comes only from canonical `actual_cost_*` shipment fields.
+
+Carrier filters are registry-driven through `CarrierRegistry::all()`. Adding a carrier to the composition root makes it available to the analytics filter and rows without hardcoded carrier arrays. The analytics layer does not call carrier APIs and does not write order meta.
+
+The threshold policy is owned by `ShipmentCostThresholdPolicy`: actual cost is within plan when `actual_cost_kopecks * 100 <= base_api_cost_kopecks * 103`; otherwise it is over threshold. Comparisons use integer kopecks. The summary reports all filtered shipments, rows with/without actual cost, planned and actual totals, comparable difference total, arithmetic average percentage over comparable rows, and count/share of shipments over the 3% threshold.
+
+Shipment cost analytics uses a materialized read-model table named `{$wpdb->prefix}wdc_shipment_cost_analytics`. Canonical data remains in WooCommerce order metadata: `_wdc_delivery_calculation_data` and `_wdc_shipments`. The analytics row is rebuilt synchronously for one order after delivery calculation changes, shipment save/delete, actual-cost changes, and order deletion/restore hooks. The overview page queries only the read-model table; it does not scan WooCommerce orders or call carrier APIs.
+
+There is no historical analytics import in this version because deployments start without old orders. If an order is not eligible for analytics, its read-model row is deleted.

@@ -1,0 +1,369 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Orders\Application;
+
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
+use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
+
+defined( 'ABSPATH' ) || exit;
+
+final class OrderDeliveryRecalculationService {
+	public function __construct(
+		private OrderQuoteRequestMapper $mapper,
+		private CheckoutOrchestrator $orchestrator,
+		private OrderShipmentRepository $shipments
+	) {
+	}
+
+	/**
+	 * @param array<string,mixed>|null $selected_location
+	 * @param array<string,mixed> $selected_pickup_point
+	 * @return array{success:bool,message:string,rates:array<int,array<string,mixed>>,request:array<string,mixed>,location:array<string,mixed>}
+	 */
+	public function preview( object $order, ?array $selected_location = null, array $selected_pickup_point = array() ): array {
+		$request = $this->mapper->map( $order, $selected_location, $selected_pickup_point );
+		$result  = $this->orchestrator->calculate( $request, array(), RateSorter::CHEAPEST, true );
+		$rates = $this->normalize_rates( $result->rates );
+
+		return array(
+			'success' => true,
+			'message' => '',
+			'rates'   => $rates,
+			'request' => $request->to_array(),
+			'location' => $this->location_payload_from_request( $request->to_array() ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed>|null $selected_location
+	 * @return array<string,mixed>
+	 */
+	public function resolved_location_payload( object $order, ?array $selected_location = null ): array {
+		$request = $this->mapper->map( $order, $selected_location );
+
+		return $this->location_payload_from_request( $request->to_array() );
+	}
+
+	public function has_blocking_shipment( object $order ): bool {
+		foreach ( $this->shipments->all_for_order( $order ) as $shipment ) {
+			if ( ! is_array( $shipment ) ) {
+				continue;
+			}
+			$status = (string) ( $shipment['status'] ?? '' );
+			$tracking = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+			$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
+			if ( in_array( $status, array( 'created', 'registered' ), true ) || '' !== $tracking || '' !== $backlog_order_id ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param array<int,DeliveryRate> $rates
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function normalize_rates( array $rates ): array {
+		$normalized = array();
+		$tariff_groups = array();
+		$tariff_group_positions = array();
+
+		foreach ( $rates as $rate ) {
+			if ( ! $rate instanceof DeliveryRate || ! $rate->is_available() ) {
+				continue;
+			}
+			if ( ! empty( $rate->meta['tariff_selector_group'] ) ) {
+				$group_id = (string) ( $rate->meta['checkout_group_id'] ?? '' );
+				if ( '' === $group_id ) {
+					$group_id = RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key
+						? RussianPostDomesticSettings::checkout_group_id( $rate->delivery_type )
+						: $rate->service_key . ':' . $rate->delivery_type;
+				}
+				if ( ! array_key_exists( $group_id, $tariff_groups ) ) {
+					$tariff_group_positions[ $group_id ] = count( $normalized );
+					$normalized[] = null;
+				}
+				$tariff_groups[ $group_id ][] = $rate;
+				continue;
+			}
+
+			$normalized[] = $this->rate_payload( $rate );
+		}
+
+		foreach ( $tariff_groups as $group_id => $group_rates ) {
+			$position = $tariff_group_positions[ $group_id ];
+			if ( 1 === count( $group_rates ) ) {
+				$normalized[ $position ] = $this->single_tariff_method_payload( $group_rates[0] );
+				continue;
+			}
+			$normalized[ $position ] = $this->tariff_group_payload( $group_id, $group_rates );
+		}
+
+		return array_values( $normalized );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function single_tariff_method_payload( DeliveryRate $rate ): array {
+		$payload = $this->rate_payload( $rate );
+		$method_title = $this->service_method_title( $rate );
+		if ( '' !== $method_title ) {
+			$payload['label'] = $method_title;
+			$payload['compact_title'] = $method_title;
+		}
+
+		$payload['rate_id'] = $rate->rate_id;
+		$payload['selected_tariff_rate_id'] = $rate->rate_id;
+		$payload['selected_tariff_object'] = $rate->tariff_key;
+		$payload['selected_tariff_title'] = $rate->tariff_name;
+		$payload['tariff_key'] = $rate->tariff_key;
+		$payload['tariff_title'] = $rate->tariff_name;
+		$payload['api_base_price_rub'] = $rate->meta['api_base_price_rub'] ?? null;
+
+		return $payload;
+	}
+
+	/**
+	 * @param array<int,DeliveryRate> $rates
+	 * @return array<string,mixed>
+	 */
+	private function tariff_group_payload( string $group_id, array $rates ): array {
+		$first = $rates[0];
+		$delivery_type = $first->delivery_type;
+		$title_key = DeliveryType::COURIER === $delivery_type ? 'courier_method_title' : 'pickup_method_title';
+		$default = DeliveryType::COURIER === $delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
+		if ( CdekCarrier::KEY === $first->carrier_key ) {
+			$default = DeliveryType::COURIER === $delivery_type ? CdekCarrier::COURIER_TITLE : CdekCarrier::PICKUP_TITLE;
+		} elseif ( DpdSettings::CARRIER_KEY === $first->carrier_key ) {
+			$default = DeliveryType::COURIER === $delivery_type ? DpdSettings::DEFAULT_COURIER_METHOD_TITLE : DpdSettings::DEFAULT_PICKUP_METHOD_TITLE;
+		}
+		$title = trim( (string) ( $first->meta[ $title_key ] ?? '' ) ) ?: $default;
+		$cheapest = $rates[0];
+		$cheapest_delivery_comment = $this->delivery_comment( $cheapest );
+
+		return array(
+			'id'                    => $group_id,
+			'label'                 => $title,
+			'carrier_key'           => $first->carrier_key,
+			'service_key'           => $first->service_key,
+			'service_title'         => $first->service_name,
+			'delivery_type'         => $delivery_type,
+			'delivery_type_label'   => $this->delivery_type_label( $delivery_type ),
+			'cost'                  => $cheapest->price->get_rubles(),
+			'price_html'            => 'от ' . $this->format_rubles( $cheapest->price->get_rubles() ),
+			'crossed_price_html'    => $this->crossed_price( $cheapest ),
+			'delivery_comment'      => $cheapest_delivery_comment,
+			'delivery_days'         => $cheapest->delivery_days->to_array(),
+			'delivery_days_label'   => $cheapest_delivery_comment,
+			'planned_delivery_date' => $cheapest->planned_delivery_date,
+			'planned_delivery_comment' => $cheapest->planned_delivery_comment,
+			'comments'              => array(),
+			'compact_title'         => $title,
+			'compact_delivery_comment' => $cheapest_delivery_comment,
+			'compact_price_html'    => 'от ' . $this->format_rubles( $cheapest->price->get_rubles() ),
+			'compact_crossed_price_html' => $this->crossed_price( $cheapest ),
+			'requires_pickup_point' => ! empty( $first->requires_pickup_point ),
+			'order_recalculation_requires_address' => $this->order_recalculation_requires_address( $first ),
+			'selected'              => false,
+			'is_grouped'            => true,
+			'tariff_variants'       => array_map( array( $this, 'tariff_payload' ), $rates ),
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function rate_payload( DeliveryRate $rate ): array {
+		return array(
+			'id'                    => $rate->rate_id,
+			'label'                 => $rate->title,
+			'carrier_key'           => $rate->carrier_key,
+			'service_key'           => $rate->service_key,
+			'service_title'         => $rate->service_name,
+			'delivery_type'         => $rate->delivery_type,
+			'delivery_type_label'   => $this->delivery_type_label( $rate->delivery_type ),
+			'cost'                  => $rate->price->get_rubles(),
+			'price_html'            => $this->format_rubles( $rate->price->get_rubles() ),
+			'crossed_price_html'    => $this->crossed_price( $rate ),
+			'delivery_comment'      => $this->delivery_comment( $rate ),
+			'planned_delivery_date' => $rate->planned_delivery_date,
+			'planned_delivery_comment' => $rate->planned_delivery_comment,
+			'comments'              => array_values( array_filter( array_map( 'strval', $rate->comments ) ) ),
+			'customer_comments'     => is_array( $rate->meta['customer_comments'] ?? null ) ? array_values( $rate->meta['customer_comments'] ) : array(),
+			'compact_title'         => $rate->title,
+			'compact_delivery_comment' => $this->delivery_comment( $rate ),
+			'compact_price_html'    => $this->format_rubles( $rate->price->get_rubles() ),
+			'compact_crossed_price_html' => $this->crossed_price( $rate ),
+			'requires_pickup_point' => $rate->requires_pickup_point,
+			'order_recalculation_requires_address' => $this->order_recalculation_requires_address( $rate ),
+			'selected'              => false,
+			'is_grouped'            => false,
+			'tariff_variants'       => array(),
+			'rate_meta'             => $rate->meta,
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function tariff_payload( DeliveryRate $rate ): array {
+		return array(
+			'rate_id'             => $rate->rate_id,
+			'object_code'         => $rate->tariff_key,
+			'title'               => $rate->tariff_name,
+			'label'               => $this->method_title_from_parts( $this->service_method_title( $rate ), $rate->tariff_name, $this->delivery_comment( $rate ) ),
+			'price_html'          => $this->format_rubles( $rate->price->get_rubles() ),
+			'cost'                => $rate->price->get_rubles(),
+			'crossed_price_html'  => $this->crossed_price( $rate ),
+			'delivery_comment'    => $this->delivery_comment( $rate ),
+			'delivery_days'       => $rate->delivery_days->to_array(),
+			'delivery_days_label' => $this->delivery_comment( $rate ),
+			'planned_delivery_date' => $rate->planned_delivery_date,
+			'planned_delivery_comment' => $rate->planned_delivery_comment,
+			'comments'            => array_values( array_filter( array_map( 'strval', $rate->comments ) ) ),
+			'customer_comments'   => is_array( $rate->meta['customer_comments'] ?? null ) ? array_values( $rate->meta['customer_comments'] ) : array(),
+			'order_recalculation_requires_address' => $this->order_recalculation_requires_address( $rate ),
+			'selected'            => false,
+			'rate_meta'           => $rate->meta,
+			'api_base_price_rub'  => $rate->meta['api_base_price_rub'] ?? null,
+		);
+	}
+
+	private function order_recalculation_requires_address( DeliveryRate $rate ): bool {
+		if ( array_key_exists( 'order_recalculation_requires_address', $rate->meta ) ) {
+			$value = $rate->meta['order_recalculation_requires_address'];
+			return true === $value || 1 === $value || '1' === $value || 'true' === $value || 'yes' === $value;
+		}
+
+		return DeliveryType::COURIER === $rate->delivery_type;
+	}
+
+	private function delivery_comment( DeliveryRate $rate ): string {
+		return DeliveryDaysFormatter::format( $rate->delivery_days );
+	}
+
+	private function service_method_title( DeliveryRate $rate ): string {
+		$title_key = DeliveryType::COURIER === $rate->delivery_type ? 'courier_method_title' : 'pickup_method_title';
+		$default = '';
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key ) {
+			$default = DeliveryType::COURIER === $rate->delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
+		} elseif ( CdekCarrier::KEY === $rate->carrier_key ) {
+			$default = DeliveryType::COURIER === $rate->delivery_type ? CdekCarrier::COURIER_TITLE : CdekCarrier::PICKUP_TITLE;
+		} elseif ( DpdSettings::CARRIER_KEY === $rate->carrier_key ) {
+			$default = DeliveryType::COURIER === $rate->delivery_type ? DpdSettings::DEFAULT_COURIER_METHOD_TITLE : DpdSettings::DEFAULT_PICKUP_METHOD_TITLE;
+		}
+
+		return trim( (string) ( $rate->meta[ $title_key ] ?? '' ) ) ?: $default;
+	}
+
+	private function method_title_from_parts( string $service_title, string $tariff_title, string $delivery_days ): string {
+		$title = trim( $service_title );
+		$tariff_title = trim( $tariff_title );
+		if ( '' !== $tariff_title && ! str_contains( $title, $tariff_title ) ) {
+			$title = '' !== $title ? $title . ', ' . $tariff_title : $tariff_title;
+		}
+
+		$delivery_days = trim( $delivery_days );
+		if ( '' !== $delivery_days && ! str_contains( $title, $delivery_days ) ) {
+			$title = '' !== $title ? $title . ' - ' . $delivery_days : $delivery_days;
+		}
+
+		return $title;
+	}
+
+	private function crossed_price( DeliveryRate $rate ): string {
+		$money = $rate->crossed_price ?? $rate->original_price;
+		if ( null === $money || $money->get_kopecks() <= $rate->price->get_kopecks() ) {
+			return '';
+		}
+
+		return $this->format_rubles( $money->get_rubles() );
+	}
+
+	private function format_rubles( float $rubles ): string {
+		return rtrim( rtrim( number_format( $rubles, 2, '.', ' ' ), '0' ), '.' ) . ' руб.';
+	}
+
+	private function delivery_type_label( string $delivery_type ): string {
+		return match ( $delivery_type ) {
+			DeliveryType::PICKUP => 'Пункт выдачи',
+			DeliveryType::COURIER => 'Курьер',
+			default => $delivery_type,
+		};
+	}
+
+	/**
+	 * @param array<string,mixed> $request
+	 * @return array<string,mixed>
+	 */
+	private function location_payload_from_request( array $request ): array {
+		$destination = is_array( $request['destination'] ?? null ) ? $request['destination'] : array();
+		$context = is_array( $request['customer_context'] ?? null ) ? $request['customer_context'] : array();
+		$region = trim( (string) ( $destination['region_name'] ?? $context['selected_location_region'] ?? '' ) );
+		$name = trim( (string) ( $context['display_name'] ?? $context['selected_location_name'] ?? $destination['display_name'] ?? $destination['city'] ?? $destination['settlement'] ?? '' ) );
+		$resolved_location_id = $this->first_positive_int(
+			array(
+				$context['selected_location_id'] ?? null,
+				$context['location_id'] ?? null,
+				$destination['location_id'] ?? null,
+			)
+		);
+
+		return array_filter(
+			array(
+				'id'            => $resolved_location_id > 0 ? $resolved_location_id : null,
+				'location_id'   => $resolved_location_id > 0 ? $resolved_location_id : null,
+				'fias_id'       => $destination['fias_id'] ?? '',
+				'gar_id'        => $destination['gar_id'] ?? $context['selected_location_gar_id'] ?? '',
+				'gar_object_id' => $destination['gar_object_id'] ?? $destination['gar_id'] ?? $context['selected_location_gar_object_id'] ?? $context['selected_location_gar_id'] ?? '',
+				'name'          => $name,
+				'display_name'  => $destination['display_name'] ?? $name,
+				'postcode'      => $destination['postcode'] ?? '',
+				'postal_code'   => $destination['postcode'] ?? '',
+				'country'       => $destination['country_code'] ?? '',
+				'country_code'  => $destination['country_code'] ?? '',
+				'region'        => $region,
+				'region_name'   => $region,
+				'label'         => $name,
+				'is_override'   => ! empty( $context['location_override'] ),
+			),
+			static fn( mixed $value ): bool => null !== $value && '' !== $value
+		);
+	}
+
+	private function positive_int( mixed $value ): int {
+		if ( is_int( $value ) ) {
+			return $value > 0 ? $value : 0;
+		}
+		if ( is_string( $value ) && ctype_digit( trim( $value ) ) ) {
+			return max( 0, (int) trim( $value ) );
+		}
+		if ( is_float( $value ) && $value > 0 ) {
+			return (int) $value;
+		}
+
+		return 0;
+	}
+
+	/** @param array<int,mixed> $values */
+	private function first_positive_int( array $values ): int {
+		foreach ( $values as $value ) {
+			$int_value = $this->positive_int( $value );
+			if ( $int_value > 0 ) {
+				return $int_value;
+			}
+		}
+
+		return 0;
+	}
+}
