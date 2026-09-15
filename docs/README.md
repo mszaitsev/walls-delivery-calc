@@ -1,6 +1,6 @@
 # Walls Delivery Calc Documentation
 
-Version: 1.0.23
+Version: 1.0.24
 
 These documents describe the current production contract. Historical investigations and superseded decisions live under `docs/research` and `docs/research/history`.
 

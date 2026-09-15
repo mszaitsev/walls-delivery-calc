@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 1.0.23
+Version: 1.0.24
 
 `Plugin.php` is the composition root. It registers infrastructure and activation ownership first, runs the single fresh-install schema migration, and only then registers services whose hooks may access plugin tables. The shared `ActionScheduler` adapter owns readiness coordination; scheduler owners attach callbacks during bootstrap and defer datastore inspection or schedule creation until `action_scheduler_init`.
 
@@ -9,6 +9,8 @@ The Yandex full pickup/geography WP-Cron callback is a carrier-owned bounded wor
 The Ozon pickup Action Scheduler callback follows the same bounded-worker contract with carrier-specific limits of 18 seconds, 10 network-heavy units, and 80% of finite memory. Its existing generation transactions remain the atomic boundaries; the carrier-owned lease and exact continuation identity protect overlap, cancellation, and bootstrap self-heal. Repository persistence uses bounded bulk SQL without changing schema or the published-generation snapshot contract.
 
 WooCommerce checkout, order administration, Shipment Framework, carrier catalogs, locations, rules, calendars, pickup providers, REST/AJAX controllers, and background jobs remain separated by their documented subsystem boundaries. The production composition root contains no prepared-FIAS or automatic GAR/SPAS runtime.
+
+Checkout order creation has a final fail-closed pickup invariant at `woocommerce_checkout_create_order` priority 19, immediately before WDC order metadata persistence at priority 20. `CurrentWdcRateResolver` is the single session-owned authority used by both the guard and `OrderShippingMetaPersister`; a current pickup rate that requires customer selection cannot proceed without a matching family/carrier/current-destination selection unless the rate explicitly disables selection or carries a fixed pickup snapshot. The ordinary POST-authoritative `woocommerce_after_checkout_validation` path remains unchanged for immediate checkout feedback.
 
 ## One-Click GAR Update
 

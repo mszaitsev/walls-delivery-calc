@@ -23,9 +23,11 @@ final class OrderShippingMetaPersister {
 		private DeliveryDateFormatter $date_formatter,
 		private DeliveryCalculationDataBuilder $calculation_data_builder,
 		private ?LocationRepository $locations = null,
-		private ?DeliveryCustomerCommentNormalizer $customer_comment_normalizer = null
+		private ?DeliveryCustomerCommentNormalizer $customer_comment_normalizer = null,
+		private ?CurrentWdcRateResolver $current_rate_resolver = null
 	) {
 		$this->customer_comment_normalizer ??= new DeliveryCustomerCommentNormalizer();
+		$this->current_rate_resolver ??= new CurrentWdcRateResolver( $this->session_manager );
 	}
 
 	public function register(): void {
@@ -1105,25 +1107,7 @@ final class OrderShippingMetaPersister {
 	 * @return array<string,mixed>
 	 */
 	private function selected_rate(): array {
-		$rates  = $this->session_manager->rates();
-		$chosen = $this->chosen_shipping_methods();
-
-		foreach ( $chosen as $rate_id ) {
-			if ( isset( $rates[ $rate_id ] ) ) {
-				return $rates[ $rate_id ];
-			}
-
-			if ( ! str_starts_with( $rate_id, NewShippingMethod::METHOD_ID . ':' ) ) {
-				continue;
-			}
-
-			$normalized = substr( $rate_id, strlen( NewShippingMethod::METHOD_ID . ':' ) );
-			if ( isset( $rates[ $normalized ] ) ) {
-				return $rates[ $normalized ];
-			}
-		}
-
-		return array();
+		return $this->current_rate_resolver->resolve();
 	}
 
 	/**
@@ -1137,19 +1121,6 @@ final class OrderShippingMetaPersister {
 		}
 
 		return $this->session_manager->pickup_selection();
-	}
-
-	/**
-	 * @return array<int,string>
-	 */
-	private function chosen_shipping_methods(): array {
-		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->session ) && is_object( WC()->session ) && method_exists( WC()->session, 'get' ) ) {
-			$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
-
-			return is_array( $chosen ) ? array_map( 'strval', $chosen ) : array();
-		}
-
-		return array();
 	}
 
 	private function meaningful_text( mixed $value ): string {
