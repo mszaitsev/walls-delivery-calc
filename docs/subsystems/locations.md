@@ -2,7 +2,7 @@
 
 `postal_code` is enrichment-owned and is never a GAR changed field. The retired location alias index is not generated, exported, created by the 1.0 schema, or used by runtime. Search uses `searchable_text` and canonical hierarchy fields; backup/restore and incremental apply swap locations only.
 
-Version: 1.0.25
+Version: 1.0.26
 
 The manual **Пересобрать display_name** job pages every active canonical location across all countries, including rows whose current `display_name` is empty. Its total uses the same active all-country dataset, and an unexpected end of pagination before `processed` reaches `total` fails the job instead of reporting a false success. Rebuild updates only `display_name`, `searchable_text`, and `updated_at` through `LocationRepository::update_display_fields()`.
 
@@ -82,6 +82,8 @@ DPD Geography processing is server-side after manual upload or SFTP acquisition.
 ## Canonical Requirements
 
 Jet Logistic owns separate geography tables for vendor city snapshots and manual overrides. Imports ignore RU rows, preserve manual overrides, deactivate missing vendor rows, and use stable identities from normalized source city/region/country rather than CSV row numbers. Matched Jet countries are stored through the shared delivery-service country repository; newly discovered countries are enabled once, while countries disabled by an administrator are not re-enabled on later imports.
+
+In the Jet manual mapping form, `location_id=0` is an explicit unmap command rather than a location identifier. It removes the override and resets only the live binding fields to `location_id=0`, `match_status=unmatched`, and an empty `match_source`, preserving the imported source row; a failed live reset leaves the persisted override intact.
 
 - City search uses the local locations database and should prefer exact and region-relevant matches.
 - Checkout may display contextual local-location labels, but the selected WooCommerce city value must be the own typed place only; region, district, country, and canonical city/place values travel separately in hidden metadata and session context.

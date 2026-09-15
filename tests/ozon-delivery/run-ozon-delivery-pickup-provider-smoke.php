@@ -98,7 +98,7 @@ $wpdb->ozon_delivery_pickup_generations = array(
 );
 $wpdb->ozon_delivery_pickup_points = array(
 	oz_pickup_provider_point( 1, 101, 'Пункт Ozon' ),
-	oz_pickup_provider_point( 1, 102, 'Постамат Ozon', 55.0400, 82.9300 ),
+	array_merge( oz_pickup_provider_point( 1, 102, 'Постамат Ozon', 55.0400, 82.9300 ), array( 'type' => 'postamat' ) ),
 	oz_pickup_provider_point( 2, 201, 'Строящийся пункт' ),
 	oz_pickup_provider_point( 3, 301, 'Неудачный пункт' ),
 	oz_pickup_provider_point( 4, 401, 'Устаревший пункт' ),
@@ -117,6 +117,7 @@ try { new CarrierPickupPointProviderRegistry( array( $provider, $provider ) ); o
 $points = $provider->search( $query );
 oz_pickup_provider_assert( 2 === count( $points ) && '101' === $points[0]->code && '102' === $points[1]->code, 'Only bounded active-generation points in the trusted coordinate radius must be visible.' );
 oz_pickup_provider_assert( 'Ежедневно 09:00-21:00' === $points[0]->work_time && 'Пункт Ozon' === $points[0]->raw_reference['point_name'] && true === $points[0]->raw_reference['requires_rate_refresh'], 'Provider must return the persisted presentation schedule, safe point name and generic repricing capability.' );
+oz_pickup_provider_assert( 'pickup' === (string) ( $points[0]->raw_reference['marker_type'] ?? '' ) && 'postamat' === (string) ( $points[1]->raw_reference['marker_type'] ?? '' ), 'Ozon structured PVZ/postamat type must map to blue/purple marker semantics.' );
 $dto = $points[0]->to_array();
 oz_pickup_provider_assert( ! isset( $dto['generation_id'], $dto['fingerprint'], $dto['id'] ) && ! isset( $dto['raw_reference']['generation_id'], $dto['raw_reference']['fingerprint'] ), 'Provider DTO must not expose generation, fingerprint or database identity.' );
 $rest = ( new ReflectionClass( PickupPointsRestController::class ) )->newInstanceWithoutConstructor();

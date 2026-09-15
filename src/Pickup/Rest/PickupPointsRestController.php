@@ -472,7 +472,7 @@ final class PickupPointsRestController {
 		$point_title = $this->registry_presentation_value( $raw, 'point_title', $type_label );
 		$card_title = $this->registry_presentation_value( $raw, 'card_title', $point_title );
 		$marker_type = $this->registry_presentation_value( $raw, 'marker_type', 'pickup' );
-		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
+		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal', 'highlighted' ), true ) ) {
 			$marker_type = 'pickup';
 		}
 		$point_comment = trim( (string) $point->comment );

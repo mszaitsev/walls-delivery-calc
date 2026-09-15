@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 1.0.25
+Version: 1.0.26
 
 The WooCommerce checkout boundary maps the current package and canonical destination into a `QuoteRequest`, runs enabled carriers, applies rules and delivery-service post-processing, then publishes only fresh WDC rates. Package mapping is read-only: city selection/profile reconciliation own session mutations, and an active canonical location row is authoritative for identity and coordinates.
 
@@ -9,6 +9,8 @@ Rate sorting supports price and delivery-time modes. Order-admin recalculation p
 Canonical RU checkout uses the WDC city picker and optional bounded DaData street/house suggestions. Manual or unsupported-country destinations retain the documented fallback behavior. Pickup REST state changes require the checkout nonce, provider/rate context is revalidated server-side, and the frontend supports both path-style and plain-permalink WordPress REST URLs.
 
 Pickup-map reconciliation uses carrier-owned stable identity where the provider supplies it. CDEK keeps its UUID/code contract; Yandex Delivery matches only namespaced `platform_station_id`, provider id, and point code values from the point or snapshot. Yandex postcode, display fields, address, title, and coordinates are presentation data and never identify a selected station. A refreshed object for the same station replaces stale presentation fields, while a selected station absent from the current viewport remains committed without transferring selection to another visible point. Clicking a side-list card remains preview-only, but is an explicit viewport action: the shared controller focuses the point, activates its marker, and opens its popup while suppressing only the programmatic bounds burst. Marker clicks retain their direct popup behavior, and only the existing select/confirm action commits the point.
+
+The normalized `marker_type` contract is shared by checkout and order-admin recalculation. Ordinary pickup points, offices, terminals, and warehouses are blue; reliable postamat/APS types plus Yandex 5Post and paid PEK partner points use the generic purple `highlighted`/`postamat` semantics. Both map providers render the active point red and restore its original blue or purple category after selection moves.
 
 Normal checkout validation treats the submitted POST shipping method as authoritative and reports missing pickup selections through the existing carrier-specific messages. Order creation adds a defense-in-depth guard at `woocommerce_checkout_create_order` priority 19. The guard resolves the current WDC rate from the same session-owned `CurrentWdcRateResolver` used by order metadata persistence at priority 20, then rejects a pickup rate with `requires_pickup_point=true` unless the matching family/carrier selection belongs to the current destination. `no_pickup_selection=true` and non-empty fixed pickup snapshots keep their established bypass behavior. Quote-only representative station metadata never counts as customer selection. Throwing from this pre-save WooCommerce hook stops the create-order chain and returns the message as a checkout error.
 
@@ -62,6 +64,7 @@ PEK pickup map access uses the existing public REST routes with a registry-backe
 - Selected city, rate, tariff, pickup point, and courier address are preserved through checkout session/runtime state. On reload, a coherent non-manual canonical session location is localized and restored into hidden checkout fields before textual profile reconciliation; mismatched IDs, country/city changes, and post-order cleanup do not restore stale identity. The location sentinel postcode `999999999` remains a storage/import value but is empty at checkout payload, resolver, visible-field, and selected-notice boundaries.
 - Sorting can use price or delivery time.
 - Manager recalculation in the order admin must save a clear order note with old/new delivery title and price.
+- The optional `allow_edit_orders_in_all_statuses` setting makes WooCommerce orders editable without changing the default when disabled. The order calculator can clear only its explicit WDC calculation/pickup/destination metadata when the server-side shipment repository is empty; it never removes or rewrites the WooCommerce shipping item or its customer-visible planned-delivery metadata. A successful clear reloads the order screen so both calculator and shipment metaboxes rebuild from canonical state.
 - Planned checkout comments use `DeliveryRate::planned_delivery_comment` and the format `Доставка планируется* с 12 августа (среда).`.
 
 Raw carrier quote responses are not order storage by default. Use diagnostics/logging for raw payloads and redact credentials.

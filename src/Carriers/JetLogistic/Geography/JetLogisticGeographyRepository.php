@@ -182,6 +182,29 @@ final class JetLogisticGeographyRepository {
 		return false !== $result;
 	}
 
+	public function reset_manual_override( string $source_identity ): bool {
+		$source_identity = trim( $source_identity );
+		if ( '' === $source_identity || array() === $this->find_by_source_identity( $source_identity ) ) {
+			return false;
+		}
+
+		$result = $this->wpdb->update(
+			$this->table(),
+			array(
+				'location_id' => 0,
+				'match_status' => 'unmatched',
+				'match_source' => '',
+				'active' => 1,
+				'updated_at' => current_time( 'mysql' ),
+			),
+			array( 'source_identity' => $source_identity ),
+			array( '%d', '%s', '%s', '%d', '%s' ),
+			array( '%s' )
+		);
+
+		return false !== $result;
+	}
+
 	/** @return array<int,array<string,mixed>> */
 	public function active_origin_options(): array {
 		return $this->origin_options();

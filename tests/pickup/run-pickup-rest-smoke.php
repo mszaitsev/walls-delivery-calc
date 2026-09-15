@@ -424,6 +424,7 @@ foreach ( $removed_fields as $removed_field ) {
 
 $type_filtered = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'type' => array( 'APS' ) ) );
 pickup_rest_assert( 1 === count( $type_filtered ) && 3 === $type_filtered[0]['id'], 'type filter must work.' );
+pickup_rest_assert( 'postamat' === (string) ( $type_filtered[0]['marker_type'] ?? '' ), 'Russian Post APS must use purple postamat marker semantics.' );
 
 $disabled_pvz = $settings->all();
 $disabled_pvz['russian_post_domestic_point_type_pvz_enabled'] = false;

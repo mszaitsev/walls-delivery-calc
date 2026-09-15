@@ -98,6 +98,10 @@ final class SettingsAdminPage {
 							<th scope="row"><?php echo esc_html__( 'Показывать отладочный блок checkout администраторам', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="show_checkout_debug_panel" value="1" <?php checked( ! empty( $values['show_checkout_debug_panel'] ) ); ?>> <?php echo esc_html__( 'Отладка скрыта по умолчанию.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__( 'Разрешить редактирование заказов в любых статусах', 'walls-delivery-calc' ); ?></th>
+							<td><label><input type="checkbox" name="<?php echo esc_attr( SettingsRepository::ALLOW_EDIT_ORDERS_IN_ALL_STATUSES_KEY ); ?>" value="1" <?php checked( ! empty( $values[ SettingsRepository::ALLOW_EDIT_ORDERS_IN_ALL_STATUSES_KEY ] ) ); ?>> <?php echo esc_html__( 'Позволяет редактировать заказ WooCommerce даже в статусах, в которых WooCommerce обычно запрещает редактирование.', 'walls-delivery-calc' ); ?></label></td>
+						</tr>
 						<tr><th colspan="2"><h2><?php echo esc_html__( 'Тексты о доставке на checkout', 'walls-delivery-calc' ); ?></h2></th></tr>
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Показывать информационный текст о доставке', 'walls-delivery-calc' ); ?></th>
@@ -259,6 +263,7 @@ final class SettingsAdminPage {
 			'checkout_sort_mode'           => $sort_mode,
 			'checkout_sort_selector_enabled' => ! empty( $data['checkout_sort_selector_enabled'] ),
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
+			SettingsRepository::ALLOW_EDIT_ORDERS_IN_ALL_STATUSES_KEY => ! empty( $data[ SettingsRepository::ALLOW_EDIT_ORDERS_IN_ALL_STATUSES_KEY ] ),
 			CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY => ! empty( $data[ CheckoutDeliveryMessageSettings::INFO_ENABLED_KEY ] ),
 			CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY => ! empty( $data[ CheckoutDeliveryMessageSettings::PROMO_ENABLED_KEY ] ),
 			CheckoutDeliveryMessageSettings::PROMO_THRESHOLD_KOPECKS_KEY => CheckoutDeliveryMessageSettings::kopecks_from_admin_amount( $data['checkout_delivery_promo_threshold_rub'] ?? CheckoutDeliveryMessageSettings::format_kopecks_amount( CheckoutDeliveryMessageSettings::DEFAULT_PROMO_THRESHOLD_KOPECKS ) ),

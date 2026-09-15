@@ -168,7 +168,12 @@ final class OrderDeliveryMetabox {
 		$current_location = $this->current_location_payload( $order );
 		$current_pickup = $this->current_pickup_payload( $order );
 		$current_shipping_address = $this->current_shipping_address_payload( $order );
-		echo '<p><button type="button" class="button" data-wdc-order-delivery-recalculate data-order-id="' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Пересчитать доставку', 'walls-delivery-calc' ) . '</button></p>';
+		echo '<p><button type="button" class="button" data-wdc-order-delivery-recalculate data-order-id="' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Пересчитать доставку', 'walls-delivery-calc' ) . '</button>';
+		if ( $this->has_wdc_meta( $order ) ) {
+			$clear_disabled = $this->has_any_shipment( $order );
+			echo ' <button type="button" class="button" data-wdc-order-delivery-clear data-order-id="' . esc_attr( (string) $order_id ) . '"' . ( $clear_disabled ? ' disabled aria-disabled="true" title="' . esc_attr__( 'Нельзя очистить данные доставки: для заказа уже существует отправление.', 'walls-delivery-calc' ) . '"' : '' ) . '>' . esc_html__( 'Очистить данные доставки', 'walls-delivery-calc' ) . '</button>';
+		}
+		echo '</p>';
 		echo '<div class="wdc-order-delivery-modal" data-wdc-order-delivery-modal data-view="full" hidden>';
 		echo '<div class="wdc-order-delivery-modal__overlay" data-wdc-order-delivery-modal-close></div>';
 		echo '<div class="wdc-order-delivery-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="wdc-order-delivery-modal-title-' . esc_attr( (string) $order_id ) . '" tabindex="-1">';
@@ -420,6 +425,12 @@ final class OrderDeliveryMetabox {
 		}
 
 		return false;
+	}
+
+	private function has_any_shipment( object $order ): bool {
+		$repository = $this->shipments ?? new OrderShipmentRepository();
+
+		return array() !== $repository->all_for_order( $order );
 	}
 
 	private function resolve_order( mixed $post_or_order ): ?object {

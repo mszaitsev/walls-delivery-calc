@@ -127,6 +127,8 @@ return array(
 	'core.checkout-location-picker' => array( 'path' => 'tests/checkout/run-checkout-location-picker-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.runtime-stabilization' => array( 'path' => 'tests/checkout/run-runtime-stabilization-smoke.php', 'groups' => array( 'status-core' ) ),
 	'core.order-delivery-recalculation' => array( 'path' => 'tests/orders/run-order-delivery-recalculation-smoke.php', 'groups' => array( 'status-core' ) ),
+	'core.order-delivery-clear' => array( 'path' => 'tests/orders/run-order-delivery-clear-smoke.php', 'groups' => array( 'status-core' ) ),
+	'core.order-editability-settings' => array( 'path' => 'tests/orders/run-order-editability-settings-smoke.php', 'groups' => array( 'status-core' ) ),
 
 	'baseline.dpd-shipment-preparation' => array(
 		'path' => 'tests/dpd/run-dpd-shipment-preparation-smoke.php',

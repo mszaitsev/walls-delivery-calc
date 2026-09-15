@@ -1301,6 +1301,37 @@
 			} );
 	}
 
+	function clearDeliveryData( button ) {
+		const box = closestBox( button );
+		if ( ! box || button.disabled ) {
+			return;
+		}
+		if ( ! window.confirm( 'Удалить сохранённые данные расчёта доставки?\nДля создания отправления потребуется заново пересчитать доставку.' ) ) {
+			return;
+		}
+		const form = new FormData();
+		form.append( 'action', config.clearAction || 'wdc_order_delivery_clear' );
+		form.append( 'nonce', config.nonce || '' );
+		form.append( 'order_id', orderId( box ) );
+		setLoading( button, true );
+		window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: form
+		} )
+			.then( function ( response ) { return response.json(); } )
+			.then( function ( payload ) {
+				if ( ! payload || ! payload.success ) {
+					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось очистить данные доставки.' );
+				}
+				window.location.reload();
+			} )
+			.catch( function ( error ) {
+				window.alert( error && error.message ? error.message : 'Не удалось очистить данные доставки.' );
+			} )
+			.finally( function () { setLoading( button, false ); } );
+	}
+
 	function requestCourierAddressSuggestions( box, block, stage, query, context ) {
 		const form = new FormData();
 		form.append( 'action', config.addressSuggestAction || 'wdc_order_delivery_recalculate_address_suggest' );
@@ -2044,6 +2075,12 @@
 	}
 
 	document.addEventListener( 'click', function ( event ) {
+		const clearButton = event.target && event.target.closest( '[data-wdc-order-delivery-clear]' );
+		if ( clearButton ) {
+			event.preventDefault();
+			clearDeliveryData( clearButton );
+			return;
+		}
 		const openButton = event.target && event.target.closest( '[data-wdc-order-delivery-recalculate]' );
 		if ( openButton ) {
 			event.preventDefault();

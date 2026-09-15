@@ -1,5 +1,5 @@
 Repository file tree
-Generated for Walls Delivery Calc 1.0.25
+Generated for Walls Delivery Calc 1.0.26
 
 .
 |-- tree.txt
@@ -511,8 +511,10 @@ Generated for Walls Delivery Calc 1.0.25
 |-- src/Orders/Admin/OrderDeliveryRecalculationAdminController.php
 |-- src/Orders/Application/DeliveryCalculationDataBuilder.php
 |-- src/Orders/Application/OrderDeliveryAddressNormalizationService.php
+|-- src/Orders/Application/OrderDeliveryDataClearService.php
 |-- src/Orders/Application/OrderDeliveryRecalculationService.php
 |-- src/Orders/Application/OrderDeliveryReplacementService.php
+|-- src/Orders/Application/OrderEditabilityPolicy.php
 |-- src/Orders/Application/OrderQuoteRequestMapper.php
 |-- src/Orders/Application/ShopProcessingOrderQueueCounter.php
 |-- src/Packaging/PackagingApplicationResult.php
@@ -793,7 +795,9 @@ Generated for Walls Delivery Calc 1.0.25
 |-- tests/manual-delivery/run-manual-delivery-shipments-smoke.php
 |-- tests/orders/run-delivery-calculation-data-builder-smoke.php
 |-- tests/orders/run-order-delivery-calculation-meta-smoke.php
+|-- tests/orders/run-order-delivery-clear-smoke.php
 |-- tests/orders/run-order-delivery-recalculation-smoke.php
+|-- tests/orders/run-order-editability-settings-smoke.php
 |-- tests/ozon-delivery/run-ozon-delivery-admin-smoke.php
 |-- tests/ozon-delivery/run-ozon-delivery-authorization-smoke.php
 |-- tests/ozon-delivery/run-ozon-delivery-checkout-smoke.php

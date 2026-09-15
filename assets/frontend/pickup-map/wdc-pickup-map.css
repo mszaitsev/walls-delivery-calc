@@ -702,11 +702,13 @@
 	transform: translateX(-50%);
 }
 
-.wdc-map-marker-pin--postamat {
+.wdc-map-marker-pin--postamat,
+.wdc-map-marker-pin--highlighted {
 	background: #7c3aed;
 }
 
-.wdc-map-marker-pin--postamat .wdc-map-marker-pin__tail {
+.wdc-map-marker-pin--postamat .wdc-map-marker-pin__tail,
+.wdc-map-marker-pin--highlighted .wdc-map-marker-pin__tail {
 	border-top-color: #7c3aed;
 }
 
@@ -791,14 +793,15 @@
 }
 
 .wdc-map-marker--pvz {
-	background: #0f766e;
+	background: var(--wdc-map-primary, #1e9af0);
 }
 
 .wdc-map-marker--aps {
 	background: #7c3aed;
 }
 
-.wdc-map-marker--postamat {
+.wdc-map-marker--postamat,
+.wdc-map-marker--highlighted {
 	background: #7c3aed;
 }
 

@@ -174,6 +174,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $services = array();
 		public array $countries = array();
 		public array $jet_update_fail_sources = array();
+		public array $jet_delete_fail_sources = array();
 		public int $location_batch_query_calls = 0;
 		public int $location_place_name_batch_query_calls = 0;
 		public int $location_single_lookup_calls = 0;
@@ -287,7 +288,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 				return false;
 			}
 			if ( str_contains( $table, 'wdc_jet_logistic_location_overrides' ) ) {
-				unset( $this->jet_overrides[ (string) ( $where['source_identity'] ?? '' ) ] );
+				$key = (string) ( $where['source_identity'] ?? '' );
+				if ( in_array( $key, $this->jet_delete_fail_sources, true ) ) {
+					return false;
+				}
+				unset( $this->jet_overrides[ $key ] );
 			}
 			if ( str_contains( $table, 'wdc_delivery_service_countries' ) ) {
 				$this->countries = array_values( array_filter( $this->countries, static fn( array $row ): bool => (int) ( $row['service_id'] ?? 0 ) !== (int) ( $where['service_id'] ?? 0 ) ) );
@@ -637,10 +642,20 @@ jet_assert( ! empty( $override['success'] ) && ! empty( $GLOBALS['wpdb']->jet_ov
 $second_override = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'manual-target', 'location_id' => 77 ) );
 $manual_row_after_second_save = $geo->active_for_location( 77 );
 jet_assert( ! empty( $second_override['success'] ) && ! empty( $GLOBALS['wpdb']->jet_overrides['manual-target'] ) && 'matched' === (string) ( $manual_row_after_second_save['match_status'] ?? '' ) && 'manual_override' === (string) ( $manual_row_after_second_save['match_source'] ?? '' ), 'Jet repeated manual override save must treat wpdb update result 0 as success and keep persistent override.' );
-$enabled_countries = ( new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] ) )->countries( 501 );
-jet_assert( in_array( 'US', $enabled_countries, true ) && in_array( 'KZ', $enabled_countries, true ) && 1 === count( array_keys( $enabled_countries, 'KZ', true ) ), 'Jet manual override must add the location country without removing existing service countries or creating duplicates.' );
+$unmap = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'manual-target', 'location_id' => 0 ) );
+$unmapped_row = $geo->find_by_source_identity( 'manual-target' );
+jet_assert( ! empty( $unmap['success'] ) && ! isset( $GLOBALS['wpdb']->jet_overrides['manual-target'] ) && 0 === (int) ( $unmapped_row['location_id'] ?? -1 ) && 'unmatched' === (string) ( $unmapped_row['match_status'] ?? '' ) && '' === (string) ( $unmapped_row['match_source'] ?? 'wrong' ) && 'KZ' === (string) ( $unmapped_row['country_code'] ?? '' ), 'Jet location_id=0 must delete the persisted override and reset only live mapping fields while preserving source country data.' );
+$unmap_again = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'manual-target', 'location_id' => 0 ) );
+jet_assert( ! empty( $unmap_again['success'] ) && ! isset( $GLOBALS['wpdb']->jet_overrides['manual-target'] ), 'Jet unmap without an existing override must be idempotent.' );
 $matcher = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyMatcher( new LocationRepository( $GLOBALS['wpdb'] ), $override_repo, $region_normalizer );
 $import_service = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService( $parser, $matcher, $geo, $country_sync, new Logger() );
+$import_after_unmap = $import_service->import_csv( "city;region;country_code\nManual Target;Manual Region;KZ\n" );
+$row_after_unmapped_import = $geo->find_by_source_identity( 'manual-target' );
+jet_assert( ! empty( $import_after_unmap['success'] ) && ! isset( $GLOBALS['wpdb']->jet_overrides['manual-target'] ) && 'manual_override' !== (string) ( $row_after_unmapped_import['match_source'] ?? '' ), 'Jet repeated import after unmap must not restore the deleted manual override.' );
+$restore_positive = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'manual-target', 'location_id' => 77 ) );
+jet_assert( ! empty( $restore_positive['success'] ), 'Positive manual mapping must continue working after an unmap.' );
+$enabled_countries = ( new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] ) )->countries( 501 );
+jet_assert( in_array( 'US', $enabled_countries, true ) && in_array( 'KZ', $enabled_countries, true ) && 1 === count( array_keys( $enabled_countries, 'KZ', true ) ), 'Jet manual override must add the location country without removing existing service countries or creating duplicates.' );
 $manual_target_identity = (string) $parser->parse( "city;region;country_code\nManual Target;Manual Region;KZ\n" )[0]['source_identity'];
 $override_repo->save( $manual_target_identity, 77, 'KZ' );
 $import_result = $import_service->import_csv( "city;region;country_code\nManual Target;Manual Region;KZ\n" );
@@ -648,9 +663,15 @@ $manual_row_after_import = $geo->active_for_location( 77 );
 jet_assert( ! empty( $import_result['success'] ) && 'manual_override' === (string) ( $manual_row_after_import['match_source'] ?? '' ), 'Jet CSV import must reapply persistent manual override after repeated imports.' );
 $override_repo->save( 'rollback-target', 77, 'KZ' );
 $GLOBALS['wpdb']->jet_update_fail_sources[] = 'rollback-target';
+$unmap_rollback = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'rollback-target', 'location_id' => 0 ) );
+jet_assert( empty( $unmap_rollback['success'] ) && 77 === (int) ( $GLOBALS['wpdb']->jet_overrides['rollback-target']['location_id'] ?? 0 ) && 'manual_override' === (string) ( $GLOBALS['wpdb']->jet_cities['rollback-target']['match_source'] ?? '' ), 'Jet unmap must keep the override and live binding when reset fails.' );
 $rollback = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'rollback-target', 'location_id' => 88 ) );
 jet_assert( empty( $rollback['success'] ) && 77 === (int) ( $GLOBALS['wpdb']->jet_overrides['rollback-target']['location_id'] ?? 0 ) && 'KZ' === (string) ( $GLOBALS['wpdb']->jet_overrides['rollback-target']['country_code'] ?? '' ), 'Jet failed snapshot apply must restore an existing previous manual override instead of deleting it.' );
 $GLOBALS['wpdb']->jet_update_fail_sources = array();
+$GLOBALS['wpdb']->jet_delete_fail_sources[] = 'rollback-target';
+$delete_rollback = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'rollback-target', 'location_id' => 0 ) );
+jet_assert( empty( $delete_rollback['success'] ) && 77 === (int) ( $GLOBALS['wpdb']->jet_overrides['rollback-target']['location_id'] ?? 0 ) && 77 === (int) ( $GLOBALS['wpdb']->jet_cities['rollback-target']['location_id'] ?? 0 ) && 'manual_override' === (string) ( $GLOBALS['wpdb']->jet_cities['rollback-target']['match_source'] ?? '' ), 'Jet unmap must restore the live binding from the persisted override when override deletion fails.' );
+$GLOBALS['wpdb']->jet_delete_fail_sources = array();
 $ru_override = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'ru-target', 'location_id' => 99 ) );
 $enabled_countries_after_ru = ( new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] ) )->countries( 501 );
 jet_assert( ! empty( $ru_override['success'] ) && ! in_array( 'RU', $enabled_countries_after_ru, true ), 'Jet manual override country sync must not enable RU.' );
